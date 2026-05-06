@@ -1,0 +1,583 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:well_check_v3/core/design/shield_theme.dart';
+import 'package:well_check_v3/core/data/medication_provider.dart';
+import 'package:well_check_v3/core/data/user_profile_provider.dart';
+import 'package:well_check_v3/features/command_center/add_medication_sheet.dart';
+import 'package:go_router/go_router.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:intl/intl.dart';
+
+class MedicationsSheet extends ConsumerStatefulWidget {
+  const MedicationsSheet({super.key});
+
+  @override
+  ConsumerState<MedicationsSheet> createState() => _MedicationsSheetState();
+}
+
+class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
+  final FlutterTts _flutterTts = FlutterTts();
+  bool _isPlaying = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initTts();
+  }
+
+  Future<void> _initTts() async {
+    await _flutterTts.setLanguage("en-US");
+    await _flutterTts.setSpeechRate(0.45);
+    await _flutterTts.setVolume(1.0);
+    await _flutterTts.setPitch(1.0);
+
+    _flutterTts.setCompletionHandler(() {
+      if (mounted) setState(() => _isPlaying = false);
+    });
+    ref.invalidate(familyMedicationsProvider);
+  }
+
+  @override
+  void dispose() {
+    _flutterTts.stop();
+    super.dispose();
+  }
+
+  Future<void> _speak(String title, String? instructions) async {
+    if (_isPlaying) {
+      await _flutterTts.stop();
+      if (mounted) setState(() => _isPlaying = false);
+      return;
+    }
+
+    if (mounted) setState(() => _isPlaying = true);
+    final text =
+        "Instructions for $title. ${instructions ?? 'No additional instructions provided.'}";
+    await _flutterTts.speak(text);
+  }
+
+  Future<void> _logDose(Medication med) async {
+    try {
+      final profile = await ref.read(currentUserProfileProvider.future);
+      if (profile == null) return;
+
+      final now = DateTime.now().toUtc();
+
+      // Log to dose_logs
+      await Supabase.instance.client.from('dose_logs').insert({
+        'medication_id': med.id,
+        'user_id': med.assignedTo, // The person who takes it
+        'family_id': profile.familyId,
+        'scheduled_at': now.toIso8601String(),
+        'taken_at': now.toIso8601String(),
+        'status': 'taken',
+      });
+
+      // Also log to well_events for the family feed
+      await Supabase.instance.client.from('well_events').insert({
+        'family_id': profile.familyId,
+        'user_id': profile.userId,
+        'event_type': 'medication_logged',
+        'title': 'Medication Taken',
+        'description':
+            '${profile.fullName ?? 'Someone'} logged ${med.medicationName} (${med.dosage})',
+      });
+
+      if (mounted) {
+        ref.refresh(familyMedicationsProvider);
+        ref.invalidate(familyMedicationsProvider);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✓ ${med.medicationName} dose logged!'),
+            backgroundColor: ShieldColors.safeZoneGreen,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[Medication] Error logging dose: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error logging dose: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteMedication(String id) async {
+    try {
+      await Supabase.instance.client.from('medications').delete().eq('id', id);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+      }
+    }
+  }
+
+  Color _doseStatusColor(Medication med) {
+    final next = med.nextDoseToday;
+    if (next == null) return Colors.grey;
+    final diff = next.difference(DateTime.now()).inMinutes;
+    if (diff < 0) return ShieldColors.urgentRed; // Overdue
+    if (diff < 30) return Colors.amber.shade700; // Due soon
+    return ShieldColors.safeZoneGreen; // On track
+  }
+
+  String _nextDoseLabel(Medication med) {
+    if (med.scheduleTimes.isEmpty) return med.frequency;
+    final next = med.nextDoseToday;
+    if (next == null) {
+      return 'Done for today';
+    }
+    final diff = next.difference(DateTime.now()).inMinutes;
+    if (diff < 0) {
+      return 'Overdue by ${(-diff)} min';
+    }
+    if (diff < 60) {
+      return 'Due in $diff min';
+    }
+    return 'Next: ${DateFormat.jm().format(next)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final medicationsAsync = ref.watch(familyMedicationsProvider);
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: ShieldColors.backgroundWhite,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.85,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Drag handle
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+
+          // Header
+          Row(
+            children: [
+              Text(
+                'Medications',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: ShieldColors.textBody,
+                ),
+              ),
+              Spacer(),
+              IconButton(
+                onPressed: () async {
+                  await showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    useSafeArea: true,
+
+                    backgroundColor: Colors.transparent,
+                    builder: (context) => const AddMedicationSheet(),
+                  );
+                  ref.refresh(familyMedicationsProvider);
+                },
+                icon: const Icon(
+                  Icons.add_circle,
+                  color: ShieldColors.activeTeal,
+                  size: 32,
+                ),
+              ),
+              SizedBox(width: 10),
+              GestureDetector(
+                onTap: () async {
+                  Navigator.of(context).pop();
+                },
+                child: Container(
+                  padding: EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.shade400,
+                        offset: Offset(0, 0),
+                        blurRadius: 3,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.close, color: Colors.black, size: 16),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Content
+          Expanded(
+            child: medicationsAsync.when(
+              data: (meds) {
+                if (meds.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.medical_services_outlined,
+                          size: 64,
+                          color: Colors.grey.shade300,
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'No medications scheduled yet.',
+                          style: TextStyle(color: Colors.grey, fontSize: 16),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Tap + to add a medication with reminders.',
+                          style: TextStyle(color: Colors.grey, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                // Separate active vs inactive
+                final active = meds.where((m) => m.isActive).toList();
+                final inactive = meds.where((m) => !m.isActive).toList();
+
+                return ListView(
+                  children: [
+                    // Today's schedule summary
+                    if (active.any((m) => m.scheduleTimes.isNotEmpty))
+                      _todaysSummaryCard(active),
+
+                    ...active.map(
+                      (med) => MedicationCard(
+                        med: med,
+                        onDelete: () => _deleteMedication(med.id),
+                        onLogDose: () => _logDose(med),
+                        isPlaying: _isPlaying,
+                        onEdit: () async {
+                          await showModalBottomSheet(
+                            context: context,
+                            useSafeArea: true,
+
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            builder: (context) =>
+                                AddMedicationSheet(existingMedication: med),
+                          );
+                          ref.refresh(familyMedicationsProvider);
+                        },
+                        onSpeak: () =>
+                            _speak(med.medicationName, med.instructions),
+                      ),
+                    ),
+
+                    if (inactive.isNotEmpty) ...[
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Text(
+                          'Inactive',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      ...inactive.map(
+                        (med) => MedicationCard(
+                          med: med,
+                          onDelete: () => _deleteMedication(med.id),
+                          onLogDose: () => _logDose(med),
+                          isPlaying: _isPlaying,
+                          onEdit: () async {
+                            await showModalBottomSheet(
+                              context: context,
+                              useSafeArea: true,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (context) =>
+                                  AddMedicationSheet(existingMedication: med),
+                            );
+                            ref.refresh(familyMedicationsProvider);
+                          },
+                          onSpeak: () =>
+                              _speak(med.medicationName, med.instructions),
+                        ),
+                      ),
+                    ],
+                  ],
+                );
+              },
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (err, _) => Center(child: Text('Error: $err')),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _todaysSummaryCard(List<Medication> active) {
+    final totalDoses = active.fold<int>(
+      0,
+      (sum, m) => sum + m.scheduleTimes.length,
+    );
+    final upcoming = active.where((m) => m.nextDoseToday != null).length;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF007F80), Color(0xFF059669)],
+        ),
+        borderRadius: ShieldDesign.roundedTwelve,
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.today, color: Colors.white, size: 28),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Today's Schedule",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+              Text(
+                '$totalDoses doses · $upcoming remaining',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class MedicationCard extends ConsumerWidget {
+  final Medication med;
+  final VoidCallback onDelete;
+  final VoidCallback onLogDose;
+  final bool isPlaying;
+  final VoidCallback onSpeak;
+  final VoidCallback? onEdit;
+
+  const MedicationCard({
+    super.key,
+    required this.med,
+    required this.onDelete,
+    required this.onLogDose,
+    required this.isPlaying,
+    required this.onSpeak,
+    this.onEdit,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final allLogsAsync = ref.watch(allDoseLogsProvider);
+    //final doseLogsAsync = ref.watch(doseLogsProvider(med.id));
+
+    // Determine if taken today
+    bool isTakenToday = false;
+    allLogsAsync.whenData((logs) {
+      final now = DateTime.now();
+      isTakenToday = logs.any(
+        (log) =>
+            log.medicationId == med.id &&
+            log.status == 'taken' &&
+            log.takenAt != null &&
+            log.takenAt!.year == now.year &&
+            log.takenAt!.month == now.month &&
+            log.takenAt!.day == now.day,
+      );
+    });
+
+    final nextDose = med.nextDoseToday;
+    final statusColor = isTakenToday
+        ? ShieldColors.safeZoneGreen
+        : nextDose == null
+        ? Colors.grey
+        : nextDose.difference(DateTime.now()).inMinutes < 0
+        ? ShieldColors.urgentRed
+        : Colors.amber.shade700;
+
+    final nextLabel = isTakenToday
+        ? 'Taken Today'
+        : med.scheduleTimes.isEmpty
+        ? med.frequency
+        : nextDose == null
+        ? 'Done for today'
+        : nextDose.difference(DateTime.now()).inMinutes < 0
+        ? 'Overdue'
+        : 'Next: ${DateFormat.jm().format(nextDose)}';
+
+    return Dismissible(
+      key: Key(med.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: ShieldColors.alertRed,
+          borderRadius: ShieldDesign.roundedTwelve,
+        ),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      onDismissed: (_) => onDelete(),
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(borderRadius: ShieldDesign.roundedTwelve),
+        elevation: 2,
+
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Title row
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      med.medicationName,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: med.isActive
+                            ? ShieldColors.textBody
+                            : Colors.grey,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.edit_outlined,
+                      color: ShieldColors.activeTeal,
+                    ),
+                    onPressed: onEdit,
+                    tooltip: 'Edit',
+                  ),
+                  if (med.scheduleTimes.isNotEmpty || isTakenToday)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        nextLabel,
+                        style: TextStyle(
+                          color: statusColor,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Dosage + schedule
+              Text(
+                '${med.dosage} · ${med.scheduleSummary}',
+                style: const TextStyle(color: Colors.black87, fontSize: 14),
+              ),
+
+              // Date range
+              if (med.startDate != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'From ${DateFormat('MMM d').format(med.startDate!)}${med.endDate != null ? ' to ${DateFormat('MMM d').format(med.endDate!)}' : ' · Ongoing'}',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                ),
+              ],
+
+              // Instructions
+              if (med.instructions != null && med.instructions!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        med.instructions!,
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontStyle: FontStyle.italic,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        isPlaying ? Icons.stop_circle : Icons.volume_up,
+                        color: ShieldColors.activeTeal,
+                      ),
+                      onPressed: onSpeak,
+                    ),
+                  ],
+                ),
+              ],
+
+              const SizedBox(height: 12),
+
+              // Log Dose button
+              if (med.isActive && !isTakenToday)
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: onLogDose,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: ShieldColors.activeTeal,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: ShieldDesign.roundedTwelve,
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    icon: const Icon(Icons.check_circle, size: 20),
+                    label: const Text(
+                      'Log Dose Taken',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

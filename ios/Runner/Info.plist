@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>dev.flutter.background.refresh</string>
+	</array>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Well Check V3</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Well-Check</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(FLUTTER_BUILD_NAME)</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>tel</string>
+		<string>sms</string>
+		<string>mailto</string>
+	</array>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Well Check uses Bluetooth to connect to nearby wearable devices for health monitoring and safety alerts.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Well Check needs full calendar access to create and sync family events, medication reminders, and appointments with your device calendar.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Well Check syncs family events and appointments with your calendar to keep everyone on the same schedule.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Well Check reads your health data (heart rate, steps, and activity) to monitor your well-being and detect potential safety events.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Well Check writes health-related observations to keep your wellness records up to date.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Well Check needs continuous location access to share your position with your safety circle and enable location-based safety alerts.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Well Check needs background location access to monitor your safety and send location updates to your safety circle even when the app is not in use.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Well Check uses your location to share your position with your safety circle during check-ins and emergencies.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Well Check needs microphone access to enable voice-activated safety commands and hands-free check-ins.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Well Check needs access to your photo library to let you set a profile picture and share images with your safety circle.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Well Check uses speech recognition to process voice commands for hands-free safety check-ins and SOS activation.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>UIWindowScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>flutter</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+					<key>UISceneStoryboardFile</key>
+					<string>Main</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>location</string>
+		<string>remote-notification</string>
+		<string>processing</string>
+	</array>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+</dict>
+</plist>
