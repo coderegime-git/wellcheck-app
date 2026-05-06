@@ -246,6 +246,7 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
               ),
             ],
           ),
+
           const SizedBox(height: 16),
           Expanded(
             child: _isLoading
