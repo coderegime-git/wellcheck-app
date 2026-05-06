@@ -350,6 +350,7 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
                         latitude: lat,
                         longitude: lng,
                         batteryLevel: level,
+                        //userName: profile.fullName??"",
                         type: 'check_in',
                       );
                       if (context.mounted) {

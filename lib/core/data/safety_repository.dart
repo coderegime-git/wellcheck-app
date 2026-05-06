@@ -18,9 +18,17 @@ class SafetyRepository {
   }) async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
-
+    final profileRes = await Supabase.instance.client
+        .from('profiles')
+        .select('full_name')
+        .eq('id', userId)
+        .single();
+    print("verification_source");
+    print("verification_source");
+    final fullName = profileRes['full_name'];
     await _supabase.from('well_events').insert({
       'user_id': userId,
+      'user_name': fullName,
       'family_id': familyId,
       'event_type': type,
       'latitude': latitude,
@@ -33,7 +41,8 @@ class SafetyRepository {
   // Trigger highest-level alarm state
   Future<void> triggerSiren(String familyId, String reason) async {
     final userId = _supabase.auth.currentUser?.id;
-    if (userId == null) throw Exception('User not logged in — cannot trigger SOS');
+    if (userId == null)
+      throw Exception('User not logged in — cannot trigger SOS');
 
     await _supabase.from('well_events').insert({
       'user_id': userId,
@@ -59,29 +68,39 @@ class SafetyRepository {
   }
 
   // Stream active family members
-  Stream<List<Map<String, dynamic>>> streamActiveMembers(String familyId) async* {
+  Stream<List<Map<String, dynamic>>> streamActiveMembers(
+    String familyId,
+  ) async* {
     final stream = _supabase
         .from('family_members')
         .stream(primaryKey: ['id'])
         .eq('family_id', familyId);
 
     await for (final list in stream) {
-      final activeList = list.where((item) => item['status'] == 'active').toList();
+      final activeList = list
+          .where((item) => item['status'] == 'active')
+          .toList();
       if (activeList.isEmpty) {
         yield [];
         continue;
       }
-      
+
       final userIds = activeList.map((e) => e['user_id']).toSet().toList();
       try {
-        final profiles = await _supabase.from('profiles').select().inFilter('id', userIds);
+        final profiles = await _supabase
+            .from('profiles')
+            .select()
+            .inFilter('id', userIds);
         final profileMap = {for (var p in profiles) p['id'] as String: p};
-        
+
         final enriched = activeList.map((item) {
           final enrichedItem = Map<String, dynamic>.from(item);
           final profile = profileMap[item['user_id']];
           if (profile != null) {
-            enrichedItem['full_name'] = profile['full_name'] ?? '${profile['first_name'] ?? ''} ${profile['last_name'] ?? ''}'.trim();
+            enrichedItem['full_name'] =
+                profile['full_name'] ??
+                '${profile['first_name'] ?? ''} ${profile['last_name'] ?? ''}'
+                    .trim();
             enrichedItem['avatar_url'] = profile['avatar_url'];
           }
           return enrichedItem;
@@ -95,29 +114,39 @@ class SafetyRepository {
   }
 
   // Stream pending family members
-  Stream<List<Map<String, dynamic>>> streamPendingMembers(String familyId) async* {
+  Stream<List<Map<String, dynamic>>> streamPendingMembers(
+    String familyId,
+  ) async* {
     final stream = _supabase
         .from('family_members')
         .stream(primaryKey: ['id'])
         .eq('family_id', familyId);
 
     await for (final list in stream) {
-      final pendingList = list.where((item) => item['status'] == 'pending').toList();
+      final pendingList = list
+          .where((item) => item['status'] == 'pending')
+          .toList();
       if (pendingList.isEmpty) {
         yield [];
         continue;
       }
-      
+
       final userIds = pendingList.map((e) => e['user_id']).toSet().toList();
       try {
-        final profiles = await _supabase.from('profiles').select().inFilter('id', userIds);
+        final profiles = await _supabase
+            .from('profiles')
+            .select()
+            .inFilter('id', userIds);
         final profileMap = {for (var p in profiles) p['id'] as String: p};
-        
+
         final enriched = pendingList.map((item) {
           final enrichedItem = Map<String, dynamic>.from(item);
           final profile = profileMap[item['user_id']];
           if (profile != null) {
-            enrichedItem['full_name'] = profile['full_name'] ?? '${profile['first_name'] ?? ''} ${profile['last_name'] ?? ''}'.trim();
+            enrichedItem['full_name'] =
+                profile['full_name'] ??
+                '${profile['first_name'] ?? ''} ${profile['last_name'] ?? ''}'
+                    .trim();
             enrichedItem['avatar_url'] = profile['avatar_url'];
           }
           return enrichedItem;
@@ -154,7 +183,11 @@ class SafetyRepository {
         .map((list) {
           try {
             return list.firstWhere(
-              (evt) => evt['latitude'] != null && evt['longitude'] != null && evt['latitude'] != 0 && evt['longitude'] != 0,
+              (evt) =>
+                  evt['latitude'] != null &&
+                  evt['longitude'] != null &&
+                  evt['latitude'] != 0 &&
+                  evt['longitude'] != 0,
             );
           } catch (_) {
             return null;

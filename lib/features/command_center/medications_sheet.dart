@@ -94,6 +94,35 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
             backgroundColor: ShieldColors.safeZoneGreen,
           ),
         );
+        final profile = await ref.read(currentUserProfileProvider.future);
+        if (profile == null) throw Exception('No profile');
+
+        final members = await Supabase.instance.client
+            .from('family_members')
+            .select('user_id')
+            .eq('family_id', profile.familyId);
+
+        // 3. Send push
+        for (final m in members) {
+          final targetUserId = m['user_id'];
+
+          if (targetUserId == profile.userId) continue;
+
+          try {
+            await Supabase.instance.client.functions.invoke(
+              'push-router',
+              body: {
+                "target_user_id": targetUserId,
+                "title": "Medications",
+                "body":
+                    "${profile.fullName ?? 'Someone'}:${med.medicationName}  dose logged",
+                "action": "log_dose",
+              },
+            );
+          } catch (e) {
+            print("Push failed: $e");
+          }
+        }
       }
     } catch (e) {
       debugPrint('[Medication] Error logging dose: $e');
