@@ -53,8 +53,11 @@ class _OTPVerificationScreenState extends ConsumerState<OTPVerificationScreen> {
               orElse: () => ShieldRole.none,
             );
             ref.read(userRoleProvider.notifier).setRole(matchedRole);
+            FocusScope.of(context).unfocus();
             context.go('/dashboard');
           } else {
+            FocusScope.of(context).unfocus();
+
             // New user without a profile, needs to setup
             context.go('/role-selection');
           }

@@ -262,7 +262,6 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
             ),
           ),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -282,6 +281,7 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
                   ),
                 ],
               ),
+              Spacer(),
               IconButton(
                 onPressed: _showAddCampusDialog,
                 icon: const Icon(
@@ -290,6 +290,25 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
                   size: 28,
                 ),
                 tooltip: 'Add Campus',
+              ),GestureDetector(
+                onTap: () async {
+                  Navigator.of(context).pop();
+                },
+                child: Container(
+                  padding: EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.shade400,
+                        offset: Offset(0, 0),
+                        blurRadius: 3,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.close, color: Colors.black, size: 16),
+                ),
               ),
             ],
           ),

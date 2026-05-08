@@ -457,6 +457,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
               showModalBottomSheet(
                 context: context,
                 isScrollControlled: true,
+                useSafeArea: true,
                 backgroundColor: Colors.transparent,
                 builder: (_) => const FamilyChatScreen(),
               );
@@ -756,6 +757,8 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                 showModalBottomSheet(
                                   context: context,
                                   isScrollControlled: true,
+                                  useSafeArea: true,
+
                                   backgroundColor: Colors.transparent,
                                   builder: (_) => const FamilyChatScreen(),
                                 );

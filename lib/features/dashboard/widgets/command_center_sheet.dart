@@ -21,19 +21,7 @@ class CommandCenterSheet extends StatefulWidget {
 }
 
 class _CommandCenterSheetState extends State<CommandCenterSheet> {
-  void _pushSheet(BuildContext ctx, Widget sheet, bool isScrollable) {
-    Navigator.of(ctx).pop(); // still close command center
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      showModalBottomSheet(
-        context: ctx,
-        isScrollControlled: isScrollable,
-        backgroundColor: Colors.transparent,
-        builder: (context) => sheet,
-      );
 
-      //  Navigator.push(context, MaterialPageRoute(builder: (context)=>sheet));
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -126,7 +114,10 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         'Family Chat',
         'Stay connected',
         const Color(0xFF3498DB),
-        () => _pushSheet(context, const FamilyChatScreen(), true),
+        () {
+      Navigator.push(context, MaterialPageRoute(builder: (context)=>FamilyChatScreen()));
+    }
+    //_pushSheet(context, const FamilyChatScreen(), true),
       ),
       _CmdItem(
         Icons.person_add,
@@ -215,6 +206,24 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         ],
       ),
     );
+  }
+  void _pushSheet(BuildContext ctx, Widget sheet, bool isScrollable) {
+    Navigator.of(ctx).pop(); // still close command center
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showModalBottomSheet(
+        context: ctx,
+        useSafeArea: true,
+        isScrollControlled: isScrollable,
+        backgroundColor: Colors.transparent,
+        builder: (context) => StatefulBuilder(
+          builder: (context,setState) {
+            return sheet;
+          }
+        ),
+      );
+
+      //  Navigator.push(context, MaterialPageRoute(builder: (context)=>sheet));
+    });
   }
 }
 

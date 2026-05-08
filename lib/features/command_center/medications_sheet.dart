@@ -94,35 +94,7 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
             backgroundColor: ShieldColors.safeZoneGreen,
           ),
         );
-        final profile = await ref.read(currentUserProfileProvider.future);
-        if (profile == null) throw Exception('No profile');
 
-        final members = await Supabase.instance.client
-            .from('family_members')
-            .select('user_id')
-            .eq('family_id', profile.familyId);
-
-        // 3. Send push
-        for (final m in members) {
-          final targetUserId = m['user_id'];
-
-          if (targetUserId == profile.userId) continue;
-
-          try {
-            await Supabase.instance.client.functions.invoke(
-              'push-router',
-              body: {
-                "target_user_id": targetUserId,
-                "title": "Medications",
-                "body":
-                    "${profile.fullName ?? 'Someone'}:${med.medicationName}  dose logged",
-                "action": "log_dose",
-              },
-            );
-          } catch (e) {
-            print("Push failed: $e");
-          }
-        }
       }
     } catch (e) {
       debugPrint('[Medication] Error logging dose: $e');
@@ -135,10 +107,63 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
           ),
         );
       }
+    }finally{
+      final profile = await ref.read(currentUserProfileProvider.future);
+      if (profile == null) throw Exception('No profile');
+
+      final members = await Supabase.instance.client
+          .from('family_members')
+          .select('user_id')
+          .eq('family_id', profile.familyId);
+
+      // 3. Send push
+      for (final m in members) {
+        final targetUserId = m['user_id'];
+
+        if (targetUserId == profile.userId) continue;
+
+        try {
+          await Supabase.instance.client.functions.invoke(
+            'push-router',
+            body: {
+              "target_user_id": targetUserId,
+              "title": "Medications",
+              "body":
+              "${profile.fullName ?? 'Someone'}:${med.medicationName}  dose logged",
+              "action": "log_dose",
+            },
+          );
+        } catch (e) {
+          print("Push failed: $e");
+        }
+      }
     }
   }
 
   Future<void> _deleteMedication(String id) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Medication'),
+        content: const Text('Are you sure you want to delete this medication? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: ShieldColors.alertRed,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
     try {
       await Supabase.instance.client.from('medications').delete().eq('id', id);
     } catch (e) {
@@ -149,7 +174,6 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
       }
     }
   }
-
   Color _doseStatusColor(Medication med) {
     final next = med.nextDoseToday;
     if (next == null) return Colors.grey;
@@ -507,14 +531,7 @@ class MedicationCard extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.edit_outlined,
-                      color: ShieldColors.activeTeal,
-                    ),
-                    onPressed: onEdit,
-                    tooltip: 'Edit',
-                  ),
+
                   if (med.scheduleTimes.isNotEmpty || isTakenToday)
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -533,7 +550,52 @@ class MedicationCard extends ConsumerWidget {
                           fontSize: 11,
                         ),
                       ),
+                    ),      PopupMenuButton<String>(
+                    icon: const Icon(
+                      Icons.more_vert,
+                      color: Colors.grey,
                     ),
+                    onSelected: (value) {
+                      if (value == 'edit') {
+                        onEdit?.call();
+                      } else if (value == 'delete') {
+                        onDelete?.call();
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.edit_outlined,
+                              color: ShieldColors.activeTeal,
+                              size: 20,
+                            ),
+                            SizedBox(width: 8),
+                            Text('Edit'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.delete,
+                              color: ShieldColors.alertRed,
+                              size: 20,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'Delete',
+                              style: TextStyle(color: ShieldColors.alertRed),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
               const SizedBox(height: 8),

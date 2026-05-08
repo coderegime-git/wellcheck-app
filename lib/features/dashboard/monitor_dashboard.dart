@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
@@ -12,6 +13,8 @@ import 'package:well_check_v3/features/dashboard/widgets/command_center_sheet.da
 import 'package:well_check_v3/features/dashboard/widgets/ai_wellness_card.dart';
 import 'package:well_check_v3/features/profile/profile_settings_view.dart';
 import 'package:well_check_v3/features/dashboard/widgets/pending_actions_card.dart';
+
+import '../../core/notifications/push_notification_service.dart';
 
 class MonitorDashboard extends ConsumerStatefulWidget {
   const MonitorDashboard({super.key});
@@ -24,7 +27,15 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
   bool _sosCountdownActive = false;
   int _sosCountdown = 5;
   Timer? _sosTimer;
+@override
+  void initState() {
+  initializeFCM();
+    super.initState();
+  }
+  void initializeFCM()async{
+    await PushNotificationService.initialize();
 
+  }
   @override
   void dispose() {
     _sosTimer?.cancel();
@@ -122,86 +133,86 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
     final profileAsync = ref.watch(currentUserProfileProvider);
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(
-                  Icons.remove_red_eye_outlined,
-                  size: 14,
-                  color: Color(0xFF6B4EE6),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'MONITOR VIEW',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: const Color(0xFF6B4EE6),
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ],
-            ),
-            profileAsync.when(
-              data: (profile) => FutureBuilder<String>(
-                future: profile != null
-                    ? ref
-                          .read(safetyRepositoryProvider)
-                          .getFamilyName(profile.familyId)
-                    : Future.value('My Family Shield'),
-                builder: (context, snap) => Text(
-                  snap.data ?? 'My Family Shield',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: ShieldColors.textBody,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              loading: () => const SizedBox.shrink(),
-              error: (e, st) => const SizedBox.shrink(),
-            ),
-          ],
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16.0),
-            child: Container(
-              decoration: BoxDecoration(
-                color: const Color(0xFFF3F0FF),
-                borderRadius: ShieldDesign.roundedTwelve,
-              ),
-              child: IconButton(
-                icon: const Icon(
-                  Icons.notifications_none,
-                  color: Color(0xFF6B4EE6),
-                ),
-                onPressed: () {
-                  // Show notifications stream
-                  final profile = profileAsync.value;
-                  if (profile == null) return;
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (ctx) => _MonitorNotificationsSheet(
-                      familyId: profile.familyId,
-                      safetyRepo: ref.read(safetyRepositoryProvider),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
+      backgroundColor: ShieldColors.activeTeal,
+      // appBar: AppBar(
+      //   backgroundColor: Colors.white,
+      //   elevation: 0,
+      //   surfaceTintColor: Colors.transparent,
+      //   title: Column(
+      //     crossAxisAlignment: CrossAxisAlignment.start,
+      //     children: [
+      //       Row(
+      //         children: [
+      //           const Icon(
+      //             Icons.remove_red_eye_outlined,
+      //             size: 14,
+      //             color: Color(0xFF6B4EE6),
+      //           ),
+      //           const SizedBox(width: 4),
+      //           Text(
+      //             'MONITOR VIEW',
+      //             style: Theme.of(context).textTheme.labelSmall?.copyWith(
+      //               color: const Color(0xFF6B4EE6),
+      //               fontWeight: FontWeight.bold,
+      //               letterSpacing: 1.2,
+      //             ),
+      //           ),
+      //         ],
+      //       ),
+      //       profileAsync.when(
+      //         data: (profile) => FutureBuilder<String>(
+      //           future: profile != null
+      //               ? ref
+      //                     .read(safetyRepositoryProvider)
+      //                     .getFamilyName(profile.familyId)
+      //               : Future.value('My Family Shield'),
+      //           builder: (context, snap) => Text(
+      //             snap.data ?? 'My Family Shield',
+      //             style: Theme.of(context).textTheme.titleMedium?.copyWith(
+      //               fontWeight: FontWeight.bold,
+      //               color: ShieldColors.textBody,
+      //             ),
+      //             maxLines: 1,
+      //             overflow: TextOverflow.ellipsis,
+      //           ),
+      //         ),
+      //         loading: () => const SizedBox.shrink(),
+      //         error: (e, st) => const SizedBox.shrink(),
+      //       ),
+      //     ],
+      //   ),
+      //   actions: [
+      //     Padding(
+      //       padding: const EdgeInsets.only(right: 16.0),
+      //       child: Container(
+      //         decoration: BoxDecoration(
+      //           color: const Color(0xFFF3F0FF),
+      //           borderRadius: ShieldDesign.roundedTwelve,
+      //         ),
+      //         child: IconButton(
+      //           icon: const Icon(
+      //             Icons.notifications_none,
+      //             color: Color(0xFF6B4EE6),
+      //           ),
+      //           onPressed: () {
+      //             // Show notifications stream
+      //             final profile = profileAsync.value;
+      //             if (profile == null) return;
+      //             showModalBottomSheet(
+      //               context: context,
+      //               isScrollControlled: true,
+      //               backgroundColor: Colors.transparent,
+      //               builder: (ctx) => _MonitorNotificationsSheet(
+      //                 familyId: profile.familyId,
+      //                 safetyRepo: ref.read(safetyRepositoryProvider),
+      //               ),
+      //             );
+      //           },
+      //         ),
+      //       ),
+      //     ),
+      //   ],
+      // ),
       body: SafeArea(
         child: profileAsync.when(
           data: (profile) {
@@ -211,241 +222,500 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
 
             final safetyRepo = ref.watch(safetyRepositoryProvider);
 
-            return SingleChildScrollView(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Alert Banner Stream
-                  StreamBuilder<List<Map<String, dynamic>>>(
-                    stream: safetyRepo.streamFamilyEvents(profile.familyId),
-                    builder: (context, snapshot) {
-                      final events = snapshot.data ?? [];
-                      final recentSos = events
-                          .where((e) => e['event_type'] == 'sos')
-                          .toList();
+            return Column(
+              children: [
+                SizedBox(height: 8,),
 
-                      if (recentSos.isEmpty) return const SizedBox.shrink();
-
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 32),
-                        padding: const EdgeInsets.all(16),
+                Container(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    Image.asset('assets/logo.png', height: 40, width: 40),
+                    SizedBox(width: 6),
+                    Text(
+                      "Well-Check",
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: ShieldColors.backgroundWhite,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Spacer(),
+                    Container(
+                        padding: EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                          color: ShieldColors.urgentRed.withValues(alpha: 0.1),
-                          borderRadius: ShieldDesign.roundedTwelve,
-                          border: Border.all(
-                            color: ShieldColors.urgentRed.withValues(
-                              alpha: 0.3,
-                            ),
-                          ),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.grey.shade200)
                         ),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.notifications_active_outlined,
-                              color: ShieldColors.urgentRed,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                'ACTIVE ALERT: Immediate Attention Required',
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(
-                                      color: ShieldColors.urgentRed,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+                        child:  GestureDetector(
+                            onTap: (){ showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) => const ProfileSettingsView(),
+                            );},
+                            child: Icon(Icons.menu,color: Colors.white,size: 18,))
+                    )
 
-                  const PendingActionsCard(),
-
-                  Text(
-                    'SHIELD MEMBERS - TACTICAL VIEW',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: ShieldColors.textLabel,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
+                  ],
+                ),
+              ),
+                SizedBox(height: 18,),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(24),
+                      topRight: Radius.circular(24),
                     ),
                   ),
-                  const SizedBox(height: 16),
-
-                  // REAL Map with member pins
-                  StreamBuilder<List<Map<String, dynamic>>>(
-                    stream: safetyRepo.streamActiveMembers(profile.familyId),
-                    builder: (context, memberSnap) {
-                      final members = memberSnap.data ?? [];
-                      return _TacticalMap(
-                        members: members,
-                        safetyRepo: safetyRepo,
-                      );
-                    },
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24.0,
+                    vertical: 16.0,
                   ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            profileAsync.when(
+                              data: (profile) {
+                                final firstName =
+                                    profile?.fullName?.split(' ').first ?? 'Leader';
+                                return Text(
+                                  'Welcome, $firstName.',
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: ShieldColors.textBody,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                );
+                              },
+                              loading: () => Text(
+                                'Welcome back...',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: ShieldColors.textBody,
+                                ),
+                              ),
+                              error: (e, st) => Text(
+                                'Welcome, Leader.',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: ShieldColors.textBody,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.remove_red_eye_outlined,
+                                  size: 14,
+                                  color: Color(0xFF6B4EE6),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'MONITOR VIEW',
+                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: const Color(0xFF6B4EE6),
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            // Row(
+                            //   children: [
+                            //     Icon(
+                            //       Icons.privacy_tip,
+                            //       color: ShieldColors.activeTeal,
+                            //       size: 22,
+                            //     ),
+                            //     SizedBox(width: 5),
+                            //     Text(
+                            //       'The Shield is active',
+                            //       style: Theme.of(context).textTheme.bodySmall
+                            //           ?.copyWith(color: ShieldColors.textLabel),
+                            //       overflow: TextOverflow.ellipsis,
+                            //     ),
+                            //   ],
+                            // ),
+                          ],
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          profileAsync.when(
+                            data: (profile) {
+                              return profile != null && profile!.avatarUrl != null
+                                  ? CircleAvatar(
+                                radius: 35,
+                                backgroundColor: ShieldColors.activeTeal,
 
-                  const SizedBox(height: 24),
+                                backgroundImage: NetworkImage(
+                                  profile!.avatarUrl ?? "",
+                                ),
+                              )
+                                  : CircleAvatar(
+                                backgroundColor: ShieldColors.activeTeal,
 
-                  // Live member cards from Realtime stream
-                  StreamBuilder<List<Map<String, dynamic>>>(
-                    stream: safetyRepo.streamActiveMembers(profile.familyId),
-                    builder: (context, memberSnapshot) {
-                      if (memberSnapshot.connectionState ==
-                          ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
+                                radius: 35,
+                                child: Icon(
+                                  size: 35,
+                                  Icons.person,
+                                  color: Colors.white,
+                                ),
+                              );
+                            },
+                            loading: () => SizedBox.shrink(),
+                            error: (e, st) => SizedBox.shrink(),
+                          ),
 
-                      final members = memberSnapshot.data ?? [];
-                      if (members.isEmpty) {
-                        return const Text('No members found.');
-                      }
+                          const SizedBox(width: 12),
+                          // Bug 2: Notification bell now shows recent events
+                          Container(
+                            padding: EdgeInsets.all(10),
 
-                      return Column(
-                        children: members.map((member) {
-                          return _LiveMemberCard(
-                            member: member,
-                            safetyRepo: safetyRepo,
-                            currentUserId: profile.userId,
-                          );
-                        }).toList(),
-                      );
-                    },
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: ShieldDesign.roundedTwelve,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.05),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: profileAsync.value == null
+                                ? GestureDetector(
+                              child: const Icon(
+                                size: 20,
+
+                                Icons.notifications_none,
+                                color: ShieldColors.textBody,
+                              ),
+                              onTap: () {},
+                            )
+                                : StreamBuilder<List<Map<String, dynamic>>>(
+                              stream: ref
+                                  .watch(safetyRepositoryProvider)
+                                  .streamFamilyEvents(
+                                profileAsync.value!.familyId,
+                              ),
+                              builder: (context, snapshot) {
+                                final events = snapshot.data ?? [];
+                                final hasRecent = events.any((e) {
+                                  final dt = DateTime.tryParse(
+                                    e['created_at'] ?? '',
+                                  );
+                                  return dt != null &&
+                                      DateTime.now().difference(dt).inHours <
+                                          24;
+                                });
+                                return Stack(
+                                  alignment: Alignment.topRight,
+                                  children: [
+                                    GestureDetector(
+                                      child: const Icon(
+                                        size: 20,
+
+                                        Icons.notifications_none,
+                                        color: ShieldColors.textBody,
+                                      ),
+                                      onTap: () {
+                                        showModalBottomSheet(
+                                          context: context,
+                                          isScrollControlled: true,
+                                          backgroundColor: Colors.transparent,
+                                          builder: (ctx) =>
+                                              _MonitorNotificationsSheet(
+                                                familyId: profileAsync
+                                                    .value!
+                                                    .familyId,
+                                                safetyRepo: ref.read(
+                                                  safetyRepositoryProvider,
+                                                ),
+                                              ),
+                                        );
+                                      },
+                                    ),
+                                    if (hasRecent)
+                                      Positioned(
+                                        right: 3,
+                                        top: 0,
+                                        child: Container(
+                                          width: 6,
+                                          height: 6,
+                                          decoration: const BoxDecoration(
+                                            color: ShieldColors.urgentRed,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 20),
-                  const AiWellnessCard(),
-                  const SizedBox(height: 100),
-                ],
-              ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Container(
+                      decoration: BoxDecoration(color: Colors.grey.shade50),
+                      padding: const EdgeInsets.all(24.0),
+
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Alert Banner Stream
+                          StreamBuilder<List<Map<String, dynamic>>>(
+                            stream: safetyRepo.streamFamilyEvents(profile.familyId),
+                            builder: (context, snapshot) {
+                              final events = snapshot.data ?? [];
+                              final recentSos = events
+                                  .where((e) => e['event_type'] == 'sos')
+                                  .toList();
+
+                              if (recentSos.isEmpty) return const SizedBox.shrink();
+
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 32),
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: ShieldColors.urgentRed.withValues(alpha: 0.1),
+                                  borderRadius: ShieldDesign.roundedTwelve,
+                                  border: Border.all(
+                                    color: ShieldColors.urgentRed.withValues(
+                                      alpha: 0.3,
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.notifications_active_outlined,
+                                      color: ShieldColors.urgentRed,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        'ACTIVE ALERT: Immediate Attention Required',
+                                        style: Theme.of(context).textTheme.bodyMedium
+                                            ?.copyWith(
+                                              color: ShieldColors.urgentRed,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+
+                          const PendingActionsCard(),
+
+                          Text(
+                            'SHIELD MEMBERS - TACTICAL VIEW',
+                            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                              color: ShieldColors.textLabel,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // REAL Map with member pins
+                          StreamBuilder<List<Map<String, dynamic>>>(
+                            stream: safetyRepo.streamActiveMembers(profile.familyId),
+                            builder: (context, memberSnap) {
+                              final members = memberSnap.data ?? [];
+                              return _TacticalMap(
+                                members: members,
+                                safetyRepo: safetyRepo,
+                              );
+                            },
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          // Live member cards from Realtime stream
+                          StreamBuilder<List<Map<String, dynamic>>>(
+                            stream: safetyRepo.streamActiveMembers(profile.familyId),
+                            builder: (context, memberSnapshot) {
+                              if (memberSnapshot.connectionState ==
+                                  ConnectionState.waiting) {
+                                return const Center(child: CircularProgressIndicator());
+                              }
+
+                              final members = memberSnapshot.data ?? [];
+                              if (members.isEmpty) {
+                                return const Text('No members found.');
+                              }
+
+                              return Column(
+                                children: members.map((member) {
+                                  return _LiveMemberCard(
+                                    member: member,
+                                    safetyRepo: safetyRepo,
+                                    currentUserId: profile.userId,
+                                  );
+                                }).toList(),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 20),
+                          const AiWellnessCard(),
+                          const SizedBox(height: 100),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             );
           },
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, st) => Center(child: Text('Error: $e')),
         ),
       ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-          child: Row(
-            children: [
-              // Large EMERGENCY button
-              Expanded(
-                flex: 3,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  height: 60,
-                  child: ElevatedButton(
-                    onPressed: _startSosCountdown,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _sosCountdownActive
-                          ? Colors.orange
-                          : ShieldColors.urgentRed,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: ShieldDesign.roundedTwelve,
+      bottomNavigationBar: Container(
+        color: Colors.white,
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Row(
+              children: [
+                // Large EMERGENCY button
+                Expanded(
+                  flex: 2,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    height: 60,
+                    child: ElevatedButton(
+                      onPressed: _startSosCountdown,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _sosCountdownActive
+                            ? Colors.orange
+                            : ShieldColors.urgentRed,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: ShieldDesign.roundedTwelve,
+                        ),
+                        elevation: 6,
                       ),
-                      elevation: 6,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.warning_rounded, size: 24),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            _sosCountdownActive
-                                ? 'CANCEL ($_sosCountdown)'
-                                : 'EMERGENCY',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                              letterSpacing: 1,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.warning_rounded, size: 24),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              _sosCountdownActive
+                                  ? 'CANCEL ($_sosCountdown)'
+                                  : 'EMERGENCY',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                letterSpacing: 1,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 5),
-              // MENU button
-              Expanded(
-                flex: 2,
-                child: SizedBox(
-                  height: 60,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (_) => const CommandCenterSheet(),
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: ShieldColors.activeTeal,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: ShieldDesign.roundedTwelve,
+                        ],
                       ),
-                      elevation: 4,
                     ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.grid_view_rounded, size: 20),
-                        SizedBox(width: 6),
-                        Text(
-                          'MENU',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
+                  ),
+                ),
+                const SizedBox(width: 5),
+                // MENU button
+                Expanded(
+                  flex: 2,
+                  child: SizedBox(
+                    height: 60,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          backgroundColor: Colors.transparent,
+                          builder: (_) => const CommandCenterSheet(),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: ShieldColors.activeTeal,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: ShieldDesign.roundedTwelve,
                         ),
-                      ],
+                        elevation: 4,
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.grid_view_rounded, size: 20),
+                          SizedBox(width: 6),
+                          Text(
+                            'MENU',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              // Profile
-              GestureDetector(
-                onTap: () {
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (_) => const ProfileSettingsView(),
-                  );
-                },
-                child: Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.grey.shade300,
-                    border: Border.all(color: Colors.white, width: 2),
-                  ),
-                  child:
-                      profileAsync.value != null &&
-                          profileAsync.value!.avatarUrl != null
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(26),
-                          child: Image.network(
-                            profileAsync.value!.avatarUrl!,
-                            fit: BoxFit.cover,
-                          ),
-                        )
-                      : const Icon(Icons.person, color: Colors.grey),
-                ),
-              ),
-            ],
+                // const SizedBox(width: 8),
+                // // Profile
+                // GestureDetector(
+                //   onTap: () {
+                //     showModalBottomSheet(
+                //       context: context,
+                //       isScrollControlled: true,
+                //       backgroundColor: Colors.transparent,
+                //       builder: (_) => const ProfileSettingsView(),
+                //     );
+                //   },
+                //   child: Container(
+                //     width: 52,
+                //     height: 52,
+                //     decoration: BoxDecoration(
+                //       shape: BoxShape.circle,
+                //       color: Colors.grey.shade300,
+                //       border: Border.all(color: Colors.white, width: 2),
+                //     ),
+                //     child:
+                //         profileAsync.value != null &&
+                //             profileAsync.value!.avatarUrl != null
+                //         ? ClipRRect(
+                //             borderRadius: BorderRadius.circular(26),
+                //             child: Image.network(
+                //               profileAsync.value!.avatarUrl!,
+                //               fit: BoxFit.cover,
+                //             ),
+                //           )
+                //         : const Icon(Icons.person, color: Colors.grey),
+                //   ),
+                // ),
+              ],
+            ),
           ),
         ),
       ),
@@ -791,20 +1061,71 @@ class _MonitorNotificationsSheet extends StatelessWidget {
                     ),
                   );
                 }
+                // return ListView.separated(
+                //   itemCount: events.length > 20 ? 20 : events.length,
+                //   separatorBuilder: (context, index) =>
+                //       const Divider(height: 1),
+                //   itemBuilder: (context, index) {
+                //     final evt = events[index];
+                //     final type = (evt['event_type'] as String?) ?? 'unknown';
+                //     final title =
+                //         evt['title'] as String? ?? type.replaceAll('_', ' ');
+                //     final desc = evt['description'] as String? ?? '';
+                //
+                //     IconData icon = Icons.notifications;
+                //     if (type == 'sos') icon = Icons.warning;
+                //     if (type == 'check_in') icon = Icons.how_to_reg;
+                //
+                //     return ListTile(
+                //       leading: Icon(
+                //         icon,
+                //         size: 20,
+                //         color: ShieldColors.activeTeal,
+                //       ),
+                //       title: Text(
+                //         title,
+                //         style: const TextStyle(
+                //           fontSize: 13,
+                //           fontWeight: FontWeight.w600,
+                //         ),
+                //       ),
+                //       subtitle: desc.isNotEmpty
+                //           ? Text(
+                //               desc,
+                //               maxLines: 1,
+                //               overflow: TextOverflow.ellipsis,
+                //               style: const TextStyle(fontSize: 11),
+                //             )
+                //           : null,
+                //     );
+                //   },
+                // );
                 return ListView.separated(
                   itemCount: events.length > 20 ? 20 : events.length,
                   separatorBuilder: (context, index) =>
-                      const Divider(height: 1),
+                  const Divider(height: 1),
                   itemBuilder: (context, index) {
                     final evt = events[index];
                     final type = (evt['event_type'] as String?) ?? 'unknown';
                     final title =
                         evt['title'] as String? ?? type.replaceAll('_', ' ');
                     final desc = evt['description'] as String? ?? '';
+                    final userName = evt['user_name'] as String? ?? '';
+                    final createdAt = evt['created_at'] as String?;
+                    print(evt);
+                    print("evtevt");
+                    String timeStr = '';
+                    if (createdAt != null) {
+                      try {
+                        final dt = DateTime.parse(createdAt);
+                        timeStr = DateFormat.jm().format(dt);
+                      } catch (_) {}
+                    }
 
                     IconData icon = Icons.notifications;
                     if (type == 'sos') icon = Icons.warning;
                     if (type == 'check_in') icon = Icons.how_to_reg;
+                    if (type.contains('driving')) icon = Icons.directions_car;
 
                     return ListTile(
                       leading: Icon(
@@ -812,21 +1133,41 @@ class _MonitorNotificationsSheet extends StatelessWidget {
                         size: 20,
                         color: ShieldColors.activeTeal,
                       ),
-                      title: Text(
-                        title,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                      title: Text.rich(
+                        TextSpan(
+                          children: [
+                            if (userName.isNotEmpty)
+                              TextSpan(
+                                text: userName,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            if (userName.isNotEmpty)
+                              const TextSpan(text: ' - '),
+                            TextSpan(
+                              text: title,
+                              style: const TextStyle(fontSize: 10),
+                            ),
+                          ],
                         ),
                       ),
                       subtitle: desc.isNotEmpty
                           ? Text(
-                              desc,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11),
-                            )
+                        desc,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11),
+                      )
                           : null,
+                      trailing: Text(
+                        timeStr,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey,
+                        ),
+                      ),
                     );
                   },
                 );

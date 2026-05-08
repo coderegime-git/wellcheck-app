@@ -18,6 +18,7 @@ import 'package:well_check_v3/features/dashboard/widgets/ai_wellness_card.dart';
 import 'package:well_check_v3/features/profile/profile_settings_view.dart';
 
 import '../../core/navigation/shield_router.dart';
+import '../../core/notifications/push_notification_service.dart';
 
 class LeaderDashboard extends ConsumerStatefulWidget {
   const LeaderDashboard({super.key});
@@ -31,6 +32,15 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
   int _sosCountdown = 5;
   Timer? _sosTimer;
 
+
+  @override
+  void initState() {
+    initializeFCM();    super.initState();
+  }
+  void initializeFCM()async{
+    await PushNotificationService.initialize();
+
+  }
   @override
   void dispose() {
     _sosTimer?.cancel();
@@ -132,6 +142,8 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            SizedBox(height: 8,),
+
             Container(
               padding: EdgeInsets.symmetric(horizontal: 12),
               child: Row(
@@ -146,6 +158,23 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                       fontSize: 16,
                     ),
                   ),
+                  Spacer(),
+                  Container(
+                    padding: EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.grey.shade200)
+                    ),
+                    child:  GestureDetector(
+                        onTap: (){ showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          backgroundColor: Colors.transparent,
+                          builder: (_) => const ProfileSettingsView(),
+                        );},
+                        child: Icon(Icons.menu,color: Colors.white,size: 18,))
+                  )
+                 
                 ],
               ),
             ),
@@ -617,7 +646,7 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
               children: [
                 // Large EMERGENCY button
                 Expanded(
-                  flex: 3,
+                  flex: 2,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 300),
                     height: 60,
@@ -637,7 +666,7 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           const Icon(Icons.warning_rounded, size: 24),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 6),
                           Flexible(
                             child: Text(
                               _sosCountdownActive
@@ -645,7 +674,7 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                   : 'EMERGENCY',
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
-                                fontSize: 14,
+                                fontSize: 13,
                                 letterSpacing: 1,
                               ),
                               overflow: TextOverflow.ellipsis,
@@ -659,7 +688,7 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                 const SizedBox(width: 8),
                 // COMMAND CENTER button
                 Expanded(
-                  flex: 3,
+                  flex: 2,
                   child: SizedBox(
                     height: 60,
                     child: ElevatedButton(
@@ -691,7 +720,7 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                               'MENU',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                fontSize: 14,
+                                fontSize: 13,
                                 letterSpacing: 1,
                               ),
                               overflow: TextOverflow.ellipsis,
@@ -702,42 +731,42 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                // Profile icon button
-                Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(30),
-                    color: Colors.white,
-                  ),
-                  height: 60,
-                  width: 60,
-                  child: GestureDetector(
-                    onTap: () {
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (_) => const ProfileSettingsView(),
-                      );
-                    },
-
-                    child: profileAsync.value?.avatarUrl != null
-                        ? Container(
-                            padding: EdgeInsets.all(10),
-                            clipBehavior: Clip.antiAlias,
-                            decoration: BoxDecoration(),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(30),
-                              //  borderRadius: ShieldDesign.roundedTwelve,
-                              child: Image.network(
-                                profileAsync.value!.avatarUrl!,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                          )
-                        : const Icon(Icons.person_outline, size: 26),
-                  ),
-                ),
+                // const SizedBox(width: 8),
+                // // Profile icon button
+                // Container(
+                //   decoration: BoxDecoration(
+                //     borderRadius: BorderRadius.circular(30),
+                //     color: Colors.white,
+                //   ),
+                //   height: 60,
+                //   width: 60,
+                //   child: GestureDetector(
+                //     onTap: () {
+                //       showModalBottomSheet(
+                //         context: context,
+                //         isScrollControlled: true,
+                //         backgroundColor: Colors.transparent,
+                //         builder: (_) => const ProfileSettingsView(),
+                //       );
+                //     },
+                //
+                //     child: profileAsync.value?.avatarUrl != null
+                //         ? Container(
+                //             padding: EdgeInsets.all(10),
+                //             clipBehavior: Clip.antiAlias,
+                //             decoration: BoxDecoration(),
+                //             child: ClipRRect(
+                //               borderRadius: BorderRadius.circular(30),
+                //               //  borderRadius: ShieldDesign.roundedTwelve,
+                //               child: Image.network(
+                //                 profileAsync.value!.avatarUrl!,
+                //                 fit: BoxFit.cover,
+                //               ),
+                //             ),
+                //           )
+                //         : const Icon(Icons.person_outline, size: 26),
+                //   ),
+                // ),
               ],
             ),
           ),

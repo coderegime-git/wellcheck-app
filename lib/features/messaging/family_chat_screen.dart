@@ -17,9 +17,23 @@ class _FamilyChatScreenState extends ConsumerState<FamilyChatScreen> {
   final TextEditingController _msgController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _isSending = false;
-
+  RealtimeChannel? channel;
+@override
+  void initState() {
+  channel = Supabase.instance.client.channel('family-chat')
+    ..onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: 'family_messages',
+      callback: (payload) {
+        setState(() {});
+      },
+    )
+    ..subscribe();    super.initState();
+  }
   @override
   void dispose() {
+    channel?.unsubscribe();
     _msgController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -97,181 +111,202 @@ class _FamilyChatScreenState extends ConsumerState<FamilyChatScreen> {
   Widget build(BuildContext context) {
     final profileAsync = ref.watch(currentUserProfileProvider);
 
-    return Padding(
-      padding: MediaQuery.viewInsetsOf(context),
-      child: Container(
-        decoration: const BoxDecoration(
-          color: ShieldColors.backgroundWhite,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.85,
-        ),
-        child: Column(
-          children: [
-            // Handle
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            // Header
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Family Chat',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Icon(Icons.chat_bubble, color: ShieldColors.activeTeal),
-                ],
-              ),
-            ),
-            const Divider(),
-
-            // Messages
-            Expanded(
-              child: profileAsync.when(
-                data: (profile) {
-                  if (profile == null) {
-                    return const Center(child: Text('No profile.'));
-                  }
-
-                  return StreamBuilder<List<Map<String, dynamic>>>(
-                    stream: Supabase.instance.client
-                        .from('family_messages')
-                        .stream(primaryKey: ['id'])
-                        .eq('family_id', profile.familyId)
-                        .order('created_at', ascending: false)
-                        .limit(100),
-                    builder: (context, snapshot) {
-                      // if (snapshot.connectionState == ConnectionState.waiting) {
-                      //   return const Center(child: CircularProgressIndicator());
-                      // }
-
-                      final messages = snapshot.data ?? [];
-                      if (messages.isEmpty) {
-                        return const Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.chat_bubble_outline,
-                                size: 48,
-                                color: Colors.grey,
-                              ),
-                              SizedBox(height: 8),
-                              Text(
-                                'No messages yet.\nSend the first one!',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: Colors.grey),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-
-                      return ListView.builder(
-                        controller: _scrollController,
-                        reverse: true,
-                        // newest at bottom
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        itemCount: messages.length,
-                        itemBuilder: (context, index) {
-                          final msg = messages[index];
-                          final isMe = msg['sender_id'] == profile.userId;
-                          return _ChatBubble(
-                            message: msg['message'] as String? ?? '',
-                            isMe: isMe,
-                            senderId: msg['sender_id'] as String? ?? '',
-                            createdAt: msg['created_at'] as String?,
-                          );
-                        },
-                      );
-                    },
-                  );
-                },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, st) => Center(child: Text('Error: $e')),
-              ),
-            ),
-
-            // Input bar
-            SafeArea(
-              top: false,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, -2),
-                    ),
-                  ],
-                ),
+    return Scaffold(
+      body: SafeArea(
+       // padding: MediaQuery.viewInsetsOf(context),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: ShieldColors.backgroundWhite,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          constraints: BoxConstraints(
+          //  maxHeight: MediaQuery.of(context).size.height * 0.85,
+          ),
+          child: Column(
+            children: [
+              // Handle
+              // Padding(
+              //   padding: const EdgeInsets.only(top: 12),
+              //   child: Container(
+              //     width: 40,
+              //     height: 4,
+              //     decoration: BoxDecoration(
+              //       color: Colors.grey.shade300,
+              //       borderRadius: BorderRadius.circular(2),
+              //     ),
+              //   ),
+              // ),
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _msgController,
-                        decoration: InputDecoration(
-                          hintText: 'Message your family...',
-                          hintStyle: const TextStyle(color: Colors.grey),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
-                            borderSide: BorderSide.none,
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey.shade100,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
+                    Text(
+                      'Family Chat',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () async {
+                        Navigator.of(context).pop();
+                      },
+                      child: Container(
+                        padding: EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.grey.shade400,
+                              offset: Offset(0, 0),
+                              blurRadius: 3,
+                            ),
+                          ],
                         ),
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _sendMessage(),
+                        child: const Icon(Icons.close, color: Colors.black, size: 16),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Container(
-                      decoration: const BoxDecoration(
-                        color: ShieldColors.activeTeal,
-                        shape: BoxShape.circle,
-                      ),
-                      child: IconButton(
-                        icon: _isSending
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.send, color: Colors.white),
-                        onPressed: _isSending ? null : _sendMessage,
-                      ),
-                    ),
+
                   ],
                 ),
               ),
-            ),
-          ],
+              const Divider(),
+
+              // Messages
+              Expanded(
+                child: profileAsync.when(
+                  data: (profile) {
+                    if (profile == null) {
+                      return const Center(child: Text('No profile.'));
+                    }
+
+                    return StreamBuilder<List<Map<String, dynamic>>>(
+                      stream: Supabase.instance.client
+                          .from('family_messages')
+                          .stream(primaryKey: ['id'])
+                          .eq('family_id', profile.familyId)
+                          .order('created_at', ascending: false),
+                      builder: (context, snapshot) {
+                        // if (snapshot.connectionState == ConnectionState.waiting) {
+                        //   return const Center(child: CircularProgressIndicator());
+                        // }
+       print("STREAM UPDATED");//
+                        final messages = snapshot.data ?? [];
+                        if (messages.isEmpty) {
+                          return const Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.chat_bubble_outline,
+                                  size: 48,
+                                  color: Colors.grey,
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'No messages yet.\nSend the first one!',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: Colors.grey),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          controller: _scrollController,
+                          reverse: true,
+                          // newest at bottom
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          itemCount: messages.length,
+                          itemBuilder: (context, index) {
+                            final msg = messages[index];
+                            final isMe = msg['sender_id'] == profile.userId;
+                            return _ChatBubble(
+                              message: msg['message'] as String? ?? '',
+                              isMe: isMe,
+                              senderId: msg['sender_id'] as String? ?? '',
+                              createdAt: msg['created_at'] as String?,
+                            );
+                          },
+                        );
+                      },
+                    );
+                  },
+                  loading: () => const Center(child: CircularProgressIndicator()),
+                  error: (e, st) => Center(child: Text('Error: $e')),
+                ),
+              ),
+
+              // Input bar
+              SafeArea(
+                top: false,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, -2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _msgController,
+                          decoration: InputDecoration(
+                            hintText: 'Message your family...',
+                            hintStyle: const TextStyle(color: Colors.grey),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            fillColor: Colors.grey.shade100,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
+                          ),
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _sendMessage(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        decoration: const BoxDecoration(
+                          color: ShieldColors.activeTeal,
+                          shape: BoxShape.circle,
+                        ),
+                        child: IconButton(
+                          icon: _isSending
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.send, color: Colors.white),
+                          onPressed: _isSending ? null : _sendMessage,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

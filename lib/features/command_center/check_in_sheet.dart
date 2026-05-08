@@ -218,12 +218,36 @@ class _CheckInSheetState extends ConsumerState<CheckInSheet> {
                       ),
                     ),
                   ),
-                  Text(
-                    'Manual Check-in',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: ShieldColors.textBody,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Manual Check-in',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: ShieldColors.textBody,
+                        ),
+                      ),  GestureDetector(
+                        onTap: () async {
+                          Navigator.of(context).pop();
+                        },
+                        child: Container(
+                          padding: EdgeInsets.all(5),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.grey.shade400,
+                                offset: Offset(0, 0),
+                                blurRadius: 3,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.close, color: Colors.black, size: 16),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
                   const Text(

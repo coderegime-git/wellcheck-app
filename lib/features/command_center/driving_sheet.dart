@@ -90,7 +90,6 @@ class _DrivingSheetState extends ConsumerState<DrivingSheet> {
             ),
           ),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -106,8 +105,29 @@ class _DrivingSheetState extends ConsumerState<DrivingSheet> {
                     style: TextStyle(color: Colors.grey, fontSize: 12),
                   ),
                 ],
+              ),Spacer(),
+              const Icon(Icons.speed, color: Colors.orange, size: 28),SizedBox(width: 12,),
+
+              GestureDetector(
+                onTap: () async {
+                  Navigator.of(context).pop();
+                },
+                child: Container(
+                  padding: EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.shade400,
+                        offset: Offset(0, 0),
+                        blurRadius: 3,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.close, color: Colors.black, size: 16),
+                ),
               ),
-              const Icon(Icons.speed, color: Colors.orange, size: 28),
             ],
           ),
           const SizedBox(height: 16),

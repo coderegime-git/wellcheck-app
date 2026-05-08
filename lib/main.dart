@@ -32,6 +32,9 @@ Future<void> main() async {
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseAnonKey,
+      realtimeClientOptions: const RealtimeClientOptions(
+        logLevel: RealtimeLogLevel.info,
+      ),
       authOptions: FlutterAuthClientOptions(
         authFlowType: AuthFlowType.pkce,
         autoRefreshToken: true,
@@ -40,7 +43,7 @@ Future<void> main() async {
   }
 
   // Initialize Firebase (gracefully degrade if not configured)
-  if (Platform.isAndroid) {
+  //if (Platform.isAndroid) {
     try {
       await Firebase.initializeApp();
       debugPrint('[Firebase] Initialized successfully.');
@@ -51,7 +54,7 @@ Future<void> main() async {
         '[Firebase] Not initialized: $e — push notifications disabled.',
       );
     }
-  }
+ // }
 
   // Initialize Medication Notifications
   await MedicationNotificationService.initialize();

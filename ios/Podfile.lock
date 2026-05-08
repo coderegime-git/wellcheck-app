@@ -4,7 +4,7 @@ PODS:
   - audioplayers_darwin (0.0.1):
     - Flutter
     - FlutterMacOS
-  - background_fetch (1.6.1):
+  - background_fetch (1.6.2):
     - Flutter
     - TSBackgroundFetch (~> 4.1.0)
   - battery_plus (1.0.0):
@@ -263,7 +263,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   app_links: 6d01271b3907b0ee7325c5297c75d697c4226c4d
   audioplayers_darwin: f15e209a3e856d1a7edcf98dc029f484fead2242
-  background_fetch: 77148aada854fab1657872e1320427de1043dc7c
+  background_fetch: b5fe15743f348c3146e198dc933f0596f152d90f
   battery_plus: 34f72fa2afeeea83bbae306c72a25828d3ec727a
   CwlCatchException: 7acc161b299a6de7f0a46a6ed741eae2c8b4d75a
   CwlCatchExceptionSupport: 54ccab8d8c78907b57f99717fb19d4cc3bce02dc

@@ -13,6 +13,8 @@ import 'package:well_check_v3/features/dashboard/widgets/command_center_sheet.da
 import 'package:well_check_v3/features/dashboard/widgets/pending_actions_card.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../../core/notifications/push_notification_service.dart';
+
 class StudentDashboard extends ConsumerStatefulWidget {
   const StudentDashboard({super.key});
 
@@ -24,7 +26,15 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
   bool _sosCountdownActive = false;
   int _sosCountdown = 5;
   Timer? _sosTimer;
+@override
+  void initState() {
+  initializeFCM();
+    super.initState();
+  }
+  void initializeFCM()async{
+    await PushNotificationService.initialize();
 
+  }
   @override
   void dispose() {
     _sosTimer?.cancel();
@@ -396,6 +406,8 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
                       showModalBottomSheet(
                         context: context,
                         isScrollControlled: true,
+                        useSafeArea: true,
+
                         backgroundColor: Colors.transparent,
                         builder: (_) => const FamilyChatScreen(),
                       );

@@ -146,7 +146,11 @@ class PushNotificationService {
         settings.authorizationStatus == AuthorizationStatus.provisional) {
       // Get and save FCM token
       final token = await _messaging.getToken();
-      debugPrint('[FCM] Token: $token');
+      final apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+      print("APNS Token: $apnsToken");
+
+      final fcmToken = await FirebaseMessaging.instance.getToken();
+      debugPrint('[FCM] fcmToken: $token');
       if (token != null) await _saveTokenToProfile(token);
 
       // Listen for token refresh
