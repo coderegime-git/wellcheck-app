@@ -211,444 +211,444 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // return Scaffold(
-    //   appBar: AppBar(title: const Text('Sign In'), centerTitle: true),
-    //   body: SingleChildScrollView(
-    //     padding: const EdgeInsets.all(24.0),
-    //     child: Column(
-    //       children: [
-    //         const SizedBox(height: 40),
-    //         const Icon(
-    //           Icons.lock_person_outlined,
-    //           size: 80,
-    //           color: ShieldColors.activeTeal,
-    //         ),
-    //         const SizedBox(height: 24),
-    //         Text(
-    //           'Welcome Back',
-    //           style: Theme.of(
-    //             context,
-    //           ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-    //         ),
-    //         const SizedBox(height: 32),
-    //
-    //         // Toggle buttons
-    //         Container(
-    //           decoration: BoxDecoration(
-    //             color: Colors.grey.shade200,
-    //             borderRadius: BorderRadius.circular(12),
-    //           ),
-    //           child: Row(
-    //             children: [
-    //               Expanded(
-    //                 child: GestureDetector(
-    //                   onTap: () => setState(() => _usePasswordLogin = false),
-    //                   child: Container(
-    //                     padding: const EdgeInsets.symmetric(vertical: 12),
-    //                     decoration: BoxDecoration(
-    //                       color: !_usePasswordLogin
-    //                           ? ShieldColors.activeTeal
-    //                           : Colors.transparent,
-    //                       borderRadius: BorderRadius.circular(12),
-    //                     ),
-    //                     child: Text(
-    //                       'OTP Login',
-    //                       textAlign: TextAlign.center,
-    //                       style: TextStyle(
-    //                         color: !_usePasswordLogin
-    //                             ? Colors.white
-    //                             : Colors.grey.shade600,
-    //                         fontWeight: FontWeight.bold,
-    //                       ),
-    //                     ),
-    //                   ),
-    //                 ),
-    //               ),
-    //               Expanded(
-    //                 child: GestureDetector(
-    //                   onTap: () => setState(() => _usePasswordLogin = true),
-    //                   child: Container(
-    //                     padding: const EdgeInsets.symmetric(vertical: 12),
-    //                     decoration: BoxDecoration(
-    //                       color: _usePasswordLogin
-    //                           ? ShieldColors.activeTeal
-    //                           : Colors.transparent,
-    //                       borderRadius: BorderRadius.circular(12),
-    //                     ),
-    //                     child: Text(
-    //                       'Password Login',
-    //                       textAlign: TextAlign.center,
-    //                       style: TextStyle(
-    //                         color: _usePasswordLogin
-    //                             ? Colors.white
-    //                             : Colors.grey.shade600,
-    //                         fontWeight: FontWeight.bold,
-    //                       ),
-    //                     ),
-    //                   ),
-    //                 ),
-    //               ),
-    //             ],
-    //           ),
-    //         ),
-    //         const SizedBox(height: 24),
-    //
-    //         // Email field
-    //         TextField(
-    //           controller: _emailController,
-    //           decoration: const InputDecoration(
-    //             labelText: 'EMAIL ADDRESS',
-    //             prefixIcon: Icon(Icons.email_outlined),
-    //           ),
-    //           keyboardType: TextInputType.emailAddress,
-    //         ),
-    //         const SizedBox(height: 16),
-    //
-    //         // Password field — only show in password mode
-    //         if (_usePasswordLogin) ...[
-    //           TextField(
-    //             controller: _passwordController,
-    //             obscureText: _obscurePassword,
-    //             decoration: InputDecoration(
-    //               labelText: 'PASSWORD',
-    //               prefixIcon: const Icon(Icons.lock_outline),
-    //               suffixIcon: IconButton(
-    //                 icon: Icon(
-    //                   _obscurePassword
-    //                       ? Icons.visibility_outlined
-    //                       : Icons.visibility_off_outlined,
-    //                 ),
-    //                 onPressed: () =>
-    //                     setState(() => _obscurePassword = !_obscurePassword),
-    //               ),
-    //             ),
-    //           ),
-    //           const SizedBox(height: 8),
-    //           // Forgot password
-    //           // Align(
-    //           //   alignment: Alignment.centerRight,
-    //           //   child: TextButton(
-    //           //     onPressed: () {
-    //           //       // TODO: handle forgot password
-    //           //     },
-    //           //     child: const Text('Forgot Password?'),
-    //           //   ),
-    //           // ),
-    //         ],
-    //
-    //         const SizedBox(height: 24),
-    //
-    //         // Login button
-    //         SizedBox(
-    //           width: double.infinity,
-    //           child: ElevatedButton(
-    //             onPressed: _isLoading
-    //                 ? null
-    //                 : _usePasswordLogin
-    //                 ? _handlePasswordLogin
-    //                 : _handleOtpLogin,
-    //             child: _isLoading
-    //                 ? const SizedBox(
-    //                     width: 20,
-    //                     height: 20,
-    //                     child: CircularProgressIndicator(
-    //                       color: Colors.white,
-    //                       strokeWidth: 2,
-    //                     ),
-    //                   )
-    //                 : Text(
-    //                     _usePasswordLogin ? 'SIGN IN' : 'SEND VERIFICATION PIN',
-    //                   ),
-    //           ),
-    //         ),
-    //
-    //         // Biometric
-    //         if (_isBiometricAvailable) ...[
-    //           const SizedBox(height: 24),
-    //           Row(
-    //             children: const [
-    //               Expanded(child: Divider()),
-    //               Padding(
-    //                 padding: EdgeInsets.symmetric(horizontal: 16),
-    //                 child: Text('OR', style: TextStyle(color: Colors.grey)),
-    //               ),
-    //               Expanded(child: Divider()),
-    //             ],
-    //           ),
-    //           const SizedBox(height: 24),
-    //           IconButton(
-    //             onPressed: _isLoading ? null : _handleBiometricLogin,
-    //             icon: const Icon(
-    //               Icons.fingerprint,
-    //               size: 48,
-    //               color: ShieldColors.activeTeal,
-    //             ),
-    //             tooltip: 'Biometric Sign In',
-    //           ),
-    //           const Text(
-    //             'Use Biometrics',
-    //             style: TextStyle(color: ShieldColors.activeTeal),
-    //           ),
-    //         ],
-    //       ],
-    //     ),
-    //   ),
-    // );
     return Scaffold(
-      backgroundColor: Colors.grey.shade50, // o
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              ShieldColors.activeTeal, // teal top
-              ShieldColors.activeTeal.withOpacity(0.5), // teal top
-              Colors.grey.shade100, // off-white bottom
-              Colors.grey.shade50, // o// off-white bottom
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              children: [
-                const SizedBox(height: 64),
-
-                // App Icon
-                Container(
-                  width: 150,
-                  height: 140,
-                  decoration: BoxDecoration(
-                    //   color: Colors.white.withOpacity(0.25),
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Image.asset("assets/logo.png"),
-                ),
-
-                const SizedBox(height: 18),
-
-                // Title
-                const Text(
-                  'Welcome Back',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1A1A1A),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Sign in to continue',
-                  style: TextStyle(fontSize: 14, color: Colors.black),
-                ),
-
-                const SizedBox(height: 30),
-
-                // White card area
-                Container(
-                  //padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    //   color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.06),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // OTP Login label
-                      // Container(
-                      //   padding: const EdgeInsets.symmetric(vertical: 10),
-                      //   decoration: BoxDecoration(
-                      //     color: const Color(0xFF00796B),
-                      //     borderRadius: BorderRadius.circular(10),
-                      //   ),
-                      //   alignment: Alignment.center,
-                      //   child: const Text(
-                      //     'OTP Login',
-                      //     style: TextStyle(
-                      //       color: Colors.white,
-                      //       fontWeight: FontWeight.w600,
-                      //       fontSize: 15,
-                      //     ),
-                      //   ),
-                      // ),
-                      const SizedBox(height: 20),
-
-                      // Email field
-                      TextFormField(
-                        controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: InputDecoration(
-                          hintText: 'EMAIL ADDRESS',
-                          hintStyle: const TextStyle(
-                            fontSize: 13,
-                            color: Color(0xFFAAAAAA),
-                            letterSpacing: 0.5,
-                          ),
-                          prefixIcon: Icon(
-                            Icons.email_outlined,
-                            color: Colors.grey.shade600,
-                            size: 25,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            vertical: 14,
-                            horizontal: 12,
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(
-                              color: Color(0xFFDDDDDD),
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(
-                              color: Color(0xFF00796B),
-                              width: 1.5,
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Send OTP button
-                      SizedBox(
-                        height: 50,
-                        child: ElevatedButton(
-                          onPressed: _isLoading ? null : _handleOtpLogin,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: ShieldColors.activeTeal,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            elevation: 0,
-                          ),
-                          child: _isLoading
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Text(
-                                  'SEND VERIFICATION PIN',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 0.8,
-                                  ),
-                                ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                // OR divider
-                Row(
-                  children: [
-                    Expanded(
-                      child: Divider(
-                        color: Colors.grey.shade400,
-                        thickness: 0.5,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text(
-                        'OR',
-                        style: TextStyle(
-                          color: Colors.grey.shade500,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Divider(
-                        color: Colors.grey.shade400,
-                        thickness: 0.5,
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 20),
-
-                // Biometrics
-                GestureDetector(
-                  onTap: () {
-                    // trigger biometric auth
-                  },
-                  child: Column(
-                    children: [
-                      Icon(
-                        Icons.fingerprint,
-                        size: 48,
-                        color: const Color(0xFF00796B),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Use Biometrics',
-                        style: TextStyle(
-                          color: Color(0xFF00796B),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 32),
-
-                // Sign up link
-                GestureDetector(
-                  onTap: () => context.push('/register'),
-
-                  child: RichText(
-                    text: const TextSpan(
-                      style: TextStyle(fontSize: 13, color: Color(0xFF777777)),
-                      children: [
-                        TextSpan(
-                          text: "Don't have an account? ",
-                          style: TextStyle(
-                            color: Colors.black,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        TextSpan(
-                          text: 'Sign Up',
-                          style: TextStyle(
-                            color: Color(0xFF00796B),
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 32),
-              ],
+      appBar: AppBar(title: const Text('Sign In'), centerTitle: true),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          children: [
+            const SizedBox(height: 40),
+            const Icon(
+              Icons.lock_person_outlined,
+              size: 80,
+              color: ShieldColors.activeTeal,
             ),
-          ),
+            const SizedBox(height: 24),
+            Text(
+              'Welcome Back',
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 32),
+
+            // Toggle buttons
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _usePasswordLogin = false),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: !_usePasswordLogin
+                              ? ShieldColors.activeTeal
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'OTP Login',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: !_usePasswordLogin
+                                ? Colors.white
+                                : Colors.grey.shade600,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _usePasswordLogin = true),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: _usePasswordLogin
+                              ? ShieldColors.activeTeal
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'Password Login',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _usePasswordLogin
+                                ? Colors.white
+                                : Colors.grey.shade600,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Email field
+            TextField(
+              controller: _emailController,
+              decoration: const InputDecoration(
+                labelText: 'EMAIL ADDRESS',
+                prefixIcon: Icon(Icons.email_outlined),
+              ),
+              keyboardType: TextInputType.emailAddress,
+            ),
+            const SizedBox(height: 16),
+
+            // Password field — only show in password mode
+            if (_usePasswordLogin) ...[
+              TextField(
+                controller: _passwordController,
+                obscureText: _obscurePassword,
+                decoration: InputDecoration(
+                  labelText: 'PASSWORD',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              // Forgot password
+              // Align(
+              //   alignment: Alignment.centerRight,
+              //   child: TextButton(
+              //     onPressed: () {
+              //       // TODO: handle forgot password
+              //     },
+              //     child: const Text('Forgot Password?'),
+              //   ),
+              // ),
+            ],
+
+            const SizedBox(height: 24),
+
+            // Login button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _isLoading
+                    ? null
+                    : _usePasswordLogin
+                    ? _handlePasswordLogin
+                    : _handleOtpLogin,
+                child: _isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : Text(
+                        _usePasswordLogin ? 'SIGN IN' : 'SEND VERIFICATION PIN',
+                      ),
+              ),
+            ),
+
+            // Biometric
+            if (_isBiometricAvailable) ...[
+              const SizedBox(height: 24),
+              Row(
+                children: const [
+                  Expanded(child: Divider()),
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Text('OR', style: TextStyle(color: Colors.grey)),
+                  ),
+                  Expanded(child: Divider()),
+                ],
+              ),
+              const SizedBox(height: 24),
+              IconButton(
+                onPressed: _isLoading ? null : _handleBiometricLogin,
+                icon: const Icon(
+                  Icons.fingerprint,
+                  size: 48,
+                  color: ShieldColors.activeTeal,
+                ),
+                tooltip: 'Biometric Sign In',
+              ),
+              const Text(
+                'Use Biometrics',
+                style: TextStyle(color: ShieldColors.activeTeal),
+              ),
+            ],
+          ],
         ),
       ),
     );
+    // return Scaffold(
+    //   backgroundColor: Colors.grey.shade50, // o
+    //   body: Container(
+    //     decoration: BoxDecoration(
+    //       gradient: LinearGradient(
+    //         begin: Alignment.topCenter,
+    //         end: Alignment.bottomCenter,
+    //         colors: [
+    //           ShieldColors.activeTeal, // teal top
+    //           ShieldColors.activeTeal.withOpacity(0.5), // teal top
+    //           Colors.grey.shade100, // off-white bottom
+    //           Colors.grey.shade50, // o// off-white bottom
+    //         ],
+    //       ),
+    //     ),
+    //     child: SafeArea(
+    //       child: SingleChildScrollView(
+    //         padding: const EdgeInsets.symmetric(horizontal: 32),
+    //         child: Column(
+    //           children: [
+    //             const SizedBox(height: 64),
+    //
+    //             // App Icon
+    //             Container(
+    //               width: 150,
+    //               height: 140,
+    //               decoration: BoxDecoration(
+    //                 //   color: Colors.white.withOpacity(0.25),
+    //                 borderRadius: BorderRadius.circular(24),
+    //               ),
+    //               child: Image.asset("assets/logo.png"),
+    //             ),
+    //
+    //             const SizedBox(height: 18),
+    //
+    //             // Title
+    //             const Text(
+    //               'Welcome Back',
+    //               style: TextStyle(
+    //                 fontSize: 26,
+    //                 fontWeight: FontWeight.bold,
+    //                 color: Color(0xFF1A1A1A),
+    //               ),
+    //             ),
+    //             const SizedBox(height: 6),
+    //             const Text(
+    //               'Sign in to continue',
+    //               style: TextStyle(fontSize: 14, color: Colors.black),
+    //             ),
+    //
+    //             const SizedBox(height: 30),
+    //
+    //             // White card area
+    //             Container(
+    //               //padding: const EdgeInsets.all(24),
+    //               decoration: BoxDecoration(
+    //                 //   color: Colors.white,
+    //                 borderRadius: BorderRadius.circular(20),
+    //                 boxShadow: [
+    //                   BoxShadow(
+    //                     color: Colors.black.withOpacity(0.06),
+    //                     blurRadius: 16,
+    //                     offset: const Offset(0, 4),
+    //                   ),
+    //                 ],
+    //               ),
+    //               child: Column(
+    //                 crossAxisAlignment: CrossAxisAlignment.stretch,
+    //                 children: [
+    //                   // OTP Login label
+    //                   // Container(
+    //                   //   padding: const EdgeInsets.symmetric(vertical: 10),
+    //                   //   decoration: BoxDecoration(
+    //                   //     color: const Color(0xFF00796B),
+    //                   //     borderRadius: BorderRadius.circular(10),
+    //                   //   ),
+    //                   //   alignment: Alignment.center,
+    //                   //   child: const Text(
+    //                   //     'OTP Login',
+    //                   //     style: TextStyle(
+    //                   //       color: Colors.white,
+    //                   //       fontWeight: FontWeight.w600,
+    //                   //       fontSize: 15,
+    //                   //     ),
+    //                   //   ),
+    //                   // ),
+    //                   const SizedBox(height: 20),
+    //
+    //                   // Email field
+    //                   TextFormField(
+    //                     controller: _emailController,
+    //                     keyboardType: TextInputType.emailAddress,
+    //                     decoration: InputDecoration(
+    //                       hintText: 'EMAIL ADDRESS',
+    //                       hintStyle: const TextStyle(
+    //                         fontSize: 13,
+    //                         color: Color(0xFFAAAAAA),
+    //                         letterSpacing: 0.5,
+    //                       ),
+    //                       prefixIcon: Icon(
+    //                         Icons.email_outlined,
+    //                         color: Colors.grey.shade600,
+    //                         size: 25,
+    //                       ),
+    //                       contentPadding: const EdgeInsets.symmetric(
+    //                         vertical: 14,
+    //                         horizontal: 12,
+    //                       ),
+    //                       enabledBorder: OutlineInputBorder(
+    //                         borderRadius: BorderRadius.circular(10),
+    //                         borderSide: const BorderSide(
+    //                           color: Color(0xFFDDDDDD),
+    //                         ),
+    //                       ),
+    //                       focusedBorder: OutlineInputBorder(
+    //                         borderRadius: BorderRadius.circular(10),
+    //                         borderSide: const BorderSide(
+    //                           color: Color(0xFF00796B),
+    //                           width: 1.5,
+    //                         ),
+    //                       ),
+    //                     ),
+    //                   ),
+    //
+    //                   const SizedBox(height: 16),
+    //
+    //                   // Send OTP button
+    //                   SizedBox(
+    //                     height: 50,
+    //                     child: ElevatedButton(
+    //                       onPressed: _isLoading ? null : _handleOtpLogin,
+    //                       style: ElevatedButton.styleFrom(
+    //                         backgroundColor: ShieldColors.activeTeal,
+    //                         foregroundColor: Colors.white,
+    //                         shape: RoundedRectangleBorder(
+    //                           borderRadius: BorderRadius.circular(10),
+    //                         ),
+    //                         elevation: 0,
+    //                       ),
+    //                       child: _isLoading
+    //                           ? const SizedBox(
+    //                               width: 20,
+    //                               height: 20,
+    //                               child: CircularProgressIndicator(
+    //                                 color: Colors.white,
+    //                                 strokeWidth: 2,
+    //                               ),
+    //                             )
+    //                           : const Text(
+    //                               'SEND VERIFICATION PIN',
+    //                               style: TextStyle(
+    //                                 fontSize: 14,
+    //                                 fontWeight: FontWeight.w600,
+    //                                 letterSpacing: 0.8,
+    //                               ),
+    //                             ),
+    //                     ),
+    //                   ),
+    //                 ],
+    //               ),
+    //             ),
+    //
+    //             const SizedBox(height: 24),
+    //
+    //             // OR divider
+    //             Row(
+    //               children: [
+    //                 Expanded(
+    //                   child: Divider(
+    //                     color: Colors.grey.shade400,
+    //                     thickness: 0.5,
+    //                   ),
+    //                 ),
+    //                 Padding(
+    //                   padding: const EdgeInsets.symmetric(horizontal: 12),
+    //                   child: Text(
+    //                     'OR',
+    //                     style: TextStyle(
+    //                       color: Colors.grey.shade500,
+    //                       fontSize: 13,
+    //                     ),
+    //                   ),
+    //                 ),
+    //                 Expanded(
+    //                   child: Divider(
+    //                     color: Colors.grey.shade400,
+    //                     thickness: 0.5,
+    //                   ),
+    //                 ),
+    //               ],
+    //             ),
+    //
+    //             const SizedBox(height: 20),
+    //
+    //             // Biometrics
+    //             GestureDetector(
+    //               onTap: () {
+    //                 // trigger biometric auth
+    //               },
+    //               child: Column(
+    //                 children: [
+    //                   Icon(
+    //                     Icons.fingerprint,
+    //                     size: 48,
+    //                     color: const Color(0xFF00796B),
+    //                   ),
+    //                   const SizedBox(height: 6),
+    //                   const Text(
+    //                     'Use Biometrics',
+    //                     style: TextStyle(
+    //                       color: Color(0xFF00796B),
+    //                       fontSize: 14,
+    //                       fontWeight: FontWeight.w500,
+    //                     ),
+    //                   ),
+    //                 ],
+    //               ),
+    //             ),
+    //
+    //             const SizedBox(height: 32),
+    //
+    //             // Sign up link
+    //             GestureDetector(
+    //               onTap: () => context.push('/register'),
+    //
+    //               child: RichText(
+    //                 text: const TextSpan(
+    //                   style: TextStyle(fontSize: 13, color: Color(0xFF777777)),
+    //                   children: [
+    //                     TextSpan(
+    //                       text: "Don't have an account? ",
+    //                       style: TextStyle(
+    //                         color: Colors.black,
+    //                         fontWeight: FontWeight.bold,
+    //                       ),
+    //                     ),
+    //                     TextSpan(
+    //                       text: 'Sign Up',
+    //                       style: TextStyle(
+    //                         color: Color(0xFF00796B),
+    //                         fontWeight: FontWeight.bold,
+    //                       ),
+    //                     ),
+    //                   ],
+    //                 ),
+    //               ),
+    //             ),
+    //
+    //             const SizedBox(height: 32),
+    //           ],
+    //         ),
+    //       ),
+    //     ),
+    //   ),
+    // );
   }
 }
 // lib/core/utils/supabase_exception.dart

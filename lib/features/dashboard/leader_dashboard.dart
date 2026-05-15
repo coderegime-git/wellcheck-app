@@ -937,10 +937,21 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                                                         12,
                                                                   ),
                                                                 ),
+//
 
-                                                                const SizedBox(
-                                                                  height: 6,
-                                                                ),
+                                                                if (med.assignedName != null) ...[
+                                                                  const SizedBox(height: 4),
+
+                                                                  Text(
+                                                                    'Assigned to: ${med.assignedName}',
+                                                                    style: TextStyle(
+                                                                      color: Colors.blueGrey,
+                                                                      fontSize: 12,
+                                                                      fontWeight: FontWeight.w500,
+                                                                    ),
+                                                                  ),
+                                                                ],
+
 
                                                                 // if (nextDose !=
                                                                 //     null) ...[

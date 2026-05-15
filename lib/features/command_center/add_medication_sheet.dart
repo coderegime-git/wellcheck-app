@@ -27,6 +27,7 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
   bool _isLoading = false;
   bool _isLoadingMembers = true;
   String? _selectedUserId;
+  String? _selectedUserName;
   List<Map<String, dynamic>> _familyMembers = [];
 
   // Schedule fields
@@ -53,8 +54,11 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
     _fetchFamilyMembers();
     final med = widget.existingMedication;
     if (med != null) {
+      print(med.assignedName);
+      print("aas");
       _nameController.text = med.medicationName;
       _selectedUserId = med.assignedTo;
+      _selectedUserName = med.assignedName;
       _dosageController.text = med.dosage;
       _instructionsController.text = med.instructions ?? '';
       _doctorController.text = med.doctor ?? '';
@@ -94,6 +98,11 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
             _selectedUserId = me.isNotEmpty
                 ? me.first['user_id']
                 : _familyMembers.first['user_id'];
+            _selectedUserName = me.isNotEmpty
+                ? me.first['profiles']['full_name']
+                : _familyMembers.first['profiles']['full_name'];
+                print(_selectedUserName);
+                print("_selectedUserName");
           }
         });
       }
@@ -105,6 +114,7 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
     print("medmed");
     if (med != null) {
       _selectedUserId = med.assignedTo;
+      _selectedUserName = med.assignedName;
     }
   }
 
@@ -306,7 +316,9 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
             .update({
               'family_id': profile.familyId,
               'assigned_to': _selectedUserId,
-              'medication_name': _nameController.text.trim(),
+          'assigned_name': _selectedUserName,
+
+          'medication_name': _nameController.text.trim(),
               'dosage': _dosageController.text.trim(),
               'frequency': freqStr,
               'instructions': _instructionsController.text.trim().isEmpty
@@ -342,6 +354,7 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
             .insert({
               'family_id': profile.familyId,
               'assigned_to': _selectedUserId,
+              'assigned_name': _selectedUserName,
               'medication_name': _nameController.text.trim(),
               'dosage': _dosageController.text.trim(),
               'frequency': freqStr,
@@ -518,16 +531,38 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
                       ),
                       prefixIcon: const Icon(Icons.person),
                     ),
+
                     items: _familyMembers.map((m) {
-                      final name = m['profiles']?['full_name'] ?? 'Unknown';
+                      final name =
+                          m['profiles']?['full_name'] ?? 'Unknown';
+
                       final role = m['role'];
+
                       return DropdownMenuItem<String>(
                         value: m['user_id'] as String,
                         child: Text('$name ($role)'),
                       );
                     }).toList(),
-                    onChanged: (val) => setState(() => _selectedUserId = val),
-                    validator: (val) => val == null ? 'Required' : null,
+
+                    onChanged: (val) {
+
+                      final member = _familyMembers.firstWhere(
+                            (m) => m['user_id'] == val,
+                      );
+
+                      setState(() {
+                        _selectedUserId = val;
+
+                        _selectedUserName =
+                        member['profiles']
+                        ?['full_name'];
+                      });
+                    },
+
+                    validator: (val) =>
+                    val == null
+                        ? 'Required'
+                        : null,
                   ),
 
                 const SizedBox(height: 16),

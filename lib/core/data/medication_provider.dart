@@ -9,6 +9,7 @@ part 'medication_provider.g.dart';
 class Medication {
   final String id;
   final String assignedTo;
+  final String assignedName;
   final String medicationName;
   final String dosage;
   final String frequency;
@@ -24,6 +25,7 @@ class Medication {
   Medication({
     required this.id,
     required this.assignedTo,
+    required this.assignedName,
     required this.medicationName,
     required this.dosage,
     required this.frequency,
@@ -41,6 +43,7 @@ class Medication {
     return Medication(
       id: json['id'] as String,
       assignedTo: json['assigned_to'] as String,
+      assignedName: json['assigned_name'] as String,
       medicationName: json['medication_name'] as String,
       dosage: json['dosage'] as String,
       frequency: json['frequency'] as String? ?? 'Daily',

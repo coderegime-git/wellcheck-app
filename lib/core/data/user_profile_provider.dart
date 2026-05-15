@@ -9,6 +9,7 @@ class UserProfile {
   final String userId;
   final String familyId;
   final String role;
+  final String? phone;
   final String? fullName; // From joined profiles view
   final String? avatarUrl; // From joined profiles view
 
@@ -17,6 +18,7 @@ class UserProfile {
     required this.familyId,
     required this.role,
     this.fullName,
+    this.phone,
     this.avatarUrl,
   });
 
@@ -25,6 +27,7 @@ class UserProfile {
       userId: json['user_id'] as String,
       familyId: json['family_id'] as String,
       role: json['role'] as String,
+      phone: json['phone'] as String?,
       fullName: json['full_name'] as String?, // May be null if not joined
       avatarUrl: json['avatar_url'] as String?, // May be null if not joined
     );

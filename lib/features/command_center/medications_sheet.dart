@@ -373,8 +373,6 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
   Widget build(BuildContext context) {
     final medicationsAsync = ref.watch(familyMedicationsProvider);
     final profile = ref.watch(currentUserProfileProvider);
-    print(profile.value!.role);
-    print("sheeeeet");
     return Container(
       decoration: const BoxDecoration(
         color: ShieldColors.backgroundWhite,
@@ -476,7 +474,8 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
                             color: Colors.grey.shade300,
                           ),
                         const SizedBox(height: 16),
-                        const Text(
+
+                          const Text(
                           'No medications scheduled yet.',
                           style: TextStyle(color: Colors.grey, fontSize: 16),
                         ),
@@ -505,7 +504,14 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
                                 m.assignedTo == profile.value?.userId,
                           )
                           .toList();
-
+if(active.isEmpty){
+  return  Center(
+    child: const Text(
+      'No medications scheduled yet.',
+      style: TextStyle(color: Colors.grey, fontSize: 16),
+    ),
+  );
+}
                 final inactive = isLeaderOrMonitor
                     ? meds.where((m) => !m.isActive).toList()
                     : meds
@@ -684,31 +690,91 @@ class MedicationCard extends ConsumerWidget {
     final logs = allLogsAsync.value ?? [];
 
     final now = DateTime.now();
-    final isTakenToday = logs.any(
-      (log) =>
-          log.medicationId == med.id &&
-          log.status == 'taken' &&
-          log.takenAt != null &&
-          log.takenAt!.year == now.year &&
-          log.takenAt!.month == now.month &&
-          log.takenAt!.day == now.day,
+
+    bool isTakenToday = false;
+
+    final medicationLogs = logs.where(
+          (l) =>
+      l.medicationId == med.id &&
+          l.status == 'taken' &&
+          l.takenAt != null,
     );
-    final nextDose = med.nextDoseToday;
-    final statusColor = isTakenToday
+
+    switch (med.recurrence) {
+      case 'daily':
+        isTakenToday = medicationLogs.any(
+              (log) =>
+          log.takenAt!.year == now.year &&
+              log.takenAt!.month == now.month &&
+              log.takenAt!.day == now.day,
+        );
+        break;
+
+      case 'every_other_day':
+        final start = med.startDate ?? now;
+
+        final diffDays =
+            now.difference(start).inDays;
+
+        final shouldTakeToday =
+            diffDays % 2 == 0;
+
+        isTakenToday =
+            shouldTakeToday &&
+                medicationLogs.any(
+                      (log) =>
+                  log.takenAt!.year == now.year &&
+                      log.takenAt!.month == now.month &&
+                      log.takenAt!.day == now.day,
+                );
+        break;
+
+      case 'weekly':
+        isTakenToday = medicationLogs.any((log) {
+          final d = log.takenAt!;
+          return d.weekday == now.weekday &&
+              d.year == now.year;
+        });
+        break;
+
+      case 'monthly':
+        isTakenToday = medicationLogs.any((log) {
+          final d = log.takenAt!;
+          return d.day == now.day &&
+              d.month == now.month &&
+              d.year == now.year;
+        });
+        break;
+
+      default:
+        isTakenToday = false;
+    }final nextDose = med.nextDoseToday;
+
+    final statusColor =
+    isTakenToday
         ? ShieldColors.safeZoneGreen
         : nextDose == null
         ? Colors.grey
-        : nextDose.difference(DateTime.now()).inMinutes < 0
+        : nextDose
+        .difference(DateTime.now())
+        .inMinutes <
+        0
         ? ShieldColors.urgentRed
         : Colors.amber.shade700;
 
-    final nextLabel = isTakenToday
+    final nextLabel =
+    isTakenToday
         ? 'Taken Today'
         : med.scheduleTimes.isEmpty
         ? med.frequency
         : nextDose == null
         ? 'Done for today'
-        : nextDose.difference(DateTime.now()).inMinutes < 0
+        : nextDose
+        .difference(
+      DateTime.now(),
+    )
+        .inMinutes <
+        0
         ? 'Overdue'
         : 'Next: ${DateFormat.jm().format(nextDose)}';
 
@@ -883,7 +949,7 @@ class MedicationCard extends ConsumerWidget {
               //       ),
               //     ),
               //   ),
-              if (med.isActive && !isTakenToday && isLeader == true)
+              if (med.isActive && !isTakenToday )
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
