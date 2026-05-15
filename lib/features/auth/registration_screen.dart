@@ -40,9 +40,18 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
       }
     } catch (e) {
       if (mounted) {
+        String errorMessage = 'Unable to send verification code. Please try again.';        if (e.toString().contains('rate limit')) {
+          errorMessage =
+          'Too many attempts. Please wait a few minutes before trying again.';
+        } else if (e.toString().contains('Invalid email')) {
+          errorMessage = 'Please enter a valid email address.';
+        } else if (e.toString().toLowerCase().contains('no address')) {
+          errorMessage =
+          'No internet connection. Please check your network.';
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Registration failed: $e'),
+            content: Text(errorMessage),
             backgroundColor: ShieldColors.urgentRed,
           ),
         );

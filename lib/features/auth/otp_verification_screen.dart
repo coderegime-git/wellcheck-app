@@ -6,6 +6,9 @@ import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/data/auth_repository.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
 import 'package:well_check_v3/core/navigation/shield_router.dart';
+import 'package:well_check_v3/features/auth/login_screen.dart';
+
+import '../safety/services/pulse_service.dart';
 
 class OTPVerificationScreen extends ConsumerStatefulWidget {
   final String email;
@@ -20,6 +23,7 @@ class OTPVerificationScreen extends ConsumerStatefulWidget {
 class _OTPVerificationScreenState extends ConsumerState<OTPVerificationScreen> {
   final _pinController = TextEditingController();
   bool _isLoading = false;
+  final focusNode = FocusNode();
 
   Future<void> _handleVerify() async {
     final pin = _pinController.text.trim();
@@ -53,10 +57,12 @@ class _OTPVerificationScreenState extends ConsumerState<OTPVerificationScreen> {
               orElse: () => ShieldRole.none,
             );
             ref.read(userRoleProvider.notifier).setRole(matchedRole);
-            FocusScope.of(context).unfocus();
+            focusNode.unfocus();
+            //  await  PulseService().broadcastPulse(null);
+
             context.go('/dashboard');
           } else {
-            FocusScope.of(context).unfocus();
+            focusNode.unfocus();
 
             // New user without a profile, needs to setup
             context.go('/role-selection');
@@ -64,6 +70,7 @@ class _OTPVerificationScreenState extends ConsumerState<OTPVerificationScreen> {
         } catch (e) {
           // Fallback if network fails
           if (!mounted) return;
+          focusNode.unfocus();
           context.go('/role-selection');
         }
       }
@@ -72,7 +79,7 @@ class _OTPVerificationScreenState extends ConsumerState<OTPVerificationScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Verification failed: $e'),
+            content: Text('Verification failed: ${e.toReadableMessage()}'),
             backgroundColor: ShieldColors.urgentRed,
           ),
         );
@@ -105,6 +112,7 @@ class _OTPVerificationScreenState extends ConsumerState<OTPVerificationScreen> {
             ),
             const SizedBox(height: 32),
             TextField(
+              focusNode: focusNode,
               controller: _pinController,
               decoration: const InputDecoration(
                 labelText: '8-DIGIT PIN',

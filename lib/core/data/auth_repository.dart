@@ -39,7 +39,6 @@ class AuthRepository {
     );
   }
 
-  // Create a new family shield (Initial Leader setup)
   Future<void> createFamilyWithRole(
     String familyName,
     String roleString,

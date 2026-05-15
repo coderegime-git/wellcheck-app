@@ -18,6 +18,8 @@ import 'package:well_check_v3/core/data/user_profile_provider.dart';
 import 'package:well_check_v3/core/notifications/global_notification_wrapper.dart';
 import 'package:well_check_v3/features/safety/services/pulse_service.dart';
 
+import 'core/notifications/checkin_service.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -44,20 +46,19 @@ Future<void> main() async {
 
   // Initialize Firebase (gracefully degrade if not configured)
   //if (Platform.isAndroid) {
-    try {
-      await Firebase.initializeApp();
-      debugPrint('[Firebase] Initialized successfully.');
-      // Initialize Push Notifications (only if Firebase succeeded)
-      await PushNotificationService.initialize();
-    } catch (e) {
-      debugPrint(
-        '[Firebase] Not initialized: $e — push notifications disabled.',
-      );
-    }
- // }
+  try {
+    await Firebase.initializeApp();
+    debugPrint('[Firebase] Initialized successfully.');
+    // Initialize Push Notifications (only if Firebase succeeded)
+    await PushNotificationService.initialize();
+  } catch (e) {
+    debugPrint('[Firebase] Not initialized: $e — push notifications disabled.');
+  }
+  // }
 
   // Initialize Medication Notifications
   await MedicationNotificationService.initialize();
+  await CheckinNotificationService.initialize();
 
   // Initialize Background Safety Pulse
   if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
@@ -112,6 +113,8 @@ class _WellCheckAppState extends ConsumerState<WellCheckApp> {
           orElse: () => ShieldRole.none,
         );
         ref.read(userRoleProvider.notifier).setRole(matchedRole);
+        await PulseService().broadcastPulse(null);
+
         ref.read(shieldRouterProvider).go('/dashboard');
       } else {
         ref.read(shieldRouterProvider).go('/role-selection');

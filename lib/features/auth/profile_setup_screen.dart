@@ -20,6 +20,8 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   final _nameController = TextEditingController();
   final _ageController = TextEditingController();
   bool _isLoading = false;
+  final profileNode = FocusNode();
+  final ageNode = FocusNode();
 
   Future<void> _saveProfile() async {
     final name = _nameController.text.trim();
@@ -36,6 +38,8 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     setState(() => _isLoading = true);
 
     try {
+      profileNode.unfocus();
+      ageNode.unfocus();
       final supabase = Supabase.instance.client;
       final userId = supabase.auth.currentUser?.id;
 
@@ -58,7 +62,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       try {
         LocationPermission perm = await Geolocator.requestPermission();
         if (perm == LocationPermission.whileInUse) {
-           await Geolocator.requestPermission();
+          await Geolocator.requestPermission();
         }
         debugPrint('[ProfileSetup] Location permissions requested');
       } catch (e) {
@@ -91,6 +95,8 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       } catch (e) {
         debugPrint('[ProfileSetup] Medication scheduling failed: $e');
       }
+      profileNode.unfocus();
+      ageNode.unfocus();
 
       if (mounted) {
         context.go('/dashboard');
@@ -145,6 +151,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
               ),
               const SizedBox(height: 48),
               TextField(
+                focusNode: profileNode,
                 controller: _nameController,
                 decoration: InputDecoration(
                   labelText: 'Full Name',
@@ -155,6 +162,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
               ),
               const SizedBox(height: 24),
               TextField(
+                focusNode: ageNode,
                 controller: _ageController,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(

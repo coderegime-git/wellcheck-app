@@ -119,7 +119,11 @@ GoRouter shieldRouter(Ref ref) {
       ),
       GoRoute(
         path: '/safe-zone-config',
-        builder: (context, state) => const SafeZoneConfigScreen(),
+        builder: (context, state) {
+          final isEdit = state.extra as bool? ?? false;
+
+          return SafeZoneConfigScreen(fromLeader: isEdit);
+        },
       ),
       GoRoute(
         path: '/sync-calendar',
@@ -127,7 +131,8 @@ GoRouter shieldRouter(Ref ref) {
       ),
       GoRoute(
         path: '/add-safe-zone',
-        builder: (context, state) => const SafeZoneScreen(),
+        builder: (context, state) =>
+            SafeZoneScreen(existingZone: state.extra as Map<String, dynamic>?),
       ),
       GoRoute(
         path: '/dashboard',

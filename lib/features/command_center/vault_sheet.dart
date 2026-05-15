@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -11,7 +12,13 @@ import 'package:path_provider/path_provider.dart';
 
 class VaultSheet extends ConsumerStatefulWidget {
   final bool isMedical;
-  const VaultSheet({super.key, this.isMedical = false});
+  final bool fromLeader;
+
+  const VaultSheet({
+    super.key,
+    this.isMedical = false,
+    this.fromLeader = false,
+  });
 
   @override
   ConsumerState<VaultSheet> createState() => _VaultSheetState();
@@ -42,12 +49,23 @@ class _VaultSheetState extends ConsumerState<VaultSheet> {
     try {
       final profile = await ref.read(currentUserProfileProvider.future);
       if (profile == null) return;
-
+      int batteryLevel =
+          100; // Safe default for simulators and aggressive background iOS policies
+      try {
+        final battery = Battery();
+        batteryLevel = await battery.batteryLevel;
+      } catch (e) {
+        debugPrint(
+          'Battery info not available over isolate, using default: $e',
+        );
+      }
       await Supabase.instance.client.from('well_events').insert({
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'event_type': 'status_update',
         'title': 'Secure Vault Accessed',
+        'battery_level': batteryLevel,
+
         'description':
             '${profile.fullName ?? 'User'} opened the ${widget.isMedical ? 'Medical' : 'Family'} Vault.',
       });
@@ -66,7 +84,9 @@ class _VaultSheetState extends ConsumerState<VaultSheet> {
 
       if (mounted) {
         setState(() {
-          _vaultFiles = files.where((f) => f.name != '.emptyFolderPlaceholder').toList();
+          _vaultFiles = files
+              .where((f) => f.name != '.emptyFolderPlaceholder')
+              .toList();
         });
       }
     } on StorageException catch (e) {
@@ -108,11 +128,14 @@ class _VaultSheetState extends ConsumerState<VaultSheet> {
       final path = '${profile.familyId}/$encryptedFileName';
 
       // Upload encrypted bytes
-      final encryptedBytes = Uint8List.fromList(
-        [...encrypted.iv.codeUnits, ...encrypted.cipherText.codeUnits],
-      );
+      final encryptedBytes = Uint8List.fromList([
+        ...encrypted.iv.codeUnits,
+        ...encrypted.cipherText.codeUnits,
+      ]);
 
-      await Supabase.instance.client.storage.from(_bucketName).uploadBinary(
+      await Supabase.instance.client.storage
+          .from(_bucketName)
+          .uploadBinary(
             path,
             encryptedBytes,
             fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
@@ -138,7 +161,9 @@ class _VaultSheetState extends ConsumerState<VaultSheet> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Storage error: ${se.message} (Is bucket "$_bucketName" configured?)'),
+            content: Text(
+              'Storage error: ${se.message} (Is bucket "$_bucketName" configured?)',
+            ),
             backgroundColor: Colors.orange,
             duration: const Duration(seconds: 4),
           ),
@@ -175,7 +200,9 @@ class _VaultSheetState extends ConsumerState<VaultSheet> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Downloaded encrypted file: $fileName (${encryptedBytes.length} bytes)'),
+              content: Text(
+                'Downloaded encrypted file: $fileName (${encryptedBytes.length} bytes)',
+              ),
               backgroundColor: ShieldColors.activeTeal,
             ),
           );
@@ -198,7 +225,10 @@ class _VaultSheetState extends ConsumerState<VaultSheet> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Download failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Download failed: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -248,9 +278,8 @@ class _VaultSheetState extends ConsumerState<VaultSheet> {
                         const SizedBox(width: 8),
                         Text(
                           widget.isMedical ? 'Medical Vault' : 'Family Vault',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -267,25 +296,27 @@ class _VaultSheetState extends ConsumerState<VaultSheet> {
                   ],
                 ),
               ),
-              _isLoading
-                  ? const Padding(
-                      padding: EdgeInsets.all(8),
-                      child: SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+              if (widget.fromLeader == true)
+                _isLoading
+                    ? const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : IconButton(
+                        icon: Icon(
+                          Icons.upload_file,
+                          color: widget.isMedical
+                              ? ShieldColors.alertRed
+                              : ShieldColors.activeTeal,
+                          size: 28,
+                        ),
+                        onPressed: _uploadDocument,
                       ),
-                    )
-                  : IconButton(
-                      icon: Icon(
-                        Icons.upload_file,
-                        color: widget.isMedical
-                            ? ShieldColors.alertRed
-                            : ShieldColors.activeTeal,
-                        size: 28,
-                      ),
-                      onPressed: _uploadDocument,
-                    ),GestureDetector(
+              GestureDetector(
                 onTap: () async {
                   Navigator.of(context).pop();
                 },
@@ -328,13 +359,14 @@ class _VaultSheetState extends ConsumerState<VaultSheet> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          'Tap the upload icon to add encrypted files',
-                          style: TextStyle(
-                            color: Colors.grey.shade400,
-                            fontSize: 12,
+                        if (widget.fromLeader == true)
+                          Text(
+                            'Tap the upload icon to add encrypted files',
+                            style: TextStyle(
+                              color: Colors.grey.shade400,
+                              fontSize: 12,
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   )
@@ -379,8 +411,9 @@ class _VaultSheetState extends ConsumerState<VaultSheet> {
                                     vertical: 2,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: ShieldColors.activeTeal
-                                        .withValues(alpha: 0.1),
+                                    color: ShieldColors.activeTeal.withValues(
+                                      alpha: 0.1,
+                                    ),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: const Row(

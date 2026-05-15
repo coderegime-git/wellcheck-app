@@ -64,6 +64,7 @@ class PulseService {
   // Send a pulse broadcast directly
   Future<void> broadcastPulse(String? fallbackUserId) async {
     try {
+      debugPrint('heartbeatheartbeatheartbeat');
       final prefs = await SharedPreferences.getInstance();
       final familyId = prefs.getString('last_family_id');
       final persistentUserId = prefs.getString('last_user_id');
@@ -165,11 +166,15 @@ class PulseService {
             longitude: lng ?? 0.0,
             altitude: altitude,
           );
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('Failed sync failed in background: $e');
+
+        }
       }
 
       // 2. Biometric Sync (Physiological Awareness)
       try {
+        print("syncVitals");
         await healthRepo.syncVitals(
           userId: effectiveUserId,
           familyId: familyId,

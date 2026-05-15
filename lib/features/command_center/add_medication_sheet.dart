@@ -52,12 +52,9 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
     super.initState();
     _fetchFamilyMembers();
     final med = widget.existingMedication;
-    print("medmed");
     if (med != null) {
       _nameController.text = med.medicationName;
       _selectedUserId = med.assignedTo;
-      print(_selectedUserId);
-      print("ddsd");
       _dosageController.text = med.dosage;
       _instructionsController.text = med.instructions ?? '';
       _doctorController.text = med.doctor ?? '';
@@ -188,6 +185,55 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
     }
   }
 
+  DateTime _calculateFirstScheduleDate(
+    DateTime startDate,
+    TimeOfDay time,
+    String recurrence,
+    List<int> selectedDays,
+  ) {
+    var date = DateTime(
+      startDate.year,
+      startDate.month,
+      startDate.day,
+      time.hour,
+      time.minute,
+    );
+
+    switch (recurrence) {
+      case 'weekly':
+        if (selectedDays.isNotEmpty) {
+          final currentDay = date.weekday % 7; // Sunday=0
+
+          int? nextDay;
+
+          for (final d in selectedDays) {
+            if (d >= currentDay) {
+              nextDay = d;
+              break;
+            }
+          }
+
+          nextDay ??= selectedDays.first + 7;
+
+          final diff = nextDay - currentDay;
+
+          date = date.add(Duration(days: diff));
+        }
+        break;
+
+      case 'every_other_day':
+        break;
+
+      case 'daily':
+        break;
+
+      case 'monthly':
+        break;
+    }
+
+    return date;
+  }
+
   Future<void> _saveMedication() async {
     if (!_formKey.currentState!.validate() || _selectedUserId == null) {
       if (_selectedUserId == null) {
@@ -210,10 +256,38 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
     try {
       final profile = await ref.read(currentUserProfileProvider.future);
       if (profile == null) throw Exception('No profile found');
-      print("_selectedUserId");
-      print(_selectedUserId);
+      debugPrint("_selectedUserId");
+      debugPrint(_selectedUserId);
       final timeStrings = _scheduleTimes.map(_formatTime).toList();
+      DateTime? utcDateTime;
+      print("nnnn");
+      if (_recurrence != 'as_needed' && _scheduleTimes.isNotEmpty) {
+        final firstTime = _scheduleTimes.first;
 
+        final nextDate = _calculateFirstScheduleDate(
+          _startDate,
+          firstTime,
+          _recurrence,
+          _selectedDays,
+        );
+
+        // utcDateTime = DateTime.utc(
+        //   nextDate.year,
+        //   nextDate.month,
+        //   nextDate.day,
+        //   nextDate.hour,
+        //   nextDate.minute,
+        // );
+        print("utcDateTime");
+        print(utcDateTime);
+        utcDateTime = nextDate.toUtc();
+
+        print("Local:");
+        print(nextDate);
+
+        print("UTC:");
+        print(utcDateTime);
+      }
       // Build frequency string for backward compatibility
       final freqLabel = _recurrenceOptions
           .firstWhere(
@@ -251,33 +325,56 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
               'recurrence': _recurrence,
               'days_of_week': _selectedDays,
               'is_active': true,
+              'scheduled_at': utcDateTime?.toIso8601String(),
+              'reminder_sent': false,
             })
             .eq('id', widget.existingMedication!.id);
+        // final response = await Supabase.instance.client.functions.invoke(
+        //   'medication-reminder-cron',
+        //   body: {"medication_id": widget.existingMedication!.id},
+        // );
+        //
+        // debugPrint("[Medication] response:");
+        // debugPrint(response.data.toString());
       } else {
-        await Supabase.instance.client.from('medications').insert({
-          'family_id': profile.familyId,
-          'assigned_to': _selectedUserId,
-          'medication_name': _nameController.text.trim(),
-          'dosage': _dosageController.text.trim(),
-          'frequency': freqStr,
-          'instructions': _instructionsController.text.trim().isEmpty
-              ? null
-              : _instructionsController.text.trim(),
-          'doctor': _doctorController.text.trim().isEmpty
-              ? null
-              : _doctorController.text.trim(),
-          'schedule_times': timeStrings,
-          'start_date': DateFormat('yyyy-MM-dd').format(_startDate),
-          'end_date': _isOngoing
-              ? null
-              : (_endDate != null
-                    ? DateFormat('yyyy-MM-dd').format(_endDate!)
-                    : null),
-          'recurrence': _recurrence,
-          'days_of_week': _selectedDays,
-          'is_active': true,
-        });
+        final medication = await Supabase.instance.client
+            .from('medications')
+            .insert({
+              'family_id': profile.familyId,
+              'assigned_to': _selectedUserId,
+              'medication_name': _nameController.text.trim(),
+              'dosage': _dosageController.text.trim(),
+              'frequency': freqStr,
+              'instructions': _instructionsController.text.trim().isEmpty
+                  ? null
+                  : _instructionsController.text.trim(),
+              'doctor': _doctorController.text.trim().isEmpty
+                  ? null
+                  : _doctorController.text.trim(),
+              'schedule_times': timeStrings,
+              'start_date': DateFormat('yyyy-MM-dd').format(_startDate),
+              'end_date': _isOngoing
+                  ? null
+                  : (_endDate != null
+                        ? DateFormat('yyyy-MM-dd').format(_endDate!)
+                        : null),
+              'recurrence': _recurrence,
+              'days_of_week': _selectedDays,
+              'is_active': true,
+              'scheduled_at': utcDateTime?.toIso8601String(),
+              'reminder_sent': false,
+            })
+            .select()
+            .single();
+        // final response = await Supabase.instance.client.functions.invoke(
+        //   'medication-reminder-cron',
+        //   body: {"medication_id": medication['id']},
+        // );
+        //
+        // debugPrint("[Medication] response:");
+        // debugPrint(response.data.toString());
       }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(

@@ -64,12 +64,15 @@ class CalendarSheet extends ConsumerWidget {
                   color: ShieldColors.activeTeal,
                   size: 32,
                 ),
-                onPressed: () {
-                  showModalBottomSheet(
+                onPressed: () async {
+                  await showModalBottomSheet(
                     context: context,
                     isScrollControlled: true,
                     backgroundColor: Colors.transparent,
                     builder: (context) => const AddEventSheet(),
+                  );
+                  final eventsAsync = ref.invalidate(
+                    familyCalendarEventsProvider,
                   );
                 },
               ),

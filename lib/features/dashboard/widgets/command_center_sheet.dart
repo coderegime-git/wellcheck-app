@@ -14,15 +14,15 @@ import 'package:well_check_v3/features/messaging/family_chat_screen.dart';
 import 'package:well_check_v3/features/profile/profile_settings_view.dart';
 
 class CommandCenterSheet extends StatefulWidget {
-  const CommandCenterSheet({super.key});
+  bool? fromLeader = false;
+
+  CommandCenterSheet({super.key, this.fromLeader = false});
 
   @override
   State<CommandCenterSheet> createState() => _CommandCenterSheetState();
 }
 
 class _CommandCenterSheetState extends State<CommandCenterSheet> {
-
-
   @override
   Widget build(BuildContext context) {
     final items = [
@@ -31,7 +31,11 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         'Medications',
         'View your meds',
         ShieldColors.activeTeal,
-        () => _pushSheet(context, const MedicationsSheet(), true),
+        () => _pushSheet(
+          context,
+          MedicationsSheet(fromLeader: widget.fromLeader),
+          true,
+        ),
       ),
       _CmdItem(
         Icons.calendar_month,
@@ -49,8 +53,17 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         'Daily check-in',
 
         ShieldColors.safeZoneGreen,
-        () => _pushSheet(context, const CheckInSheet(), false),
+        () => _pushSheet(context, const CheckInSheet(), true),
       ),
+      if (widget.fromLeader == true)
+        _CmdItem(
+          Icons.how_to_reg,
+          'Schedule Check-in',
+          'Assign check-in',
+
+          ShieldColors.safeZoneGreen,
+          () => _pushSheet(context, const ScheduleCheckInSheet(), true),
+        ),
       _CmdItem(
         Icons.contacts,
         'Contacts',
@@ -67,7 +80,7 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         const Color(0xFFE6894E),
         () {
           context.pop();
-          context.push('/safe-zone-config');
+          context.push('/safe-zone-config', extra: widget.fromLeader);
         },
       ),
       _CmdItem(
@@ -84,7 +97,11 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         'Health records',
 
         const Color(0xFF9B59B6),
-        () => _pushSheet(context, const VaultSheet(isMedical: true), true),
+        () => _pushSheet(
+          context,
+          VaultSheet(isMedical: true, fromLeader: widget.fromLeader ?? false),
+          true,
+        ),
       ),
       _CmdItem(
         Icons.lock,
@@ -92,7 +109,11 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         'Secure storage',
 
         const Color(0xFF2C3E50),
-        () => _pushSheet(context, const VaultSheet(isMedical: false), true),
+        () => _pushSheet(
+          context,
+          VaultSheet(isMedical: false, fromLeader: widget.fromLeader ?? false),
+          true,
+        ),
       ),
       _CmdItem(
         Icons.drive_eta,
@@ -107,7 +128,11 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         'Campus Watch',
         'School updates',
         const Color(0xFF1ABC9C),
-        () => _pushSheet(context, const CampusWatchSheet(), true),
+        () => _pushSheet(
+          context,
+          CampusWatchSheet(fromLeader: widget.fromLeader ?? false),
+          true,
+        ),
       ),
       _CmdItem(
         Icons.chat_bubble_outlined,
@@ -115,9 +140,12 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         'Stay connected',
         const Color(0xFF3498DB),
         () {
-      Navigator.push(context, MaterialPageRoute(builder: (context)=>FamilyChatScreen()));
-    }
-    //_pushSheet(context, const FamilyChatScreen(), true),
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => FamilyChatScreen()),
+          );
+        },
+        //_pushSheet(context, const FamilyChatScreen(), true),
       ),
       _CmdItem(
         Icons.person_add,
@@ -207,6 +235,7 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
       ),
     );
   }
+
   void _pushSheet(BuildContext ctx, Widget sheet, bool isScrollable) {
     Navigator.of(ctx).pop(); // still close command center
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -216,9 +245,9 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         isScrollControlled: isScrollable,
         backgroundColor: Colors.transparent,
         builder: (context) => StatefulBuilder(
-          builder: (context,setState) {
+          builder: (context, setState) {
             return sheet;
-          }
+          },
         ),
       );
 

@@ -1,3 +1,6 @@
+import 'package:battery_plus/battery_plus.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:intl/intl.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -23,8 +26,6 @@ class SafetyRepository {
         .select('full_name')
         .eq('id', userId)
         .single();
-    print("verification_source");
-    print("verification_source");
     final fullName = profileRes['full_name'];
     await _supabase.from('well_events').insert({
       'user_id': userId,
@@ -36,6 +37,52 @@ class SafetyRepository {
       'battery_level': batteryLevel,
       'verification_source': 'app_foreground', // or 'background_service'
     });
+    final members = await Supabase.instance.client
+        .from('family_members')
+        .select('user_id')
+        .eq('family_id', familyId);
+    if (type == 'check_in') {
+      for (final m in members) {
+        final targetUserId = m['user_id'];
+
+        if (targetUserId == userId) continue;
+
+        try {
+          await Supabase.instance.client.functions.invoke(
+            'push-router',
+            body: {
+              "target_user_id": targetUserId,
+              "title": "Check-In",
+              "body": "${fullName ?? 'Someone'}: Checked in just now",
+              "action": "check_in",
+            },
+          );
+        } catch (e) {
+          print("Push failed: $e");
+        }
+      }
+    }
+    // if (type == 'safe_zone_enter') {
+    //   for (final m in members) {
+    //     final targetUserId = m['user_id'];
+    //
+    //     if (targetUserId == userId) continue;
+    //
+    //     try {
+    //       await Supabase.instance.client.functions.invoke(
+    //         'push-router',
+    //         body: {
+    //           "target_user_id": targetUserId,
+    //           "title": "Safe zone entered",
+    //           "body": "${fullName ?? 'Someone'}: Enter safe zone",
+    //           "action": "check_in",
+    //         },
+    //       );
+    //     } catch (e) {
+    //       print("Push failed: $e");
+    //     }
+    //   }
+    // }
   }
 
   // Trigger highest-level alarm state
@@ -43,7 +90,14 @@ class SafetyRepository {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null)
       throw Exception('User not logged in — cannot trigger SOS');
-
+    int batteryLevel =
+        100; // Safe default for simulators and aggressive background iOS policies
+    try {
+      final battery = Battery();
+      batteryLevel = await battery.batteryLevel;
+    } catch (e) {
+      debugPrint('Battery info not available over isolate, using default: $e');
+    }
     await _supabase.from('well_events').insert({
       'user_id': userId,
       'family_id': familyId,
@@ -51,6 +105,7 @@ class SafetyRepository {
       'title': '🚨 Emergency SOS',
       'description': reason,
       'metadata': {'reason': reason, 'status': 'active'},
+      'battery_level': batteryLevel,
     });
   }
 
@@ -238,8 +293,37 @@ class SafetyRepository {
       return null;
     }
   }
+
+  Stream<List<Map<String, dynamic>>> streamMyCheckinSchedules(String userId) {
+    return Supabase.instance.client
+        .from('checkin_schedules')
+        .stream(primaryKey: ['id'])
+        .eq('assigned_user_id', userId)
+        .map(
+          (data) => data.where((e) {
+            return e['is_completed'] != true;
+          }).toList(),
+        );
+  }
+
+  Stream<List<Map<String, dynamic>>> streamLeaderSchedules(String familyId) {
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    return Supabase.instance.client
+        .from('checkin_schedules')
+        .stream(primaryKey: ['id'])
+        .map((data) {
+          return data.where((e) {
+            return e['family_id'] == familyId &&
+                e['checkin_date'] == today &&
+                e['is_active'] == true &&
+                e['is_completed'] != true;
+          }).toList();
+        });
+  }
 }
 
+//
 @riverpod
 SafetyRepository safetyRepository(Ref ref) {
   return SafetyRepository(Supabase.instance.client);

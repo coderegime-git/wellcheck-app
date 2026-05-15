@@ -16,7 +16,7 @@ class JoinWithCodeScreen extends ConsumerStatefulWidget {
 class _JoinWithCodeScreenState extends ConsumerState<JoinWithCodeScreen> {
   final _codeController = TextEditingController();
   bool _isLoading = false;
-
+final focusNode = FocusNode();
   Future<void> _handleJoin() async {
     final code = _codeController.text.trim();
     if (code.length != 6) {
@@ -64,7 +64,7 @@ class _JoinWithCodeScreenState extends ConsumerState<JoinWithCodeScreen> {
             assignedRole = ShieldRole.pet;
             break;
         }
-
+        focusNode.unfocus();
         ref.read(userRoleProvider.notifier).setRole(assignedRole);
         context.go('/profile-setup');
       } else {
@@ -82,6 +82,8 @@ class _JoinWithCodeScreenState extends ConsumerState<JoinWithCodeScreen> {
       }
     } finally {
       if (mounted) {
+        focusNode.unfocus();
+
         setState(() => _isLoading = false);
       }
     }
@@ -128,6 +130,7 @@ class _JoinWithCodeScreenState extends ConsumerState<JoinWithCodeScreen> {
                 ),
                 const SizedBox(height: 48),
                 TextField(
+                  focusNode: focusNode,
                   controller: _codeController,
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,

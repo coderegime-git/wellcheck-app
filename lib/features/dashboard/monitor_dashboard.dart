@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
 import 'package:well_check_v3/core/data/safety_repository.dart';
@@ -14,6 +17,7 @@ import 'package:well_check_v3/features/dashboard/widgets/ai_wellness_card.dart';
 import 'package:well_check_v3/features/profile/profile_settings_view.dart';
 import 'package:well_check_v3/features/dashboard/widgets/pending_actions_card.dart';
 
+import '../../core/data/medication_provider.dart';
 import '../../core/notifications/push_notification_service.dart';
 
 class MonitorDashboard extends ConsumerStatefulWidget {
@@ -27,22 +31,37 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
   bool _sosCountdownActive = false;
   int _sosCountdown = 5;
   Timer? _sosTimer;
-@override
+  Timer? _medicationTimer;
+  bool isLoad = false;
+
+  @override
   void initState() {
-  initializeFCM();
+    initializeFCM();
     super.initState();
   }
-  void initializeFCM()async{
-    await PushNotificationService.initialize();
 
+  void initializeFCM() async {
+    // _medicationTimer = Timer.periodic(
+    //   const Duration(seconds: 1),
+    //       (_) {
+    //     if (mounted) {
+    //       setState(() {});
+    //     }
+    //   },
+    // );
+    await PushNotificationService.initialize();
   }
+
   @override
   void dispose() {
     _sosTimer?.cancel();
+    _medicationTimer?.cancel();
     super.dispose();
   }
 
   void _startSosCountdown() {
+    if (isLoad) return;
+
     if (_sosCountdownActive) {
       _sosTimer?.cancel();
       setState(() {
@@ -53,6 +72,7 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
     }
 
     setState(() {
+      isLoad = true;
       _sosCountdownActive = true;
       _sosCountdown = 5;
     });
@@ -70,6 +90,8 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
             );
             if (mounted) {
               setState(() {
+                isLoad = false;
+
                 _sosCountdownActive = false;
                 _sosCountdown = 5;
               });
@@ -89,12 +111,14 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
           await ref
               .read(safetyRepositoryProvider)
               .triggerSiren(
-                profile.familyId,
-                'Monitor initiated an emergency state',
-              );
+            profile.familyId,
+            '${profile.fullName}- Monitor initiated an emergency state',
+          );
 
           if (mounted) {
             setState(() {
+              isLoad = false;
+
               _sosCountdownActive = false;
               _sosCountdown = 5;
             });
@@ -105,11 +129,37 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                 duration: Duration(seconds: 5),
               ),
             );
+            final members = await Supabase.instance.client
+                .from('family_members')
+                .select('user_id')
+                .eq('family_id', profile.familyId);
+
+            for (final m in members) {
+              final targetUserId = m['user_id'];
+
+              if (targetUserId == profile.userId) continue;
+
+              try {
+                await Supabase.instance.client.functions.invoke(
+                  'push-router',
+                  body: {
+                    "target_user_id": targetUserId,
+                    "title": "Emergency Alert",
+                    "body": "${profile.fullName} triggered an emergency alert",
+                    "action": "emergency",
+                  },
+                );
+              } catch (e) {
+                debugPrint("Push failed: $e");
+              }
+            }
           }
         } catch (e) {
           debugPrint('[SOS] triggerSiren failed: $e');
           if (mounted) {
             setState(() {
+              isLoad = false;
+
               _sosCountdownActive = false;
               _sosCountdown = 5;
             });
@@ -131,9 +181,10 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
   @override
   Widget build(BuildContext context) {
     final profileAsync = ref.watch(currentUserProfileProvider);
+    final medicationsAsync = ref.watch(familyMedicationsProvider);
 
     return Scaffold(
-      backgroundColor: ShieldColors.activeTeal,
+      backgroundColor: isLoad ? Colors.white : ShieldColors.activeTeal,
       // appBar: AppBar(
       //   backgroundColor: Colors.white,
       //   elevation: 0,
@@ -213,7 +264,9 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
       //     ),
       //   ],
       // ),
-      body: SafeArea(
+      body: isLoad
+          ? Center(child: CircularProgressIndicator())
+          : SafeArea(
         child: profileAsync.when(
           data: (profile) {
             if (profile == null) {
@@ -224,43 +277,57 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
 
             return Column(
               children: [
-                SizedBox(height: 8,),
+                SizedBox(height: 8),
 
                 Container(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    Image.asset('assets/logo.png', height: 40, width: 40),
-                    SizedBox(width: 6),
-                    Text(
-                      "Well-Check",
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: ShieldColors.backgroundWhite,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    children: [
+                      Image.asset(
+                        'assets/logo.png',
+                        height: 40,
+                        width: 40,
                       ),
-                    ),
-                    Spacer(),
-                    Container(
+                      SizedBox(width: 6),
+                      Text(
+                        "Well-Check",
+                        style: Theme
+                            .of(context)
+                            .textTheme
+                            .headlineSmall
+                            ?.copyWith(
+                          color: ShieldColors.backgroundWhite,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      Spacer(),
+                      Container(
                         padding: EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.grey.shade200)
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.grey.shade200),
                         ),
-                        child:  GestureDetector(
-                            onTap: (){ showModalBottomSheet(
+                        child: GestureDetector(
+                          onTap: () {
+                            showModalBottomSheet(
                               context: context,
                               isScrollControlled: true,
                               backgroundColor: Colors.transparent,
                               builder: (_) => const ProfileSettingsView(),
-                            );},
-                            child: Icon(Icons.menu,color: Colors.white,size: 18,))
-                    )
-
-                  ],
+                            );
+                          },
+                          child: Icon(
+                            Icons.menu,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-                SizedBox(height: 18,),
+                SizedBox(height: 18),
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.grey.shade50,
@@ -283,10 +350,16 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                             profileAsync.when(
                               data: (profile) {
                                 final firstName =
-                                    profile?.fullName?.split(' ').first ?? 'Leader';
+                                    profile?.fullName
+                                        ?.split(' ')
+                                        .first ??
+                                        'Leader';
                                 return Text(
                                   'Welcome, $firstName.',
-                                  style: Theme.of(context).textTheme.titleMedium
+                                  style: Theme
+                                      .of(context)
+                                      .textTheme
+                                      .titleMedium
                                       ?.copyWith(
                                     fontWeight: FontWeight.bold,
                                     color: ShieldColors.textBody,
@@ -295,22 +368,30 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                   overflow: TextOverflow.ellipsis,
                                 );
                               },
-                              loading: () => Text(
-                                'Welcome back...',
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: ShieldColors.textBody,
-                                ),
-                              ),
-                              error: (e, st) => Text(
-                                'Welcome, Leader.',
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: ShieldColors.textBody,
-                                ),
-                              ),
+                              loading: () =>
+                                  Text(
+                                    'Welcome back...',
+                                    style: Theme
+                                        .of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      color: ShieldColors.textBody,
+                                    ),
+                                  ),
+                              error: (e, st) =>
+                                  Text(
+                                    'Welcome, Leader.',
+                                    style: Theme
+                                        .of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      color: ShieldColors.textBody,
+                                    ),
+                                  ),
                             ),
                             const SizedBox(height: 4),
                             Row(
@@ -323,7 +404,11 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                 const SizedBox(width: 4),
                                 Text(
                                   'MONITOR VIEW',
-                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  style: Theme
+                                      .of(context)
+                                      .textTheme
+                                      .labelSmall
+                                      ?.copyWith(
                                     color: const Color(0xFF6B4EE6),
                                     fontWeight: FontWeight.bold,
                                     letterSpacing: 1.2,
@@ -354,17 +439,20 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                         children: [
                           profileAsync.when(
                             data: (profile) {
-                              return profile != null && profile!.avatarUrl != null
+                              return profile != null &&
+                                  profile!.avatarUrl != null
                                   ? CircleAvatar(
                                 radius: 35,
-                                backgroundColor: ShieldColors.activeTeal,
+                                backgroundColor:
+                                ShieldColors.activeTeal,
 
                                 backgroundImage: NetworkImage(
                                   profile!.avatarUrl ?? "",
                                 ),
                               )
                                   : CircleAvatar(
-                                backgroundColor: ShieldColors.activeTeal,
+                                backgroundColor:
+                                ShieldColors.activeTeal,
 
                                 radius: 35,
                                 child: Icon(
@@ -388,7 +476,9 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                               borderRadius: ShieldDesign.roundedTwelve,
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.05),
+                                  color: Colors.black.withValues(
+                                    alpha: 0.05,
+                                  ),
                                   blurRadius: 10,
                                   offset: const Offset(0, 4),
                                 ),
@@ -404,7 +494,9 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                               ),
                               onTap: () {},
                             )
-                                : StreamBuilder<List<Map<String, dynamic>>>(
+                                : StreamBuilder<
+                                List<Map<String, dynamic>>
+                            >(
                               stream: ref
                                   .watch(safetyRepositoryProvider)
                                   .streamFamilyEvents(
@@ -417,7 +509,10 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                     e['created_at'] ?? '',
                                   );
                                   return dt != null &&
-                                      DateTime.now().difference(dt).inHours <
+                                      DateTime
+                                          .now()
+                                          .difference(dt)
+                                          .inHours <
                                           24;
                                 });
                                 return Stack(
@@ -428,16 +523,19 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                         size: 20,
 
                                         Icons.notifications_none,
-                                        color: ShieldColors.textBody,
+                                        color:
+                                        ShieldColors.textBody,
                                       ),
                                       onTap: () {
                                         showModalBottomSheet(
                                           context: context,
                                           isScrollControlled: true,
-                                          backgroundColor: Colors.transparent,
+                                          backgroundColor:
+                                          Colors.transparent,
                                           builder: (ctx) =>
                                               _MonitorNotificationsSheet(
-                                                familyId: profileAsync
+                                                familyId:
+                                                profileAsync
                                                     .value!
                                                     .familyId,
                                                 safetyRepo: ref.read(
@@ -454,9 +552,12 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                         child: Container(
                                           width: 6,
                                           height: 6,
-                                          decoration: const BoxDecoration(
-                                            color: ShieldColors.urgentRed,
-                                            shape: BoxShape.circle,
+                                          decoration:
+                                          const BoxDecoration(
+                                            color: ShieldColors
+                                                .urgentRed,
+                                            shape:
+                                            BoxShape.circle,
                                           ),
                                         ),
                                       ),
@@ -471,116 +572,639 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                   ),
                 ),
                 Expanded(
-                  child: SingleChildScrollView(
-                    child: Container(
-                      decoration: BoxDecoration(color: Colors.grey.shade50),
-                      padding: const EdgeInsets.all(24.0),
+                  child: RefreshIndicator(
+                    onRefresh: () async {
+                      final safety = ref.invalidate(
+                        safetyRepositoryProvider,
+                      );
+                      ref.invalidate(familyMedicationsProvider);
+                    },
+                    child: SingleChildScrollView(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                        ),
+                        padding: const EdgeInsets.all(24.0),
 
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Alert Banner Stream
-                          StreamBuilder<List<Map<String, dynamic>>>(
-                            stream: safetyRepo.streamFamilyEvents(profile.familyId),
-                            builder: (context, snapshot) {
-                              final events = snapshot.data ?? [];
-                              final recentSos = events
-                                  .where((e) => e['event_type'] == 'sos')
-                                  .toList();
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Alert Banner Stream
+                            StreamBuilder<List<Map<String, dynamic>>>(
+                              stream: safetyRepo.streamFamilyEvents(
+                                profile.familyId,
+                              ),
+                              builder: (context, snapshot) {
+                                final events = snapshot.data ?? [];
+                                final recentSos = events
+                                    .where(
+                                      (e) => e['event_type'] == 'sos',
+                                )
+                                    .toList();
 
-                              if (recentSos.isEmpty) return const SizedBox.shrink();
+                                if (recentSos.isEmpty)
+                                  return const SizedBox.shrink();
 
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 32),
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: ShieldColors.urgentRed.withValues(alpha: 0.1),
-                                  borderRadius: ShieldDesign.roundedTwelve,
-                                  border: Border.all(
-                                    color: ShieldColors.urgentRed.withValues(
-                                      alpha: 0.3,
+                                return Container(
+                                  margin: const EdgeInsets.only(
+                                    bottom: 32,
+                                  ),
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: ShieldColors.urgentRed
+                                        .withValues(alpha: 0.1),
+                                    borderRadius:
+                                    ShieldDesign.roundedTwelve,
+                                    border: Border.all(
+                                      color: ShieldColors.urgentRed
+                                          .withValues(alpha: 0.3),
                                     ),
                                   ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.notifications_active_outlined,
-                                      color: ShieldColors.urgentRed,
-                                      size: 20,
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Text(
-                                        'ACTIVE ALERT: Immediate Attention Required',
-                                        style: Theme.of(context).textTheme.bodyMedium
-                                            ?.copyWith(
-                                              color: ShieldColors.urgentRed,
-                                              fontWeight: FontWeight.bold,
-                                            ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons
+                                            .notifications_active_outlined,
+                                        color: ShieldColors.urgentRed,
+                                        size: 20,
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-
-                          const PendingActionsCard(),
-
-                          Text(
-                            'SHIELD MEMBERS - TACTICAL VIEW',
-                            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                              color: ShieldColors.textLabel,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.2,
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Text(
+                                          'ACTIVE ALERT: Immediate Attention Required',
+                                          style: Theme
+                                              .of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                            color: ShieldColors
+                                                .urgentRed,
+                                            fontWeight:
+                                            FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
                             ),
-                          ),
-                          const SizedBox(height: 16),
 
-                          // REAL Map with member pins
-                          StreamBuilder<List<Map<String, dynamic>>>(
-                            stream: safetyRepo.streamActiveMembers(profile.familyId),
-                            builder: (context, memberSnap) {
-                              final members = memberSnap.data ?? [];
-                              return _TacticalMap(
-                                members: members,
-                                safetyRepo: safetyRepo,
-                              );
-                            },
-                          ),
+                            const PendingActionsCard(),
 
-                          const SizedBox(height: 24),
+                            Text(
+                              'SHIELD MEMBERS - TACTICAL VIEW',
+                              style: Theme
+                                  .of(context)
+                                  .textTheme
+                                  .labelMedium
+                                  ?.copyWith(
+                                color: ShieldColors.textLabel,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
 
-                          // Live member cards from Realtime stream
-                          StreamBuilder<List<Map<String, dynamic>>>(
-                            stream: safetyRepo.streamActiveMembers(profile.familyId),
-                            builder: (context, memberSnapshot) {
-                              if (memberSnapshot.connectionState ==
-                                  ConnectionState.waiting) {
-                                return const Center(child: CircularProgressIndicator());
-                              }
+                            // REAL Map with member pins
+                            StreamBuilder<List<Map<String, dynamic>>>(
+                              stream: safetyRepo.streamActiveMembers(
+                                profile.familyId,
+                              ),
+                              builder: (context, memberSnap) {
+                                final members = memberSnap.data ?? [];
+                                return _TacticalMap(
+                                  members: members,
+                                  safetyRepo: safetyRepo,
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 14),
 
-                              final members = memberSnapshot.data ?? [];
-                              if (members.isEmpty) {
-                                return const Text('No members found.');
-                              }
+                            StreamBuilder<List<Map<String, dynamic>>>(
+                              stream: safetyRepo.streamLeaderSchedules(
+                                profile.familyId,
+                              ),
+                              builder: (context, snapshot) {
+                                final schedules = snapshot.data ?? [];
+                                print("schedules");
+                                print(schedules);
+                                if (schedules.isEmpty) {
+                                  return const SizedBox.shrink();
+                                }
 
-                              return Column(
-                                children: members.map((member) {
-                                  return _LiveMemberCard(
-                                    member: member,
-                                    safetyRepo: safetyRepo,
-                                    currentUserId: profile.userId,
+                                // Get next upcoming checkin
+                                DateTime? nextCheckin;
+                                Map<String, dynamic>? selectedSchedule;
+                                String assignedUser = '';
+                                for (final s in schedules) {
+                                  print(s);
+                                  print('checkin_time');
+                                  final time = s['checkin_time'];
+                                  final name = s['assigned_user_name'];
+
+                                  final next = _getNextCheckinTime(s);
+
+                                  if (next == null) continue;
+                                  if (nextCheckin == null ||
+                                      next.isBefore(nextCheckin)) {
+                                    nextCheckin = next;
+                                    selectedSchedule = s;
+                                    assignedUser = name;
+                                  }
+                                }
+
+                                if (nextCheckin == null ||
+                                    selectedSchedule == null) {
+                                  return const SizedBox.shrink();
+                                }
+
+                                final scheduleId = selectedSchedule['id'];
+                                final assignedUserId =
+                                selectedSchedule['assigned_user_id'];
+                                return _NextCheckinCard(
+                                  nextCheckin: nextCheckin,
+                                  profile: profileAsync.value,
+                                  scheduleId: scheduleId,
+                                  assignedUser: assignedUser,
+                                  assignedUserId: assignedUserId,
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 14),
+                            medicationsAsync.when(
+                              data: (medications) {
+                                final activeMeds = medications
+                                    .where((m) => m.isActive)
+                                    .toList();
+
+                                if (activeMeds.isEmpty) {
+                                  return const SizedBox.shrink();
+                                }
+
+                                return Container(
+                                  margin: const EdgeInsets.only(
+                                    bottom: 18,
+                                  ),
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(
+                                      20,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.04,
+                                        ),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'MEDICATION MONITOR',
+                                        style: Theme
+                                            .of(context)
+                                            .textTheme
+                                            .labelMedium
+                                            ?.copyWith(
+                                          color:
+                                          ShieldColors.textLabel,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 1.2,
+                                        ),
+                                      ),
+
+                                      const SizedBox(height: 14),
+
+                                      ...activeMeds.map((med) {
+                                        // final nextDose = med.nextDoseToday;
+                                        DateTime? nextDose;
+
+                                        if (med
+                                            .scheduleTimes
+                                            .isNotEmpty) {
+                                          final now = DateTime.now();
+
+                                          final upcomingDoses =
+                                          <DateTime>[];
+
+                                          final startDate =
+                                              med.startDate ?? now;
+
+                                          for (final time
+                                          in med.scheduleTimes) {
+                                            try {
+                                              final parts = time.split(
+                                                ':',
+                                              );
+
+                                              final hour = int.parse(
+                                                parts[0],
+                                              );
+                                              final minute = int.parse(
+                                                parts[1],
+                                              );
+
+                                              DateTime doseTime =
+                                              DateTime(
+                                                now.year,
+                                                now.month,
+                                                now.day,
+                                                hour,
+                                                minute,
+                                              );
+
+                                              final frequency = med
+                                                  .frequency
+                                                  .toLowerCase();
+
+                                              // DAILY
+                                              if (frequency.contains(
+                                                'daily',
+                                              )) {
+                                                if (doseTime.isBefore(
+                                                  now,
+                                                )) {
+                                                  doseTime = doseTime.add(
+                                                    const Duration(
+                                                      days: 1,
+                                                    ),
+                                                  );
+                                                }
+                                              }
+                                              // EVERY OTHER DAY
+                                              else if (frequency.contains(
+                                                'every other',
+                                              )) {
+                                                final daysSinceStart = now
+                                                    .difference(startDate)
+                                                    .inDays;
+
+                                                final shouldTakeToday =
+                                                    daysSinceStart % 2 ==
+                                                        0;
+
+                                                if (!shouldTakeToday ||
+                                                    doseTime.isBefore(
+                                                      now,
+                                                    )) {
+                                                  doseTime = doseTime.add(
+                                                    const Duration(
+                                                      days: 1,
+                                                    ),
+                                                  );
+
+                                                  while (doseTime
+                                                      .difference(
+                                                    startDate,
+                                                  )
+                                                      .inDays %
+                                                      2 !=
+                                                      0) {
+                                                    doseTime = doseTime
+                                                        .add(
+                                                      const Duration(
+                                                        days: 1,
+                                                      ),
+                                                    );
+                                                  }
+                                                }
+                                              }
+                                              // WEEKLY
+                                              else if (frequency.contains(
+                                                'weekly',
+                                              )) {
+                                                doseTime = DateTime(
+                                                  now.year,
+                                                  now.month,
+                                                  now.day,
+                                                  hour,
+                                                  minute,
+                                                );
+
+                                                while (doseTime.weekday !=
+                                                    startDate
+                                                        .weekday ||
+                                                    doseTime.isBefore(
+                                                      now,
+                                                    )) {
+                                                  doseTime = doseTime.add(
+                                                    const Duration(
+                                                      days: 1,
+                                                    ),
+                                                  );
+                                                }
+                                              }
+                                              // MONTHLY
+                                              else if (frequency.contains(
+                                                'monthly',
+                                              )) {
+                                                doseTime = DateTime(
+                                                  now.year,
+                                                  now.month,
+                                                  startDate.day,
+                                                  hour,
+                                                  minute,
+                                                );
+
+                                                if (doseTime.isBefore(
+                                                  now,
+                                                )) {
+                                                  doseTime = DateTime(
+                                                    now.year,
+                                                    now.month + 1,
+                                                    startDate.day,
+                                                    hour,
+                                                    minute,
+                                                  );
+                                                }
+                                              }
+                                              // AS NEEDED
+                                              else if (frequency.contains(
+                                                'as needed',
+                                              )) {
+                                                continue;
+                                              }
+
+                                              upcomingDoses.add(doseTime);
+                                            } catch (e) {
+                                              debugPrint(
+                                                "Dose parse error: $e",
+                                              );
+                                            }
+                                          }
+
+                                          upcomingDoses.sort();
+
+                                          if (upcomingDoses.isNotEmpty) {
+                                            nextDose =
+                                                upcomingDoses.first;
+                                          }
+                                        }
+                                        String countdownText =
+                                            'No upcoming dose';
+                                        Color statusColor = Colors.grey;
+
+                                        Duration? diff;
+
+                                        if (nextDose != null) {
+                                          diff = nextDose.difference(
+                                            DateTime.now(),
+                                          );
+                                        }
+                                        countdownText =
+                                        '${diff?.inHours}h ${diff?.inMinutes
+                                            .remainder(60)}m ${diff?.inSeconds
+                                            .remainder(60)}s';
+                                        return Container(
+                                          margin: const EdgeInsets.only(
+                                            bottom: 12,
+                                          ),
+                                          padding: const EdgeInsets.all(
+                                            14,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.grey.shade50,
+                                            borderRadius:
+                                            BorderRadius.circular(16),
+                                            border: Border.all(
+                                              color: statusColor
+                                                  .withValues(alpha: 0.2),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisAlignment:
+                                            MainAxisAlignment
+                                                .spaceBetween,
+                                            children: [
+                                              Icon(
+                                                Icons.local_hospital,
+                                                color: Colors.purple,
+                                                size: 26,
+                                              ),
+
+                                              const SizedBox(width: 7),
+
+                                              Expanded(
+                                                child: Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                        children: [
+                                                          Text(
+                                                            med.medicationName,
+                                                            style: const TextStyle(
+                                                              fontWeight:
+                                                              FontWeight
+                                                                  .bold,
+                                                              fontSize:
+                                                              15,
+                                                            ),
+                                                          ),
+
+                                                          const SizedBox(
+                                                            height: 4,
+                                                          ),
+
+                                                          Text(
+                                                            '${med
+                                                                .dosage} • ${med
+                                                                .scheduleSummary}',
+                                                            style: TextStyle(
+                                                              color: Colors
+                                                                  .grey
+                                                                  .shade700,
+                                                              fontSize:
+                                                              12,
+                                                            ),
+                                                          ),
+
+                                                          const SizedBox(
+                                                            height: 6,
+                                                          ),
+
+                                                          // if (nextDose !=
+                                                          //     null) ...[
+                                                          //   const SizedBox(
+                                                          //     height: 4,
+                                                          //   ),
+                                                          //
+                                                          //   Text(
+                                                          //     'At ${DateFormat.jm().format(nextDose)}',
+                                                          //     style: TextStyle(
+                                                          //       color: Colors
+                                                          //           .grey
+                                                          //           .shade600,
+                                                          //       fontSize: 11,
+                                                          //     ),
+                                                          //   ),
+                                                          // ],
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .end,
+                                                        mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .end,
+                                                        children: [
+                                                          Row(
+                                                            mainAxisAlignment:
+                                                            MainAxisAlignment
+                                                                .end,
+                                                            children: [
+                                                              if (nextDose !=
+                                                                  null)
+                                                                StreamBuilder(
+                                                                  stream: Stream
+                                                                      .periodic(
+                                                                    const Duration(
+                                                                      seconds:
+                                                                      1,
+                                                                    ),
+                                                                  ),
+                                                                  builder:
+                                                                      (context,
+                                                                      snapshot,) {
+                                                                    final diff =
+                                                                        nextDose
+                                                                            ?.difference(
+                                                                          DateTime
+                                                                              .now(),
+                                                                        ) ??
+                                                                            Duration
+                                                                                .zero;
+
+                                                                    // Prevent negative values
+                                                                    final safeDiff = diff
+                                                                        .isNegative
+                                                                        ? Duration
+                                                                        .zero
+                                                                        : diff;
+
+                                                                    final text =
+                                                                        '${safeDiff
+                                                                        .inHours
+                                                                        .toString()
+                                                                        .padLeft(
+                                                                        2,
+                                                                        '0')}h '
+                                                                        '${safeDiff
+                                                                        .inMinutes
+                                                                        .remainder(
+                                                                        60)
+                                                                        .toString()
+                                                                        .padLeft(
+                                                                        2,
+                                                                        '0')}m '
+                                                                        '${safeDiff
+                                                                        .inSeconds
+                                                                        .remainder(
+                                                                        60)
+                                                                        .toString()
+                                                                        .padLeft(
+                                                                        2,
+                                                                        '0')}s';
+
+                                                                    return Text(
+                                                                      text,
+                                                                      style: TextStyle(
+                                                                        color: ShieldColors
+                                                                            .activeTeal,
+                                                                        fontWeight: FontWeight
+                                                                            .w600,
+                                                                        fontSize: 12,
+                                                                      ),
+                                                                    );
+                                                                  },
+                                                                ),
+                                                            ],
+                                                          ),
+                                                          Text(
+                                                            "Until Next Dose",
+                                                            style: TextStyle(
+                                                              fontSize:
+                                                              12,
+                                                              fontWeight:
+                                                              FontWeight
+                                                                  .bold,
+                                                              color: ShieldColors
+                                                                  .activeTeal,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }),
+                                    ],
+                                  ),
+                                );
+                              },
+                              loading: () =>
+                              const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(20),
+                                  child: CircularProgressIndicator(),
+                                ),
+                              ),
+                              error: (e, st) => const SizedBox.shrink(),
+                            ),
+                            const SizedBox(height: 10),
+
+                            //   const SizedBox(height: 24),
+
+                            // Live member cards from Realtime stream
+                            StreamBuilder<List<Map<String, dynamic>>>(
+                              stream: safetyRepo.streamActiveMembers(
+                                profile.familyId,
+                              ),
+                              builder: (context, memberSnapshot) {
+                                if (memberSnapshot.connectionState ==
+                                    ConnectionState.waiting) {
+                                  return const Center(
+                                    child: CircularProgressIndicator(),
                                   );
-                                }).toList(),
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 20),
-                          const AiWellnessCard(),
-                          const SizedBox(height: 100),
-                        ],
+                                }
+
+                                final members = memberSnapshot.data ?? [];
+                                if (members.isEmpty) {
+                                  return const Text('No members found.');
+                                }
+
+                                return Column(
+                                  children: members.map((member) {
+                                    return _LiveMemberCard(
+                                      member: member,
+                                      safetyRepo: safetyRepo,
+                                      currentUserId: profile.userId,
+                                    );
+                                  }).toList(),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 20),
+                            const AiWellnessCard(),
+                            const SizedBox(height: 100),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -653,7 +1277,7 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                           context: context,
                           isScrollControlled: true,
                           backgroundColor: Colors.transparent,
-                          builder: (_) => const CommandCenterSheet(),
+                          builder: (_) => CommandCenterSheet(fromLeader: false),
                         );
                       },
                       style: ElevatedButton.styleFrom(
@@ -720,6 +1344,42 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
         ),
       ),
     );
+  }
+
+  DateTime? _getNextCheckinTime(Map<String, dynamic> schedule) {
+    // use next generated occurrence if available
+    if (schedule['scheduled_at'] != null) {
+      final next = DateTime.parse(schedule['scheduled_at']).toLocal();
+
+      if (next.isBefore(DateTime.now())) {
+        return null;
+      }
+
+      return next;
+    }
+
+    // fallback for old records
+    final datePart = DateTime.parse(schedule['checkin_date']);
+
+    final parts = schedule['checkin_time'].split(':');
+
+    final hour = int.parse(parts[0]);
+
+    final minute = int.parse(parts[1]);
+
+    final checkin = DateTime(
+      datePart.year,
+      datePart.month,
+      datePart.day,
+      hour,
+      minute,
+    );
+
+    if (checkin.isBefore(DateTime.now())) {
+      return null;
+    }
+
+    return checkin;
   }
 }
 
@@ -815,7 +1475,10 @@ class _MapContentState extends State<_MapContent> {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        name.toString().split(' ').first,
+                        name
+                            .toString()
+                            .split(' ')
+                            .first,
                         style: const TextStyle(
                           fontSize: 9,
                           fontWeight: FontWeight.bold,
@@ -1027,7 +1690,10 @@ class _MonitorNotificationsSheet extends StatelessWidget {
       ),
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.7,
+        maxHeight: MediaQuery
+            .of(context)
+            .size
+            .height * 0.7,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1043,9 +1709,13 @@ class _MonitorNotificationsSheet extends StatelessWidget {
           ),
           Text(
             'Notifications',
-            style: Theme.of(
+            style: Theme
+                .of(
               context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+            )
+                .textTheme
+                .titleLarge
+                ?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
           Expanded(
@@ -1176,6 +1846,882 @@ class _MonitorNotificationsSheet extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _NextCheckinCard extends ConsumerStatefulWidget {
+  final DateTime nextCheckin;
+  final UserProfile? profile;
+  final String scheduleId;
+  final String assignedUser;
+  final String assignedUserId;
+
+  const _NextCheckinCard({
+    super.key,
+    required this.nextCheckin,
+    required this.profile,
+    required this.scheduleId,
+    required this.assignedUser,
+    required this.assignedUserId,
+  });
+
+  @override
+  ConsumerState<_NextCheckinCard> createState() => _NextCheckinCardState();
+}
+
+class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
+  bool _showCheckinPopup = false;
+  bool isLoad = false;
+  bool _sosCountdownActive = false;
+  int _sosCountdown = 5;
+  Timer? _sosTimer;
+
+  void _startSosCountdown() {
+    if (_sosCountdownActive) {
+      _sosTimer?.cancel();
+      setState(() {
+        _sosCountdownActive = false;
+        _sosCountdown = 5;
+      });
+      return;
+    }
+
+    setState(() {
+      _sosCountdownActive = true;
+      _sosCountdown = 5;
+    });
+
+    _sosTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      HapticFeedback.heavyImpact();
+
+      if (_sosCountdown <= 1) {
+        timer.cancel();
+        try {
+          final profile = await ref.read(currentUserProfileProvider.future);
+          if (profile == null) {
+            debugPrint(
+              '[SOS] Profile is null — user has no family_members row',
+            );
+            if (mounted) {
+              setState(() {
+                _sosCountdownActive = false;
+                _sosCountdown = 5;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    '⚠️ SOS FAILED: No family profile found. Please re-join a family first.',
+                  ),
+                  backgroundColor: Colors.orange,
+                  duration: Duration(seconds: 5),
+                ),
+              );
+            }
+            return;
+          }
+
+          await ref
+              .read(safetyRepositoryProvider)
+              .triggerSiren(
+            profile.familyId,
+            'Monitor initiated an emergency state',
+          );
+
+          if (mounted) {
+            setState(() {
+              _sosCountdownActive = false;
+              _sosCountdown = 5;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('🚨 EMERGENCY ALERT SENT!'),
+                backgroundColor: ShieldColors.urgentRed,
+                duration: Duration(seconds: 5),
+              ),
+            );
+          }
+          final members = await Supabase.instance.client
+              .from('family_members')
+              .select('user_id')
+              .eq('family_id', profile.familyId);
+
+          for (final m in members) {
+            final targetUserId = m['user_id'];
+
+            if (targetUserId == profile.userId) continue;
+
+            try {
+              await Supabase.instance.client.functions.invoke(
+                'push-router',
+                body: {
+                  "target_user_id": targetUserId,
+                  "title": "Emergency Alert",
+                  "body": "${profile.fullName} triggered an emergency alert",
+                  "action": "emergency",
+                },
+              );
+            } catch (e) {
+              debugPrint("Push failed: $e");
+            }
+          }
+        } catch (e) {
+          debugPrint('[SOS] triggerSiren failed: $e');
+          if (mounted) {
+            setState(() {
+              _sosCountdownActive = false;
+              _sosCountdown = 5;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('⚠️ SOS FAILED: $e'),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 5),
+              ),
+            );
+          }
+        }
+      } else {
+        if (mounted) setState(() => _sosCountdown--);
+      }
+    });
+  }
+
+  void _checkScheduleTime(DateTime nextCheckin) {
+    final now = DateTime.now();
+
+    if (now.isAfter(nextCheckin) && !_showCheckinPopup) {
+      _showCheckinPopup = true;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (mounted) {
+          var value = await _showCheckinDialog();
+          print(value);
+          print("valuevalue");
+
+          if (value == true) {
+            if (isLoad) return;
+            if (widget.profile == null) return;
+            setState(() {
+              isLoad = true;
+            });
+            int level =
+            100; // Safe default for simulators and aggressive background iOS policies
+            try {
+              final battery = Battery();
+              level = await battery.batteryLevel;
+            } catch (e) {
+              debugPrint(
+                'Battery info not available over isolate, using default: $e',
+              );
+            }
+
+            final defaultMsg = "Checked in from Current Location.";
+
+            bool gpsSuccess = false;
+            double lat = 0.0;
+            double lng = 0.0;
+
+            try {
+              bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+              if (serviceEnabled) {
+                LocationPermission permission =
+                await Geolocator.checkPermission();
+                if (permission == LocationPermission.denied) {
+                  permission = await Geolocator.requestPermission();
+                }
+                if (permission == LocationPermission.deniedForever) {
+                  setState(() {
+                    isLoad = false;
+                  });
+                  throw Exception(
+                    'Location permissions are permanently denied, we cannot request permissions. Please enable in Settings.',
+                  );
+                }
+
+                if (permission == LocationPermission.whileInUse ||
+                    permission == LocationPermission.always) {
+                  // First attempt: High accuracy, short timeout
+                  try {
+                    final position = await Geolocator.getCurrentPosition(
+                      locationSettings: const LocationSettings(
+                        accuracy: LocationAccuracy.high,
+                      ),
+                      timeLimit: const Duration(seconds: 5),
+                    );
+                    lat = position.latitude;
+                    lng = position.longitude;
+                    gpsSuccess = true;
+                  } catch (_) {
+                    setState(() {
+                      isLoad = false;
+                    });
+                    // Fallback 1: Low accuracy (Cell tower/Wi-Fi), very fast
+                    try {
+                      final position = await Geolocator.getCurrentPosition(
+                        locationSettings: const LocationSettings(
+                          accuracy: LocationAccuracy.low,
+                        ),
+                        timeLimit: const Duration(seconds: 4),
+                      );
+                      lat = position.latitude;
+                      lng = position.longitude;
+                      gpsSuccess = true;
+                    } catch (_) {
+                      setState(() {
+                        isLoad = false;
+                      });
+                      // Fallback 2: Last known position
+                      final lastPos = await Geolocator.getLastKnownPosition();
+                      if (lastPos != null) {
+                        lat = lastPos.latitude;
+                        lng = lastPos.longitude;
+                        gpsSuccess = true;
+                      }
+                    }
+                  }
+                }
+              } else {
+                setState(() {
+                  isLoad = false;
+                });
+                await Geolocator.openLocationSettings();
+                throw Exception(
+                  'GPS Location Services are disabled on this device.',
+                );
+              }
+            } catch (e) {
+              setState(() {
+                isLoad = false;
+              });
+              if (e is Exception &&
+                  e.toString().contains('permanently denied') ||
+                  e.toString().contains('disabled')) {
+                rethrow;
+              }
+            }
+
+            await Supabase.instance.client.from('check_ins').insert({
+              'family_id': widget.profile?.familyId,
+              'user_id': widget.profile?.userId,
+              'latitude': lat,
+              'longitude': lng,
+              'status_message': "Scheduled check-in completed",
+            });
+
+            // Also register this as a well_event to ensure it shows up securely on the stream!
+            await Supabase.instance.client.from('well_events').insert({
+              'family_id': widget.profile?.familyId,
+              'user_id': widget.profile?.userId,
+              'user_name': widget.profile?.fullName,
+              'event_type': 'check_in',
+              'title': 'Manual Check-in',
+              'description': 'Scheduled check-in completed',
+              'latitude': lat,
+              'longitude': lng,
+              'battery_level': level,
+            });
+            final schedule = await Supabase.instance.client
+                .from('checkin_schedules')
+                .select('recurrence')
+                .eq('id', widget.scheduleId)
+                .single();
+            final recurrence = schedule['recurrence'];
+
+            final isRecurring =
+                recurrence == 'daily' ||
+                    recurrence == 'every_other_day' ||
+                    recurrence == 'weekly' ||
+                    recurrence == 'monthly';
+
+            DateTime? nextDate;
+
+            if (isRecurring) {
+              final fullSchedule = await Supabase.instance.client
+                  .from('checkin_schedules')
+                  .select()
+                  .eq('id', widget.scheduleId)
+                  .single();
+
+              nextDate = DateTime.parse(fullSchedule['scheduled_at']);
+
+              switch (recurrence) {
+                case 'daily':
+                  nextDate = nextDate.add(const Duration(days: 1));
+                  break;
+
+                case 'every_other_day':
+                  nextDate = nextDate.add(const Duration(days: 2));
+                  break;
+
+                case 'weekly':
+                  final days = List<int>.from(
+                    fullSchedule['days_of_week'] ?? [],
+                  );
+
+                  if (days.isEmpty) {
+                    nextDate = nextDate.add(const Duration(days: 7));
+                  } else {
+                    final currentDay = nextDate.weekday % 7;
+
+                    int? found;
+
+                    for (final d in days) {
+                      if (d > currentDay) {
+                        found = d;
+                        break;
+                      }
+                    }
+
+                    found ??= days.first + 7;
+
+                    nextDate = nextDate.add(Duration(days: found - currentDay));
+                  }
+
+                  break;
+
+                case 'monthly':
+                  nextDate = DateTime(
+                    nextDate.year,
+                    nextDate.month + 1,
+                    nextDate.day,
+                    nextDate.hour,
+                    nextDate.minute,
+                  );
+                  break;
+              }
+            }
+
+            await Supabase.instance.client
+                .from('checkin_schedules')
+                .update({
+              if (!isRecurring) 'is_completed': true,
+
+              'completed_at': DateTime.now().toIso8601String(),
+
+              if (!isRecurring) 'status': 'completed',
+
+              if (isRecurring) ...{
+                'status': 'pending',
+                'scheduled_at': nextDate?.toIso8601String(),
+                'reminder_sent': false,
+                'reminder_sent_at': null,
+              },
+            })
+                .eq('id', widget.scheduleId);
+            if (!mounted) return;
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("Scheduled check-in completed")),
+            );
+            final safety = ref.invalidate(safetyRepositoryProvider);
+
+            final profile = await ref.read(currentUserProfileProvider.future);
+            if (profile == null) throw Exception('No profile');
+
+            final members = await Supabase.instance.client
+                .from('family_members')
+                .select('user_id')
+                .eq('family_id', profile.familyId);
+
+            for (final m in members) {
+              final targetUserId = m['user_id'];
+
+              if (targetUserId == profile.userId) continue;
+
+              try {
+                await Supabase.instance.client.functions.invoke(
+                  'push-router',
+                  body: {
+                    "target_user_id": targetUserId,
+                    "title": "Check-In",
+                    "body":
+                    "${profile.fullName ?? 'Someone'}: Checked in just now",
+                    "action": "check_in",
+                  },
+                );
+                setState(() {
+                  isLoad = false;
+                });
+              } catch (e) {
+                print("Push failed: $e");
+              }
+            }
+          } else if (value == false) {
+            _startSosCountdown();
+          }
+        }
+      });
+    }
+  }
+
+  Future<bool?> _showCheckinDialog() async {
+    final result = await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text("Time To Check In"),
+          content: const Text("Please confirm your status"),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              onPressed: () {
+                Navigator.of(context).pop(true);
+              },
+              child: const Text("I'M OK"),
+            ),
+
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () {
+                Navigator.of(context).pop(false);
+              },
+              child: const Text("I NEED HELP"),
+            ),
+          ],
+        );
+      },
+    );
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: Stream.periodic(const Duration(seconds: 1)),
+      builder: (context, snapshot) {
+        Duration diff = widget.nextCheckin.difference(DateTime.now());
+
+        if (diff.isNegative) {
+          diff = Duration.zero;
+        }
+
+        final hours = diff.inHours.toString().padLeft(2, '0');
+
+        final mins = diff.inMinutes.remainder(60).toString().padLeft(2, '0');
+
+        final secs = diff.inSeconds.remainder(60).toString().padLeft(2, '0');
+        if (widget.profile?.userId == widget.assignedUserId) {
+          _checkScheduleTime(widget.nextCheckin);
+        }
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 24),
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF00838F), Color(0xFF006064)],
+            ),
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(
+                    Icons.check_circle_outline,
+                    color: Colors.white,
+                    size: 42,
+                  ),
+                  SizedBox(width: 10),
+                  Text(
+                    "Check In",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 42,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              RichText(
+                textAlign: TextAlign.center,
+                text: TextSpan(
+                  style: const TextStyle(color: Colors.white70, fontSize: 18),
+                  children: [
+                    TextSpan(
+                      text: widget.assignedUser,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    TextSpan(
+                      text:
+                      "- Next Check-In at ${DateFormat('dd MMM yyyy, hh:mm a')
+                          .format(widget.nextCheckin)}",
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _timeBox(hours, "HRS"),
+                  const SizedBox(width: 16),
+
+                  const Text(
+                    ":",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 34,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(width: 16),
+
+                  _timeBox(mins, "MINS"),
+
+                  const SizedBox(width: 16),
+
+                  const Text(
+                    ":",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 34,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(width: 16),
+
+                  _timeBox(secs, "SECS"),
+                ],
+              ), if (widget.profile?.userId == widget.assignedUserId)
+
+                SizedBox(height: 10),
+              if (widget.profile?.userId == widget.assignedUserId)
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFF006064),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: () async {
+                      if (isLoad) return;
+                      if (widget.profile == null) return;
+                      setState(() {
+                        isLoad = true;
+                      });
+                      int level =
+                      100; // Safe default for simulators and aggressive background iOS policies
+                      try {
+                        final battery = Battery();
+                        level = await battery.batteryLevel;
+                      } catch (e) {
+                        debugPrint(
+                          'Battery info not available over isolate, using default: $e',
+                        );
+                      }
+
+                      final defaultMsg = "Checked in from Current Location.";
+
+                      bool gpsSuccess = false;
+                      double lat = 0.0;
+                      double lng = 0.0;
+
+                      try {
+                        bool serviceEnabled =
+                        await Geolocator.isLocationServiceEnabled();
+                        if (serviceEnabled) {
+                          LocationPermission permission =
+                          await Geolocator.checkPermission();
+                          if (permission == LocationPermission.denied) {
+                            permission = await Geolocator.requestPermission();
+                          }
+                          if (permission == LocationPermission.deniedForever) {
+                            setState(() {
+                              isLoad = false;
+                            });
+                            throw Exception(
+                              'Location permissions are permanently denied, we cannot request permissions. Please enable in Settings.',
+                            );
+                          }
+
+                          if (permission == LocationPermission.whileInUse ||
+                              permission == LocationPermission.always) {
+                            // First attempt: High accuracy, short timeout
+                            try {
+                              final position =
+                              await Geolocator.getCurrentPosition(
+                                locationSettings: const LocationSettings(
+                                  accuracy: LocationAccuracy.high,
+                                ),
+                                timeLimit: const Duration(seconds: 5),
+                              );
+                              lat = position.latitude;
+                              lng = position.longitude;
+                              gpsSuccess = true;
+                            } catch (_) {
+                              setState(() {
+                                isLoad = false;
+                              });
+                              // Fallback 1: Low accuracy (Cell tower/Wi-Fi), very fast
+                              try {
+                                final position =
+                                await Geolocator.getCurrentPosition(
+                                  locationSettings: const LocationSettings(
+                                    accuracy: LocationAccuracy.low,
+                                  ),
+                                  timeLimit: const Duration(seconds: 4),
+                                );
+                                lat = position.latitude;
+                                lng = position.longitude;
+                                gpsSuccess = true;
+                              } catch (_) {
+                                setState(() {
+                                  isLoad = false;
+                                });
+                                // Fallback 2: Last known position
+                                final lastPos =
+                                await Geolocator.getLastKnownPosition();
+                                if (lastPos != null) {
+                                  lat = lastPos.latitude;
+                                  lng = lastPos.longitude;
+                                  gpsSuccess = true;
+                                }
+                              }
+                            }
+                          }
+                        } else {
+                          setState(() {
+                            isLoad = false;
+                          });
+                          await Geolocator.openLocationSettings();
+                          throw Exception(
+                            'GPS Location Services are disabled on this device.',
+                          );
+                        }
+                      } catch (e) {
+                        setState(() {
+                          isLoad = false;
+                        });
+                        if (e is Exception &&
+                            e.toString().contains('permanently denied') ||
+                            e.toString().contains('disabled')) {
+                          rethrow;
+                        }
+                      }
+
+                      await Supabase.instance.client.from('check_ins').insert({
+                        'family_id': widget.profile?.familyId,
+                        'user_id': widget.profile?.userId,
+                        'latitude': lat,
+                        'longitude': lng,
+                        'status_message': "Scheduled check-in completed",
+                      });
+
+                      // Also register this as a well_event to ensure it shows up securely on the stream!
+                      await Supabase.instance.client
+                          .from('well_events')
+                          .insert({
+                        'family_id': widget.profile?.familyId,
+                        'user_id': widget.profile?.userId,
+                        'user_name': widget.profile?.fullName,
+                        'event_type': 'check_in',
+                        'title': 'Manual Check-in',
+                        'description': 'Scheduled check-in completed',
+                        'latitude': lat,
+                        'longitude': lng,
+                        'battery_level': level,
+                      });
+                      final schedule = await Supabase.instance.client
+                          .from('checkin_schedules')
+                          .select('recurrence')
+                          .eq('id', widget.scheduleId)
+                          .single();
+                      final recurrence = schedule['recurrence'];
+
+                      final isRecurring =
+                          recurrence == 'daily' ||
+                              recurrence == 'every_other_day' ||
+                              recurrence == 'weekly' ||
+                              recurrence == 'monthly';
+
+                      DateTime? nextDate;
+
+                      if (isRecurring) {
+                        final fullSchedule = await Supabase.instance.client
+                            .from('checkin_schedules')
+                            .select()
+                            .eq('id', widget.scheduleId)
+                            .single();
+
+                        nextDate = DateTime.parse(fullSchedule['scheduled_at']);
+
+                        switch (recurrence) {
+                          case 'daily':
+                            nextDate = nextDate.add(const Duration(days: 1));
+                            break;
+
+                          case 'every_other_day':
+                            nextDate = nextDate.add(const Duration(days: 2));
+                            break;
+
+                          case 'weekly':
+                            final days = List<int>.from(
+                              fullSchedule['days_of_week'] ?? [],
+                            );
+
+                            if (days.isEmpty) {
+                              nextDate = nextDate.add(const Duration(days: 7));
+                            } else {
+                              final currentDay = nextDate.weekday % 7;
+
+                              int? found;
+
+                              for (final d in days) {
+                                if (d > currentDay) {
+                                  found = d;
+                                  break;
+                                }
+                              }
+
+                              found ??= days.first + 7;
+
+                              nextDate = nextDate.add(
+                                Duration(days: found - currentDay),
+                              );
+                            }
+
+                            break;
+
+                          case 'monthly':
+                            nextDate = DateTime(
+                              nextDate.year,
+                              nextDate.month + 1,
+                              nextDate.day,
+                              nextDate.hour,
+                              nextDate.minute,
+                            );
+                            break;
+                        }
+                      }
+
+                      await Supabase.instance.client
+                          .from('checkin_schedules')
+                          .update({
+                        if (!isRecurring) 'is_completed': true,
+
+                        'completed_at': DateTime.now().toIso8601String(),
+
+                        if (!isRecurring) 'status': 'completed',
+
+                        if (isRecurring) ...{
+                          'status': 'pending',
+                          'scheduled_at': nextDate?.toIso8601String(),
+                          'reminder_sent': false,
+                          'reminder_sent_at': null,
+                        },
+                      })
+                          .eq('id', widget.scheduleId);
+                      if (!mounted) return;
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Scheduled check-in completed")),
+                      );
+                      final safety = ref.invalidate(safetyRepositoryProvider);
+
+                      final profile = await ref.read(
+                        currentUserProfileProvider.future,
+                      );
+                      if (profile == null) throw Exception('No profile');
+
+                      final members = await Supabase.instance.client
+                          .from('family_members')
+                          .select('user_id')
+                          .eq('family_id', profile.familyId);
+
+                      for (final m in members) {
+                        final targetUserId = m['user_id'];
+
+                        if (targetUserId == profile.userId) continue;
+
+                        try {
+                          await Supabase.instance.client.functions.invoke(
+                            'push-router',
+                            body: {
+                              "target_user_id": targetUserId,
+                              "title": "Check-In",
+                              "body":
+                              "${profile.fullName ??
+                                  'Someone'}: Checked in just now",
+                              "action": "check_in",
+                            },
+                          );
+                          setState(() {
+                            isLoad = false;
+                          });
+                        } catch (e) {
+                          print("Push failed: $e");
+                        }
+                      }
+                    },
+                    child: isLoad
+                        ? SizedBox(
+                      height: 25,
+                      width: 25,
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                        : const Text(
+                      "CHECK IN NOW",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _timeBox(String value, String label) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 40,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 4),
+
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.2,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -90,16 +90,33 @@
 //     // Future: navigate to the relevant screen based on message.data['type']
 //   }
 // }
+import 'dart:convert';
+
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'checkin_service.dart';
+
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  debugPrint('[FCM Background] ${message.notification?.title}');
+
+  final action = message.data['action'];
+
+  if (action == 'schedule_checkin') {
+    final scheduleString = message.data['schedule'];
+    if (scheduleString != null) {
+      final schedule = jsonDecode(scheduleString) as Map<String, dynamic>;
+      // ── This runs on User B's device and schedules locally ──
+      await CheckinNotificationService.initialize();
+      await CheckinNotificationService.scheduleCheckin(schedule);
+    }
+  }
 }
 
 class PushNotificationService {
@@ -129,6 +146,9 @@ class PushNotificationService {
       );
 
   static Future<void> initialize() async {
+    tz.initializeTimeZones();
+    // final String timezoneName = await FlutterTimezone.getLocalTimezone();
+    // tz.setLocalLocation(tz.getLocation(timezoneName));
     // Step 1: Request FCM permission
     final settings = await _messaging.requestPermission(
       alert: true,
@@ -136,7 +156,11 @@ class PushNotificationService {
       sound: true,
       criticalAlert: true,
     );
-
+    await _messaging.setForegroundNotificationPresentationOptions(
+      alert: true, // ← don't show FCM notification natively on iOS
+      badge: true,
+      sound: true,
+    );
     debugPrint('[FCM] Permission: ${settings.authorizationStatus}');
 
     // Step 2: Setup local notifications
@@ -151,6 +175,7 @@ class PushNotificationService {
 
       final fcmToken = await FirebaseMessaging.instance.getToken();
       debugPrint('[FCM] fcmToken: $token');
+      print(token);
       if (token != null) await _saveTokenToProfile(token);
 
       // Listen for token refresh
@@ -204,21 +229,46 @@ class PushNotificationService {
 
     await androidPlugin?.createNotificationChannel(_generalChannel);
     await androidPlugin?.createNotificationChannel(_sosChannel);
+    await androidPlugin?.createNotificationChannel(_checkinChannel);
   }
+
+  static const AndroidNotificationChannel _checkinChannel =
+      AndroidNotificationChannel(
+        'checkin_channel',
+        'Check-In Alerts',
+        description: 'Scheduled check-in reminders',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+      );
 
   static void _onNotificationTapped(NotificationResponse response) {
     debugPrint('[LocalNotif] Tapped: ${response.payload}');
     // TODO: navigate based on payload
   }
 
-  static void _handleForegroundMessage(RemoteMessage message) {
+  static void _handleForegroundMessage(RemoteMessage message) async {
     debugPrint(
       '[FCM Foreground] ${message.notification?.title}: ${message.notification?.body}',
     );
+    debugPrint('[FCM Foreground] ${message}');
 
     final notification = message.notification;
     if (notification == null) return;
+    final action = message.data['action'];
+    print("cccc");
 
+    // if (action == 'schedule_checkin') {
+    //   print("aaaaaaa");
+    //   final scheduleString = message.data['schedule'];
+    //
+    //   if (scheduleString != null && scheduleString.isNotEmpty) {
+    //     final schedule = jsonDecode(scheduleString) as Map<String, dynamic>;
+    //     print("bbbbb");
+    //
+    //     await PushNotificationService.scheduleCheckinNotification(schedule);
+    //   }
+    // }
     // Determine if SOS alert
     final isSos =
         message.data['type'] == 'sos' ||
@@ -287,8 +337,7 @@ class PushNotificationService {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) return;
-      print(" user.id");
-      print(user.id);
+
       await Supabase.instance.client
           .from('profiles')
           .update({'fcm_token': token})
@@ -316,5 +365,81 @@ class PushNotificationService {
     required String body,
   }) async {
     await showNotification(title: title, body: body, isSos: false);
+  }
+
+  static Future<void> scheduleCheckinNotification(
+    Map<String, dynamic> schedule,
+  ) async {
+    final date = DateTime.parse(schedule['checkin_date']);
+    print("cccccc");
+
+    final time = schedule['checkin_time'].toString().split(':');
+
+    final scheduledDate = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      int.parse(time[0]),
+      int.parse(time[1]),
+    );
+
+    final tzScheduled = tz.TZDateTime.from(scheduledDate, tz.local);
+    if (tzScheduled.isBefore(tz.TZDateTime.now(tz.local))) {
+      debugPrint(
+        '[Checkin] Skipping — scheduled time is in the past: $tzScheduled',
+      );
+      return;
+    }
+
+    // await _localNotifications.zonedSchedule(
+    //   schedule['id'].hashCode,
+    //   'Time to Check In',
+    //   'Please confirm you are okay',
+    //   tz.TZDateTime.from(scheduledDate, tz.local),
+    //   const NotificationDetails(
+    //     android: AndroidNotificationDetails(
+    //       'checkin_channel',
+    //       'Check-In Alerts',
+    //       channelDescription: 'Scheduled check-in reminders',
+    //       importance: Importance.max,
+    //       priority: Priority.high,
+    //       fullScreenIntent: true,
+    //     ),
+    //     iOS: DarwinNotificationDetails(
+    //       presentAlert: true,
+    //       presentBadge: true,
+    //       presentSound: true,
+    //     ),
+    //   ),
+    //   androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+    //   uiLocalNotificationDateInterpretation:
+    //       UILocalNotificationDateInterpretation.absoluteTime,
+    // );
+    await _localNotifications.zonedSchedule(
+      schedule['id'].toString().hashCode.abs(),
+      'Time to Check In',
+      'Please confirm you are okay',
+      tzScheduled,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'checkin_channel',
+          'Check-In Alerts',
+          channelDescription: 'Scheduled check-in reminders',
+          importance: Importance.max,
+          priority: Priority.high,
+          fullScreenIntent: true,
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      // ← changed
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+      // no matchDateTimeComponents — check-in is a one-time alarm, not daily repeat
+    );
   }
 }

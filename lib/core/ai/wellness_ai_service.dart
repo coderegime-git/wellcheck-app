@@ -1,3 +1,5 @@
+import 'package:battery_plus/battery_plus.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_generative_ai/google_generative_ai.dart' as gemini;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -131,6 +133,16 @@ class WellnessAiService {
     if (medName == null) return;
     final supabase = Supabase.instance.client;
     final userId = supabase.auth.currentUser?.id;
+    int batteryLevel =
+    100; // Safe default for simulators and aggressive background iOS policies
+    try {
+      final battery = Battery();
+      batteryLevel = await battery.batteryLevel;
+    } catch (e) {
+      debugPrint(
+        'Battery info not available over isolate, using default: $e',
+      );
+    }
     await supabase.from('well_events').insert({
       'family_id': familyId,
       'user_id': userId,
@@ -138,6 +150,8 @@ class WellnessAiService {
       'title': 'Medication Voice Log',
       'description': 'Verbally confirmed taking: $medName',
       'created_by': userId,
+      'battery_level': batteryLevel,
+
     });
   }
 
@@ -149,6 +163,16 @@ class WellnessAiService {
     if (message == null) return;
     final supabase = Supabase.instance.client;
     final userId = supabase.auth.currentUser?.id;
+    int batteryLevel =
+    100; // Safe default for simulators and aggressive background iOS policies
+    try {
+      final battery = Battery();
+      batteryLevel = await battery.batteryLevel;
+    } catch (e) {
+      debugPrint(
+        'Battery info not available over isolate, using default: $e',
+      );
+    }
     await supabase.from('well_events').insert({
       'family_id': familyId,
       'user_id': userId,
@@ -156,6 +180,8 @@ class WellnessAiService {
       'title': isUrgent ? 'Urgent Voice Alert' : 'Voice Update',
       'description': message,
       'created_by': userId,
+      'battery_level': batteryLevel,
+
     });
   }
 

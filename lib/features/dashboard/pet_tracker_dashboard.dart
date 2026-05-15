@@ -1,5 +1,10 @@
+import 'dart:async';
+
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
@@ -780,5 +785,489 @@ class PetDashboard extends ConsumerWidget {
       ).showSnackBar(SnackBar(content: Text('Logout failed: $e')));
       // }
     }
+  }
+}
+
+class _NextCheckinCard extends ConsumerStatefulWidget {
+  final DateTime nextCheckin;
+  final profile;
+  final String scheduleId;
+  final String assignedUser;
+
+  const _NextCheckinCard({
+    super.key,
+    required this.nextCheckin,
+    required this.profile,
+    required this.scheduleId,
+    required this.assignedUser,
+  });
+
+  @override
+  ConsumerState<_NextCheckinCard> createState() => _NextCheckinCardState();
+}
+
+class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
+  bool _showCheckinPopup = false;
+  bool isLoad = false;
+  bool _sosCountdownActive = false;
+  int _sosCountdown = 5;
+  Timer? _sosTimer;
+
+  void _startSosCountdown() {
+    if (_sosCountdownActive) {
+      _sosTimer?.cancel();
+      setState(() {
+        _sosCountdownActive = false;
+        _sosCountdown = 5;
+      });
+      return;
+    }
+
+    setState(() {
+      _sosCountdownActive = true;
+      _sosCountdown = 5;
+    });
+
+    _sosTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      HapticFeedback.heavyImpact();
+
+      if (_sosCountdown <= 1) {
+        timer.cancel();
+        try {
+          final profile = await ref.read(currentUserProfileProvider.future);
+          if (profile == null) {
+            debugPrint(
+              '[SOS] Profile is null — user has no family_members row',
+            );
+            if (mounted) {
+              setState(() {
+                _sosCountdownActive = false;
+                _sosCountdown = 5;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    '⚠️ SOS FAILED: No family profile found. Please re-join a family first.',
+                  ),
+                  backgroundColor: Colors.orange,
+                  duration: Duration(seconds: 5),
+                ),
+              );
+            }
+            return;
+          }
+
+          await ref
+              .read(safetyRepositoryProvider)
+              .triggerSiren(
+                profile.familyId,
+                'Monitor initiated an emergency state',
+              );
+
+          if (mounted) {
+            setState(() {
+              _sosCountdownActive = false;
+              _sosCountdown = 5;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('🚨 EMERGENCY ALERT SENT!'),
+                backgroundColor: ShieldColors.urgentRed,
+                duration: Duration(seconds: 5),
+              ),
+            );
+          }
+        } catch (e) {
+          debugPrint('[SOS] triggerSiren failed: $e');
+          if (mounted) {
+            setState(() {
+              _sosCountdownActive = false;
+              _sosCountdown = 5;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('⚠️ SOS FAILED: $e'),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 5),
+              ),
+            );
+          }
+        }
+      } else {
+        if (mounted) setState(() => _sosCountdown--);
+      }
+    });
+  }
+
+  void _checkScheduleTime(DateTime nextCheckin) {
+    final now = DateTime.now();
+
+    if (now.isAfter(nextCheckin) && !_showCheckinPopup) {
+      _showCheckinPopup = true;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (mounted) {
+          var value = await _showCheckinDialog();
+          print(value);
+          print("valuevalue");
+
+          if (value == true) {
+            if (isLoad) return;
+            if (widget.profile == null) return;
+            setState(() {
+              isLoad = true;
+            });
+            int level =
+                100; // Safe default for simulators and aggressive background iOS policies
+            try {
+              final battery = Battery();
+              level = await battery.batteryLevel;
+            } catch (e) {
+              debugPrint(
+                'Battery info not available over isolate, using default: $e',
+              );
+            }
+
+            final defaultMsg = "Checked in from Current Location.";
+
+            bool gpsSuccess = false;
+            double lat = 0.0;
+            double lng = 0.0;
+
+            try {
+              bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+              if (serviceEnabled) {
+                LocationPermission permission =
+                    await Geolocator.checkPermission();
+                if (permission == LocationPermission.denied) {
+                  permission = await Geolocator.requestPermission();
+                }
+                if (permission == LocationPermission.deniedForever) {
+                  setState(() {
+                    isLoad = false;
+                  });
+                  throw Exception(
+                    'Location permissions are permanently denied, we cannot request permissions. Please enable in Settings.',
+                  );
+                }
+
+                if (permission == LocationPermission.whileInUse ||
+                    permission == LocationPermission.always) {
+                  // First attempt: High accuracy, short timeout
+                  try {
+                    final position = await Geolocator.getCurrentPosition(
+                      locationSettings: const LocationSettings(
+                        accuracy: LocationAccuracy.high,
+                      ),
+                      timeLimit: const Duration(seconds: 5),
+                    );
+                    lat = position.latitude;
+                    lng = position.longitude;
+                    gpsSuccess = true;
+                  } catch (_) {
+                    setState(() {
+                      isLoad = false;
+                    });
+                    // Fallback 1: Low accuracy (Cell tower/Wi-Fi), very fast
+                    try {
+                      final position = await Geolocator.getCurrentPosition(
+                        locationSettings: const LocationSettings(
+                          accuracy: LocationAccuracy.low,
+                        ),
+                        timeLimit: const Duration(seconds: 4),
+                      );
+                      lat = position.latitude;
+                      lng = position.longitude;
+                      gpsSuccess = true;
+                    } catch (_) {
+                      setState(() {
+                        isLoad = false;
+                      });
+                      // Fallback 2: Last known position
+                      final lastPos = await Geolocator.getLastKnownPosition();
+                      if (lastPos != null) {
+                        lat = lastPos.latitude;
+                        lng = lastPos.longitude;
+                        gpsSuccess = true;
+                      }
+                    }
+                  }
+                }
+              } else {
+                setState(() {
+                  isLoad = false;
+                });
+                await Geolocator.openLocationSettings();
+                throw Exception(
+                  'GPS Location Services are disabled on this device.',
+                );
+              }
+            } catch (e) {
+              setState(() {
+                isLoad = false;
+              });
+              if (e is Exception &&
+                      e.toString().contains('permanently denied') ||
+                  e.toString().contains('disabled')) {
+                rethrow;
+              }
+            }
+
+            await Supabase.instance.client.from('check_ins').insert({
+              'family_id': widget.profile.familyId,
+              'user_id': widget.profile.userId,
+              'latitude': lat,
+              'longitude': lng,
+              'status_message': "Scheduled check-in completed",
+            });
+
+            // Also register this as a well_event to ensure it shows up securely on the stream!
+            await Supabase.instance.client.from('well_events').insert({
+              'family_id': widget.profile.familyId,
+              'user_id': widget.profile.userId,
+              'user_name': widget.profile.fullName,
+              'event_type': 'check_in',
+              'title': 'Manual Check-in',
+              'description': 'Scheduled check-in completed',
+              'latitude': lat,
+              'longitude': lng,
+              'battery_level': level,
+            });
+
+            await Supabase.instance.client
+                .from('checkin_schedules')
+                .update({
+                  'is_completed': true,
+                  'completed_at': DateTime.now().toIso8601String(),
+                  'status': 'completed',
+                })
+                .eq('id', widget.scheduleId);
+            if (!mounted) return;
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("Scheduled check-in completed")),
+            );
+            final safety = ref.invalidate(safetyRepositoryProvider);
+            setState(() {
+              isLoad = false;
+            });
+            final profile = await ref.read(currentUserProfileProvider.future);
+            if (profile == null) throw Exception('No profile');
+
+            final members = await Supabase.instance.client
+                .from('family_members')
+                .select('user_id')
+                .eq('family_id', profile.familyId);
+
+            for (final m in members) {
+              final targetUserId = m['user_id'];
+
+              if (targetUserId == profile.userId) continue;
+
+              try {
+                await Supabase.instance.client.functions.invoke(
+                  'push-router',
+                  body: {
+                    "target_user_id": targetUserId,
+                    "title": "Check-In",
+                    "body":
+                        "${profile.fullName ?? 'Someone'}: Checked in just now",
+                    "action": "check_in",
+                  },
+                );
+              } catch (e) {
+                print("Push failed: $e");
+              }
+            }
+          } else if (value == false) {
+            _startSosCountdown();
+          }
+        }
+      });
+    }
+  }
+
+  Future<bool?> _showCheckinDialog() async {
+    final result = await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text("Time To Check In"),
+          content: const Text("Please confirm your status"),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              onPressed: () {
+                Navigator.of(context).pop(true);
+              },
+              child: const Text("I'M OK"),
+            ),
+
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () {
+                Navigator.of(context).pop(false);
+              },
+              child: const Text("I NEED HELP"),
+            ),
+          ],
+        );
+      },
+    );
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: Stream.periodic(const Duration(seconds: 1)),
+      builder: (context, snapshot) {
+        Duration diff = widget.nextCheckin.difference(DateTime.now());
+
+        if (diff.isNegative) {
+          diff = Duration.zero;
+        }
+
+        final hours = diff.inHours.toString().padLeft(2, '0');
+
+        final mins = diff.inMinutes.remainder(60).toString().padLeft(2, '0');
+
+        final secs = diff.inSeconds.remainder(60).toString().padLeft(2, '0');
+
+        //_checkScheduleTime(widget.nextCheckin);
+
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 24),
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF00838F), Color(0xFF006064)],
+            ),
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(
+                    Icons.check_circle_outline,
+                    color: Colors.white,
+                    size: 42,
+                  ),
+                  SizedBox(width: 10),
+                  Text(
+                    "Check In",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 42,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              RichText(
+                textAlign: TextAlign.center,
+                text: TextSpan(
+                  style: const TextStyle(color: Colors.white70, fontSize: 18),
+                  children: [
+                    TextSpan(
+                      text: widget.assignedUser,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    TextSpan(
+                      text:
+                          " Next Check In at ${DateFormat.jm().format(widget.nextCheckin)}",
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _timeBox(hours, "HRS"),
+                  const SizedBox(width: 16),
+
+                  const Text(
+                    ":",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 34,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(width: 16),
+
+                  _timeBox(mins, "MINS"),
+
+                  const SizedBox(width: 16),
+
+                  const Text(
+                    ":",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 34,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(width: 16),
+
+                  _timeBox(secs, "SECS"),
+                ],
+              ),
+
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _timeBox(String value, String label) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 40,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 4),
+
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.2,
+          ),
+        ),
+      ],
+    );
   }
 }

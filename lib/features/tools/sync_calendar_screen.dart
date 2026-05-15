@@ -1,6 +1,7 @@
 import 'package:device_calendar/device_calendar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 //import 'package:device_calendar/device_calendar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -38,7 +39,7 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
   Future<void> _initialize() async {
     setState(() => _isLoading = true);
 
-     // Check / request permissions
+    // Check / request permissions
     var permResult = await _calendarPlugin.hasPermissions();
     if (permResult.isSuccess && !(permResult.data ?? false)) {
       permResult = await _calendarPlugin.requestPermissions();
@@ -67,15 +68,15 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
     final result = await _calendarPlugin.retrieveCalendars();
     if (result.isSuccess && result.data != null) {
       // Filter to writable calendars (null-safe check — iOS sometimes reports isReadOnly as null)
-      var writable = result.data!
-          .where((c) => c.isReadOnly != true)
-          .toList();
+      var writable = result.data!.where((c) => c.isReadOnly != true).toList();
 
       // Fallback: if no writable calendars found, show all calendars
       // so the user can still see what's available
       if (writable.isEmpty && result.data!.isNotEmpty) {
         writable = result.data!.toList();
-        debugPrint('[CalendarSync] No writable calendars found, showing all ${writable.length} calendars');
+        debugPrint(
+          '[CalendarSync] No writable calendars found, showing all ${writable.length} calendars',
+        );
       }
 
       setState(() => _calendars = writable);
@@ -130,13 +131,13 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
           .eq('family_id', profile.familyId)
           .gte('event_datetime', now.toIso8601String())
           .order('event_datetime', ascending: true);
-
+      debugPrint('Found events: ${events.length}');
       int count = 0;
       for (final evt in events) {
         final title = evt['title'] as String? ?? 'Well-Check Event';
         final dtStr = evt['event_datetime'] as String;
         final notes = evt['notes'] as String?;
-
+        print(title);
         final startDt = DateTime.parse(dtStr).toLocal();
         final endDt = startDt.add(const Duration(hours: 1)); // Default 1hr
 
@@ -167,7 +168,9 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✅ Synced $count event${count != 1 ? 's' : ''} to calendar!'),
+            content: Text(
+              '✅ Synced $count event${count != 1 ? 's' : ''} to calendar!',
+            ),
             backgroundColor: ShieldColors.safeZoneGreen,
           ),
         );
@@ -190,10 +193,7 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Calendar'),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text('Calendar'), centerTitle: true),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Padding(
@@ -218,7 +218,9 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
                   if (_lastSyncTime != null)
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         color: ShieldColors.activeTeal.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
@@ -226,8 +228,11 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.check_circle,
-                              color: ShieldColors.safeZoneGreen, size: 16),
+                          const Icon(
+                            Icons.check_circle,
+                            color: ShieldColors.safeZoneGreen,
+                            size: 16,
+                          ),
                           const SizedBox(width: 6),
                           Text(
                             'Last sync: $_lastSyncTime ($_syncedCount events)',
@@ -280,7 +285,8 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
                                     side: isConnected
                                         ? const BorderSide(
                                             color: ShieldColors.activeTeal,
-                                            width: 2)
+                                            width: 2,
+                                          )
                                         : BorderSide.none,
                                   ),
                                   child: ListTile(
@@ -289,8 +295,7 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
                                       height: 40,
                                       decoration: BoxDecoration(
                                         color: Color(cal.color ?? 0xFF007F80),
-                                        borderRadius:
-                                            BorderRadius.circular(10),
+                                        borderRadius: BorderRadius.circular(10),
                                       ),
                                       child: const Icon(
                                         Icons.calendar_month,
@@ -318,7 +323,8 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
                                             : FontWeight.normal,
                                       ),
                                     ),
-                                    trailing: _isSyncing &&
+                                    trailing:
+                                        _isSyncing &&
                                             _selectedCalendarId == cal.id
                                         ? const SizedBox(
                                             width: 24,
@@ -334,8 +340,8 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
                                                 ShieldColors.activeTeal,
                                             onChanged: _isSyncing
                                                 ? null
-                                                : (_) => _toggleCalendar(
-                                                    cal.id!),
+                                                : (_) =>
+                                                      _toggleCalendar(cal.id!),
                                           ),
                                   ),
                                 );
@@ -363,13 +369,11 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
                                 ),
                               )
                             : const Icon(Icons.sync),
-                        label: Text(
-                            _isSyncing ? 'Syncing...' : 'SYNC NOW'),
+                        label: Text(_isSyncing ? 'Syncing...' : 'SYNC NOW'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: ShieldColors.activeTeal,
                           foregroundColor: Colors.white,
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 16),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: ShieldDesign.roundedTwelve,
                           ),
@@ -382,10 +386,8 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
                     child: OutlinedButton(
                       onPressed: () => Navigator.of(context).pop(),
                       style: OutlinedButton.styleFrom(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 16),
-                        side: const BorderSide(
-                            color: ShieldColors.activeTeal),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        side: const BorderSide(color: ShieldColors.activeTeal),
                         shape: RoundedRectangleBorder(
                           borderRadius: ShieldDesign.roundedTwelve,
                         ),
@@ -408,15 +410,11 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.calendar_month,
-                size: 64, color: Colors.grey.shade300),
+            Icon(Icons.calendar_month, size: 64, color: Colors.grey.shade300),
             const SizedBox(height: 16),
             const Text(
               'Calendar Access Required',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
             ),
             const SizedBox(height: 8),
             const Text(
@@ -448,15 +446,11 @@ class _SyncCalendarScreenState extends ConsumerState<SyncCalendarScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.event_busy,
-                size: 64, color: Colors.grey.shade300),
+            Icon(Icons.event_busy, size: 64, color: Colors.grey.shade300),
             const SizedBox(height: 16),
             const Text(
               'No Calendars Found',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
             ),
             const SizedBox(height: 8),
             const Text(

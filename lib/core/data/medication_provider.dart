@@ -174,13 +174,15 @@ Stream<List<Medication>> familyMedications(Ref ref) async* {
       .eq('family_id', profile.familyId)
       .order('created_at', ascending: false)
       .map((events) {
-    try {
-      return events.map((e) => Medication.fromJson(e)).toList();
-    } catch (err) {
-      debugPrint('[MedicationProvider] Parse error: $err');
-      return <Medication>[];
-    }
-  });
+        try {
+          print("events");
+          print(events);
+          return events.map((e) => Medication.fromJson(e)).toList();
+        } catch (err) {
+          debugPrint('[MedicationProvider] Parse error: $err');
+          return <Medication>[];
+        }
+      });
 }
 
 @riverpod

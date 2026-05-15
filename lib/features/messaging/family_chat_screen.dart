@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -18,22 +20,31 @@ class _FamilyChatScreenState extends ConsumerState<FamilyChatScreen> {
   final ScrollController _scrollController = ScrollController();
   bool _isSending = false;
   RealtimeChannel? channel;
-@override
+  Timer? _refreshTimer;
+
+  @override
   void initState() {
-  channel = Supabase.instance.client.channel('family-chat')
-    ..onPostgresChanges(
-      event: PostgresChangeEvent.insert,
-      schema: 'public',
-      table: 'family_messages',
-      callback: (payload) {
-        setState(() {});
-      },
-    )
-    ..subscribe();    super.initState();
+    // channel = Supabase.instance.client.channel('family-chat')
+    //   ..onPostgresChanges(
+    //     event: PostgresChangeEvent.insert,
+    //     schema: 'public',
+    //     table: 'family_messages',
+    //     callback: (payload) {
+    //       setState(() {});
+    //     },
+    //   )
+    //   ..subscribe();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) setState(() {});
+    });
+    super.initState();
   }
+
   @override
   void dispose() {
-    channel?.unsubscribe();
+    // channel?.unsubscribe();
+    _refreshTimer?.cancel();
+
     _msgController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -51,6 +62,7 @@ class _FamilyChatScreenState extends ConsumerState<FamilyChatScreen> {
       await Supabase.instance.client.from('family_messages').insert({
         'family_id': profile.familyId,
         'sender_id': profile.userId,
+        'sender_name': profile.fullName,
         'message': text,
         'message_type': 'text',
       });
@@ -113,14 +125,14 @@ class _FamilyChatScreenState extends ConsumerState<FamilyChatScreen> {
 
     return Scaffold(
       body: SafeArea(
-       // padding: MediaQuery.viewInsetsOf(context),
+        // padding: MediaQuery.viewInsetsOf(context),
         child: Container(
           decoration: const BoxDecoration(
             color: ShieldColors.backgroundWhite,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           constraints: BoxConstraints(
-          //  maxHeight: MediaQuery.of(context).size.height * 0.85,
+            //  maxHeight: MediaQuery.of(context).size.height * 0.85,
           ),
           child: Column(
             children: [
@@ -165,10 +177,13 @@ class _FamilyChatScreenState extends ConsumerState<FamilyChatScreen> {
                             ),
                           ],
                         ),
-                        child: const Icon(Icons.close, color: Colors.black, size: 16),
+                        child: const Icon(
+                          Icons.close,
+                          color: Colors.black,
+                          size: 16,
+                        ),
                       ),
                     ),
-
                   ],
                 ),
               ),
@@ -192,7 +207,7 @@ class _FamilyChatScreenState extends ConsumerState<FamilyChatScreen> {
                         // if (snapshot.connectionState == ConnectionState.waiting) {
                         //   return const Center(child: CircularProgressIndicator());
                         // }
-       print("STREAM UPDATED");//
+                        print("STREAM UPDATED"); //
                         final messages = snapshot.data ?? [];
                         if (messages.isEmpty) {
                           return const Center(
@@ -226,11 +241,14 @@ class _FamilyChatScreenState extends ConsumerState<FamilyChatScreen> {
                           itemCount: messages.length,
                           itemBuilder: (context, index) {
                             final msg = messages[index];
+                            print(msg);
+                            print("msg");
                             final isMe = msg['sender_id'] == profile.userId;
                             return _ChatBubble(
                               message: msg['message'] as String? ?? '',
                               isMe: isMe,
                               senderId: msg['sender_id'] as String? ?? '',
+                              senderName: msg['sender_name'] as String? ?? '',
                               createdAt: msg['created_at'] as String?,
                             );
                           },
@@ -238,7 +256,8 @@ class _FamilyChatScreenState extends ConsumerState<FamilyChatScreen> {
                       },
                     );
                   },
-                  loading: () => const Center(child: CircularProgressIndicator()),
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
                   error: (e, st) => Center(child: Text('Error: $e')),
                 ),
               ),
@@ -318,11 +337,13 @@ class _ChatBubble extends StatelessWidget {
   final bool isMe;
   final String senderId;
   final String? createdAt;
+  final String? senderName;
 
   const _ChatBubble({
     required this.message,
     required this.isMe,
     required this.senderId,
+    required this.senderName,
     this.createdAt,
   });
 
@@ -387,6 +408,9 @@ class _ChatBubble extends StatelessWidget {
                       fontSize: 10,
                     ),
                   ),
+                  if (!isMe)
+                    if (senderName != "")
+                      Text(senderName ?? "", style: TextStyle(fontSize: 10)),
                 ],
               ),
             ),

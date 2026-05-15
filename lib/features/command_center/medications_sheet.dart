@@ -1,3 +1,4 @@
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
@@ -10,7 +11,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 
 class MedicationsSheet extends ConsumerStatefulWidget {
-  const MedicationsSheet({super.key});
+  bool? fromLeader = false;
+
+  MedicationsSheet({super.key, this.fromLeader});
 
   @override
   ConsumerState<MedicationsSheet> createState() => _MedicationsSheetState();
@@ -19,6 +22,7 @@ class MedicationsSheet extends ConsumerStatefulWidget {
 class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
   final FlutterTts _flutterTts = FlutterTts();
   bool _isPlaying = false;
+  String? _loggingMedicationId;
 
   @override
   void initState() {
@@ -57,24 +61,183 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
     await _flutterTts.speak(text);
   }
 
+  // Future<void> _logDose(Medication med) async {
+  //   try {
+  //     final profile = await ref.read(currentUserProfileProvider.future);
+  //     if (profile == null) return;
+  //
+  //     final now = DateTime.now().toUtc();
+  //
+  //     // Log to dose_logs
+  //     await Supabase.instance.client.from('dose_logs').insert({
+  //       'medication_id': med.id,
+  //       'user_id': med.assignedTo, // The person who takes it
+  //       'family_id': profile.familyId,
+  //       'scheduled_at': now.toIso8601String(),
+  //       'taken_at': now.toIso8601String(),
+  //       'status': 'taken',
+  //     });
+  //
+  //     // Also log to well_events for the family feed
+  //     await Supabase.instance.client.from('well_events').insert({
+  //       'family_id': profile.familyId,
+  //       'user_id': profile.userId,
+  //       'event_type': 'medication_logged',
+  //       'title': 'Medication Taken',
+  //       'description':
+  //           '${profile.fullName ?? 'Someone'} logged ${med.medicationName} (${med.dosage})',
+  //     });
+  //
+  //     if (mounted) {
+  //       ref.refresh(familyMedicationsProvider);
+  //       ref.invalidate(familyMedicationsProvider);
+  //
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         SnackBar(
+  //           content: Text('✓ ${med.medicationName} dose logged!'),
+  //           backgroundColor: ShieldColors.safeZoneGreen,
+  //         ),
+  //       );
+  //
+  //     }
+  //   } catch (e) {
+  //     debugPrint('[Medication] Error logging dose: $e');
+  //     if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         SnackBar(
+  //           content: Text('Error logging dose: $e'),
+  //           backgroundColor: Colors.red,
+  //           duration: const Duration(seconds: 6),
+  //         ),
+  //       );
+  //     }
+  //   }finally{
+  //     final profile = await ref.read(currentUserProfileProvider.future);
+  //     if (profile == null) throw Exception('No profile');
+  //
+  //     final members = await Supabase.instance.client
+  //         .from('family_members')
+  //         .select('user_id')
+  //         .eq('family_id', profile.familyId);
+  //
+  //     // 3. Send push
+  //     for (final m in members) {
+  //       final targetUserId = m['user_id'];
+  //
+  //       if (targetUserId == profile.userId) continue;
+  //
+  //       try {
+  //         await Supabase.instance.client.functions.invoke(
+  //           'push-router',
+  //           body: {
+  //             "target_user_id": targetUserId,
+  //             "title": "Medications",
+  //             "body":
+  //             "${profile.fullName ?? 'Someone'}:${med.medicationName}  dose logged",
+  //             "action": "log_dose",
+  //           },
+  //         );
+  //       } catch (e) {
+  //         print("Push failed: $e");
+  //       }
+  //     }
+  //   }
+  // }
+
   Future<void> _logDose(Medication med) async {
+    if (_loggingMedicationId != null) return;
+
+    setState(() {
+      _loggingMedicationId = med.id;
+    });
+
     try {
       final profile = await ref.read(currentUserProfileProvider.future);
       if (profile == null) return;
 
       final now = DateTime.now().toUtc();
+      int batteryLevel =
+          100; // Safe default for simulators and aggressive background iOS policies
+      try {
+        final battery = Battery();
+        batteryLevel = await battery.batteryLevel;
+      } catch (e) {
+        debugPrint(
+          'Battery info not available over isolate, using default: $e',
+        );
+      }
 
-      // Log to dose_logs
       await Supabase.instance.client.from('dose_logs').insert({
         'medication_id': med.id,
-        'user_id': med.assignedTo, // The person who takes it
+        'user_id': med.assignedTo,
         'family_id': profile.familyId,
         'scheduled_at': now.toIso8601String(),
         'taken_at': now.toIso8601String(),
         'status': 'taken',
       });
+      final medData = await Supabase.instance.client
+          .from('medications')
+          .select('scheduled_at, recurrence, days_of_week')
+          .eq('id', med.id)
+          .single();
 
-      // Also log to well_events for the family feed
+      DateTime nextDate = DateTime.parse(medData['scheduled_at']);
+
+      switch (medData['recurrence']) {
+        case 'daily':
+          nextDate = nextDate.add(const Duration(days: 1));
+          break;
+
+        case 'every_other_day':
+          nextDate = nextDate.add(const Duration(days: 2));
+          break;
+
+        case 'weekly':
+          final days = List<int>.from(medData['days_of_week'] ?? [])..sort();
+
+          if (days.isEmpty) {
+            nextDate = nextDate.add(const Duration(days: 7));
+          } else {
+            final currentDay = nextDate.weekday % 7;
+
+            int? found;
+
+            for (final d in days) {
+              if (d > currentDay) {
+                found = d;
+                break;
+              }
+            }
+
+            found ??= days.first + 7;
+
+            nextDate = nextDate.add(Duration(days: found - currentDay));
+          }
+
+          break;
+
+        case 'monthly':
+          nextDate = DateTime(
+            nextDate.year,
+            nextDate.month + 1,
+            nextDate.day,
+            nextDate.hour,
+            nextDate.minute,
+          );
+          break;
+
+        default:
+          break;
+      }
+      await Supabase.instance.client
+          .from('medications')
+          .update({
+            'scheduled_at': nextDate.toUtc().toIso8601String(),
+
+            'reminder_sent': false,
+            'reminder_sent_at': null,
+          })
+          .eq('id', med.id);
       await Supabase.instance.client.from('well_events').insert({
         'family_id': profile.familyId,
         'user_id': profile.userId,
@@ -82,41 +245,28 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
         'title': 'Medication Taken',
         'description':
             '${profile.fullName ?? 'Someone'} logged ${med.medicationName} (${med.dosage})',
+        'battery_level': batteryLevel,
       });
 
-      if (mounted) {
-        ref.refresh(familyMedicationsProvider);
-        ref.invalidate(familyMedicationsProvider);
+      // IMPORTANT
+      ref.invalidate(allDoseLogsProvider);
+      ref.invalidate(familyMedicationsProvider);
 
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('✓ ${med.medicationName} dose logged!'),
             backgroundColor: ShieldColors.safeZoneGreen,
           ),
         );
-
       }
-    } catch (e) {
-      debugPrint('[Medication] Error logging dose: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error logging dose: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 6),
-          ),
-        );
-      }
-    }finally{
-      final profile = await ref.read(currentUserProfileProvider.future);
-      if (profile == null) throw Exception('No profile');
 
+      // Send push
       final members = await Supabase.instance.client
           .from('family_members')
           .select('user_id')
           .eq('family_id', profile.familyId);
 
-      // 3. Send push
       for (final m in members) {
         final targetUserId = m['user_id'];
 
@@ -129,13 +279,30 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
               "target_user_id": targetUserId,
               "title": "Medications",
               "body":
-              "${profile.fullName ?? 'Someone'}:${med.medicationName}  dose logged",
+                  "${profile.fullName ?? 'Someone'}: ${med.medicationName} dose logged",
               "action": "log_dose",
             },
           );
         } catch (e) {
-          print("Push failed: $e");
+          debugPrint("Push failed: $e");
         }
+      }
+    } catch (e) {
+      debugPrint('[Medication] Error logging dose: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error logging dose: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loggingMedicationId = null;
+        });
       }
     }
   }
@@ -145,7 +312,9 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Medication'),
-        content: const Text('Are you sure you want to delete this medication? This action cannot be undone.'),
+        content: const Text(
+          'Are you sure you want to delete this medication? This action cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -153,9 +322,7 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: TextButton.styleFrom(
-              foregroundColor: ShieldColors.alertRed,
-            ),
+            style: TextButton.styleFrom(foregroundColor: ShieldColors.alertRed),
             child: const Text('Delete'),
           ),
         ],
@@ -166,6 +333,8 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
 
     try {
       await Supabase.instance.client.from('medications').delete().eq('id', id);
+      ref.invalidate(allDoseLogsProvider);
+      ref.invalidate(familyMedicationsProvider);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -174,6 +343,7 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
       }
     }
   }
+
   Color _doseStatusColor(Medication med) {
     final next = med.nextDoseToday;
     if (next == null) return Colors.grey;
@@ -202,7 +372,9 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
   @override
   Widget build(BuildContext context) {
     final medicationsAsync = ref.watch(familyMedicationsProvider);
-
+    final profile = ref.watch(currentUserProfileProvider);
+    print(profile.value!.role);
+    print("sheeeeet");
     return Container(
       decoration: const BoxDecoration(
         color: ShieldColors.backgroundWhite,
@@ -243,24 +415,26 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
                 ),
               ),
               Spacer(),
-              IconButton(
-                onPressed: () async {
-                  await showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    useSafeArea: true,
+              //
+              if (widget.fromLeader == true)
+                IconButton(
+                  onPressed: () async {
+                    await showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
 
-                    backgroundColor: Colors.transparent,
-                    builder: (context) => const AddMedicationSheet(),
-                  );
-                  ref.refresh(familyMedicationsProvider);
-                },
-                icon: const Icon(
-                  Icons.add_circle,
-                  color: ShieldColors.activeTeal,
-                  size: 32,
+                      backgroundColor: Colors.transparent,
+                      builder: (context) => const AddMedicationSheet(),
+                    );
+                    ref.refresh(familyMedicationsProvider);
+                  },
+                  icon: const Icon(
+                    Icons.add_circle,
+                    color: ShieldColors.activeTeal,
+                    size: 32,
+                  ),
                 ),
-              ),
               SizedBox(width: 10),
               GestureDetector(
                 onTap: () async {
@@ -295,30 +469,52 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          Icons.medical_services_outlined,
-                          size: 64,
-                          color: Colors.grey.shade300,
-                        ),
+                        if (widget.fromLeader == true)
+                          Icon(
+                            Icons.medical_services_outlined,
+                            size: 64,
+                            color: Colors.grey.shade300,
+                          ),
                         const SizedBox(height: 16),
                         const Text(
                           'No medications scheduled yet.',
                           style: TextStyle(color: Colors.grey, fontSize: 16),
                         ),
                         const SizedBox(height: 8),
-                        const Text(
-                          'Tap + to add a medication with reminders.',
-                          style: TextStyle(color: Colors.grey, fontSize: 13),
-                        ),
+                        if (widget.fromLeader == true)
+                          const Text(
+                            'Tap + to add a medication with reminders.',
+                            style: TextStyle(color: Colors.grey, fontSize: 13),
+                          ),
                       ],
                     ),
                   );
                 }
 
                 // Separate active vs inactive
-                final active = meds.where((m) => m.isActive).toList();
-                final inactive = meds.where((m) => !m.isActive).toList();
+                final role = profile.value?.role;
 
+                final isLeaderOrMonitor = role == "leader" || role == "monitor";
+
+                final active = isLeaderOrMonitor
+                    ? meds.where((m) => m.isActive).toList()
+                    : meds
+                          .where(
+                            (m) =>
+                                m.isActive &&
+                                m.assignedTo == profile.value?.userId,
+                          )
+                          .toList();
+
+                final inactive = isLeaderOrMonitor
+                    ? meds.where((m) => !m.isActive).toList()
+                    : meds
+                          .where(
+                            (m) =>
+                                !m.isActive &&
+                                m.assignedTo == profile.value?.userId,
+                          )
+                          .toList();
                 return ListView(
                   children: [
                     // Today's schedule summary
@@ -327,6 +523,8 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
 
                     ...active.map(
                       (med) => MedicationCard(
+                        isLeader: widget.fromLeader,
+                        isLogging: _loggingMedicationId == med.id,
                         med: med,
                         onDelete: () => _deleteMedication(med.id),
                         onLogDose: () => _logDose(med),
@@ -341,6 +539,8 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
                             builder: (context) =>
                                 AddMedicationSheet(existingMedication: med),
                           );
+                          ref.invalidate(allDoseLogsProvider);
+                          ref.invalidate(familyMedicationsProvider);
                           ref.refresh(familyMedicationsProvider);
                         },
                         onSpeak: () =>
@@ -361,6 +561,8 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
                       ),
                       ...inactive.map(
                         (med) => MedicationCard(
+                          isLeader: widget.fromLeader,
+                          isLogging: _loggingMedicationId == med.id,
                           med: med,
                           onDelete: () => _deleteMedication(med.id),
                           onLogDose: () => _logDose(med),
@@ -375,6 +577,8 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
                                   AddMedicationSheet(existingMedication: med),
                             );
                             ref.refresh(familyMedicationsProvider);
+                            ref.invalidate(allDoseLogsProvider);
+                            ref.invalidate(familyMedicationsProvider);
                           },
                           onSpeak: () =>
                               _speak(med.medicationName, med.instructions),
@@ -443,15 +647,19 @@ class MedicationCard extends ConsumerWidget {
   final bool isPlaying;
   final VoidCallback onSpeak;
   final VoidCallback? onEdit;
+  final bool isLogging;
+  bool? isLeader = false;
 
-  const MedicationCard({
+  MedicationCard({
     super.key,
     required this.med,
     required this.onDelete,
     required this.onLogDose,
     required this.isPlaying,
     required this.onSpeak,
+    required this.isLogging,
     this.onEdit,
+    required this.isLeader,
   });
 
   @override
@@ -460,20 +668,31 @@ class MedicationCard extends ConsumerWidget {
     //final doseLogsAsync = ref.watch(doseLogsProvider(med.id));
 
     // Determine if taken today
-    bool isTakenToday = false;
-    allLogsAsync.whenData((logs) {
-      final now = DateTime.now();
-      isTakenToday = logs.any(
-        (log) =>
-            log.medicationId == med.id &&
-            log.status == 'taken' &&
-            log.takenAt != null &&
-            log.takenAt!.year == now.year &&
-            log.takenAt!.month == now.month &&
-            log.takenAt!.day == now.day,
-      );
-    });
+    //bool isTakenToday = false;
+    // allLogsAsync.whenData((logs) {
+    //   final now = DateTime.now();
+    //   isTakenToday = logs.any(
+    //     (log) =>
+    //         log.medicationId == med.id &&
+    //         log.status == 'taken' &&
+    //         log.takenAt != null &&
+    //         log.takenAt!.year == now.year &&
+    //         log.takenAt!.month == now.month &&
+    //         log.takenAt!.day == now.day,
+    //   );
+    // });
+    final logs = allLogsAsync.value ?? [];
 
+    final now = DateTime.now();
+    final isTakenToday = logs.any(
+      (log) =>
+          log.medicationId == med.id &&
+          log.status == 'taken' &&
+          log.takenAt != null &&
+          log.takenAt!.year == now.year &&
+          log.takenAt!.month == now.month &&
+          log.takenAt!.day == now.day,
+    );
     final nextDose = med.nextDoseToday;
     final statusColor = isTakenToday
         ? ShieldColors.safeZoneGreen
@@ -509,7 +728,7 @@ class MedicationCard extends ConsumerWidget {
       child: Card(
         margin: const EdgeInsets.only(bottom: 12),
         shape: RoundedRectangleBorder(borderRadius: ShieldDesign.roundedTwelve),
-        elevation: 2,
+        elevation: 1,
 
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -550,52 +769,51 @@ class MedicationCard extends ConsumerWidget {
                           fontSize: 11,
                         ),
                       ),
-                    ),      PopupMenuButton<String>(
-                    icon: const Icon(
-                      Icons.more_vert,
-                      color: Colors.grey,
                     ),
-                    onSelected: (value) {
-                      if (value == 'edit') {
-                        onEdit?.call();
-                      } else if (value == 'delete') {
-                        onDelete?.call();
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.edit_outlined,
-                              color: ShieldColors.activeTeal,
-                              size: 20,
-                            ),
-                            SizedBox(width: 8),
-                            Text('Edit'),
-                          ],
+                  if (isLeader == true)
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert, color: Colors.grey),
+                      onSelected: (value) {
+                        if (value == 'edit') {
+                          onEdit?.call();
+                        } else if (value == 'delete') {
+                          onDelete?.call();
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'edit',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.edit_outlined,
+                                color: ShieldColors.activeTeal,
+                                size: 20,
+                              ),
+                              SizedBox(width: 8),
+                              Text('Edit'),
+                            ],
+                          ),
                         ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.delete,
-                              color: ShieldColors.alertRed,
-                              size: 20,
-                            ),
-                            SizedBox(width: 8),
-                            Text(
-                              'Delete',
-                              style: TextStyle(color: ShieldColors.alertRed),
-                            ),
-                          ],
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.delete,
+                                color: ShieldColors.alertRed,
+                                size: 20,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Delete',
+                                style: TextStyle(color: ShieldColors.alertRed),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
                 ],
               ),
               const SizedBox(height: 8),
@@ -645,11 +863,31 @@ class MedicationCard extends ConsumerWidget {
               const SizedBox(height: 12),
 
               // Log Dose button
-              if (med.isActive && !isTakenToday)
+              // if (med.isActive && !isTakenToday)
+              //   SizedBox(
+              //     width: double.infinity,
+              //     child: ElevatedButton.icon(
+              //       onPressed: onLogDose,
+              //       style: ElevatedButton.styleFrom(
+              //         backgroundColor: ShieldColors.activeTeal,
+              //         foregroundColor: Colors.white,
+              //         shape: RoundedRectangleBorder(
+              //           borderRadius: ShieldDesign.roundedTwelve,
+              //         ),
+              //         padding: const EdgeInsets.symmetric(vertical: 12),
+              //       ),
+              //       icon: const Icon(Icons.check_circle, size: 20),
+              //       label: const Text(
+              //         'Log Dose Taken',
+              //         style: TextStyle(fontWeight: FontWeight.bold),
+              //       ),
+              //     ),
+              //   ),
+              if (med.isActive && !isTakenToday && isLeader == true)
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: onLogDose,
+                    onPressed: isLogging ? null : onLogDose,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: ShieldColors.activeTeal,
                       foregroundColor: Colors.white,
@@ -658,10 +896,19 @@ class MedicationCard extends ConsumerWidget {
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    icon: const Icon(Icons.check_circle, size: 20),
-                    label: const Text(
-                      'Log Dose Taken',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                    icon: isLogging
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.check_circle, size: 20),
+                    label: Text(
+                      isLogging ? 'Logging...' : 'Log Dose Taken',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),

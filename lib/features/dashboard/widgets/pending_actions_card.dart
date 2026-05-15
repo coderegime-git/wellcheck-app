@@ -1,3 +1,4 @@
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -20,13 +21,23 @@ class PendingActionsCard extends ConsumerWidget {
         'taken_at': now.toIso8601String(),
         'status': 'taken',
       });
-
+      int batteryLevel =
+      100; // Safe default for simulators and aggressive background iOS policies
+      try {
+        final battery = Battery();
+        batteryLevel = await battery.batteryLevel;
+      } catch (e) {
+        debugPrint(
+          'Battery info not available over isolate, using default: $e',
+        );
+      }
       final profile = await ref.read(currentUserProfileProvider.future);
       await Supabase.instance.client.from('well_events').insert({
         'family_id': familyId,
         'user_id': userId,
         'event_type': 'medication_logged',
         'title': 'Medication Taken',
+        'battery_level':batteryLevel,
         'description': '${profile?.fullName ?? 'User'} logged ${med.medicationName} (${med.dosage})',
       });
 

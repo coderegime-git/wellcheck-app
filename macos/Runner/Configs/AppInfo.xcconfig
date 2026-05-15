@@ -8,7 +8,7 @@
 PRODUCT_NAME = Well-Check
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.anwiik.wellCheckV3
+PRODUCT_BUNDLE_IDENTIFIER = com.app.wellcheck
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.anwiik. All rights reserved.

@@ -9,6 +9,8 @@ import 'package:well_check_v3/core/data/auth_repository.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
 import 'package:well_check_v3/core/navigation/shield_router.dart';
 
+import '../safety/services/pulse_service.dart';
+
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -112,7 +114,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Biometric auth error: $e'),
+            content: Text('Biometric auth error: ${e.toReadableMessage()}'),
             backgroundColor: ShieldColors.urgentRed,
           ),
         );
@@ -179,12 +181,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         ref.invalidate(currentUserProfileProvider);
         final profile = await ref.read(currentUserProfileProvider.future);
         if (profile != null && mounted) {
+          //   await  PulseService().broadcastPulse(null);
+
           final matchedRole = ShieldRole.values.firstWhere(
             (r) => r.name == profile.role,
             orElse: () => ShieldRole.none,
           );
           ref.read(userRoleProvider.notifier).setRole(matchedRole);
-          context.go('/dashboard');
+          if (mounted) {
+            context.go('/dashboard');
+          }
         } else if (mounted) {
           context.go('/role-selection');
         }
@@ -193,7 +199,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Login failed: $e'),
+            content: Text('Login failed: ${e.toReadableMessage()}'),
             backgroundColor: ShieldColors.urgentRed,
           ),
         );
@@ -389,16 +395,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     //   ),
     // );
     return Scaffold(
-      backgroundColor:     Colors.grey.shade50, // o
+      backgroundColor: Colors.grey.shade50, // o
       body: Container(
-        decoration:  BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
               ShieldColors.activeTeal, // teal top
               ShieldColors.activeTeal.withOpacity(0.5), // teal top
-             Colors.grey.shade100, // off-white bottom
+              Colors.grey.shade100, // off-white bottom
               Colors.grey.shade50, // o// off-white bottom
             ],
           ),
@@ -415,10 +421,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   width: 150,
                   height: 140,
                   decoration: BoxDecoration(
-                 //   color: Colors.white.withOpacity(0.25),
+                    //   color: Colors.white.withOpacity(0.25),
                     borderRadius: BorderRadius.circular(24),
                   ),
-                  child: Image.asset("assets/logo.png")
+                  child: Image.asset("assets/logo.png"),
                 ),
 
                 const SizedBox(height: 18),
@@ -435,10 +441,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: 6),
                 const Text(
                   'Sign in to continue',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.black,
-                  ),
+                  style: TextStyle(fontSize: 14, color: Colors.black),
                 ),
 
                 const SizedBox(height: 30),
@@ -447,7 +450,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Container(
                   //padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                 //   color: Colors.white,
+                    //   color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
@@ -477,7 +480,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       //     ),
                       //   ),
                       // ),
-
                       const SizedBox(height: 20),
 
                       // Email field
@@ -491,7 +493,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             color: Color(0xFFAAAAAA),
                             letterSpacing: 0.5,
                           ),
-                          prefixIcon:  Icon(
+                          prefixIcon: Icon(
                             Icons.email_outlined,
                             color: Colors.grey.shade600,
                             size: 25,
@@ -533,21 +535,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                           child: _isLoading
                               ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
                               : const Text(
-                            'SEND VERIFICATION PIN',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.8,
-                            ),
-                          ),
+                                  'SEND VERIFICATION PIN',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.8,
+                                  ),
+                                ),
                         ),
                       ),
                     ],
@@ -560,7 +562,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: Divider(color: Colors.grey.shade400, thickness: 0.5),
+                      child: Divider(
+                        color: Colors.grey.shade400,
+                        thickness: 0.5,
+                      ),
                     ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -573,7 +578,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                     ),
                     Expanded(
-                      child: Divider(color: Colors.grey.shade400, thickness: 0.5),
+                      child: Divider(
+                        color: Colors.grey.shade400,
+                        thickness: 0.5,
+                      ),
                     ),
                   ],
                 ),
@@ -615,15 +623,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     text: const TextSpan(
                       style: TextStyle(fontSize: 13, color: Color(0xFF777777)),
                       children: [
-                        TextSpan(text: "Don't have an account? ",style: TextStyle(
-                  color: Colors.black,
-                      fontWeight: FontWeight.bold,
-
-                    ),),
+                        TextSpan(
+                          text: "Don't have an account? ",
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                         TextSpan(
                           text: 'Sign Up',
                           style: TextStyle(
-
                             color: Color(0xFF00796B),
                             fontWeight: FontWeight.bold,
                           ),
@@ -641,5 +650,98 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       ),
     );
   }
-  }
+}
+// lib/core/utils/supabase_exception.dart
 
+extension SupabaseExceptionMessage on Object {
+  String toReadableMessage() {
+    final error = toString();
+    if (error.contains('429') ||
+        error.contains('over_email_send_rate_limit') ||
+        error.contains('over_request_rate_limit') ||
+        error.contains('For security purposes')) {
+      // Extract seconds if present
+      final match = RegExp(r'after (\d+) seconds').firstMatch(error);
+      if (match != null) {
+        final seconds = match.group(1);
+        return 'Please wait $seconds seconds before trying again.';
+      }
+      return 'Too many attempts. Please wait a moment and try again.';
+    }
+    // PostgrestException — DB errors
+    if (this is PostgrestException) {
+      final e = this as PostgrestException;
+      print(e);
+      switch (e.code) {
+        case '23505':
+          return 'This record already exists.';
+        case '23503':
+          return 'Related record not found.';
+        case '23502':
+          return 'Required field is missing.';
+        case '42501':
+          return 'You don\'t have permission to do this.';
+        case 'PGRST116':
+          return 'Record not found.';
+        case 'over_email_send_rate_limit':
+          return 'Too many emails sent. Please wait a few minutes and try again.';
+
+        default:
+          return e.message;
+      }
+    }
+
+    // AuthException — login/signup errors
+    if (this is AuthException) {
+      final e = this as AuthException;
+      print(e);
+      switch (e.message) {
+        case 'Invalid login credentials':
+          return 'Incorrect email or password.';
+        case 'Email not confirmed':
+          return 'Please verify your email first.';
+        case 'User already registered':
+          return 'An account with this email already exists.';
+        case 'Password should be at least 6 characters':
+          return 'Password must be at least 6 characters.';
+
+        // ── Rate limit cases ──────────────────────────────────
+        case 'Email rate limit exceeded':
+        case 'over_email_send_rate_limit':
+          return 'Too many emails sent. Please wait a few minutes and try again.';
+        case 'over_request_rate_limit':
+          return 'Too many requests. Please slow down and try again.';
+        case 'For security purposes, you can only request this after':
+          return 'Please wait before requesting another email.';
+        // ─────────────────────────────────────────────────────
+
+        default:
+          // Catch rate limit messages that come as dynamic strings
+          if (e.message.contains('rate limit') ||
+              e.message.contains('after') ||
+              e.message.contains('seconds')) {
+            return 'Too many attempts. Please wait a moment and try again.';
+          }
+          return e.message;
+      }
+    }
+
+    // StorageException — file upload errors
+    if (this is StorageException) {
+      final e = this as StorageException;
+      return e.message;
+    }
+
+    // Network / timeout
+    if (error.contains('SocketException') ||
+        error.contains('NetworkException')) {
+      return 'No internet connection. Please check your network.';
+    }
+    if (error.contains('TimeoutException')) {
+      return 'Request timed out. Please try again.';
+    }
+
+    // Fallback
+    return 'Something went wrong. Please try again.';
+  }
+}

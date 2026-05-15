@@ -6,6 +6,8 @@ import 'package:well_check_v3/core/navigation/shield_router.dart';
 import 'package:well_check_v3/core/data/auth_repository.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
 
+import '../safety/services/pulse_service.dart';
+
 class RoleSelectionScreen extends ConsumerWidget {
   const RoleSelectionScreen({super.key});
 
@@ -62,6 +64,7 @@ class RoleSelectionScreen extends ConsumerWidget {
 
       await authRepo.createFamilyWithRole('My Family Shield', 'leader');
       ref.invalidate(currentUserProfileProvider);
+      await  PulseService().broadcastPulse(null);
 
       if (context.mounted) {
         context.go('/profile-setup');

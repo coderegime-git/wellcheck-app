@@ -1,3 +1,4 @@
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -8,7 +9,9 @@ import 'package:well_check_v3/core/data/safety_repository.dart';
 import 'package:well_check_v3/core/data/safe_zone_provider.dart';
 
 class CampusWatchSheet extends ConsumerStatefulWidget {
-  const CampusWatchSheet({super.key});
+  final bool fromLeader;
+
+  const CampusWatchSheet({super.key, this.fromLeader = false});
 
   @override
   ConsumerState<CampusWatchSheet> createState() => _CampusWatchSheetState();
@@ -191,14 +194,25 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
         'longitude': 0.0,
         'radius_meters': 300,
       });
-
+      int level =
+          100; // Safe default for simulators and aggressive background iOS policies
+      try {
+        final battery = Battery();
+        level = await battery.batteryLevel;
+      } catch (e) {
+        debugPrint(
+          'Battery info not available over isolate, using default: $e',
+        );
+      }
       await Supabase.instance.client.from('well_events').insert({
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'event_type': 'campus_added',
         'title': 'Campus Zone Added',
+        'battery_level': level,
+
         'description':
-            'Created campus zone: $name${address.isNotEmpty ? ' at $address' : ''}',
+            '${profile.fullName}- Created campus zone: $name${address.isNotEmpty ? ' at $address' : ''}',
       });
 
       if (mounted) {
@@ -282,15 +296,17 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
                 ],
               ),
               Spacer(),
-              IconButton(
-                onPressed: _showAddCampusDialog,
-                icon: const Icon(
-                  Icons.add_location_alt,
-                  color: ShieldColors.activeTeal,
-                  size: 28,
+              if (widget.fromLeader == true)
+                IconButton(
+                  onPressed: _showAddCampusDialog,
+                  icon: const Icon(
+                    Icons.add_location_alt,
+                    color: ShieldColors.activeTeal,
+                    size: 28,
+                  ),
+                  tooltip: 'Add Campus',
                 ),
-                tooltip: 'Add Campus',
-              ),GestureDetector(
+              GestureDetector(
                 onTap: () async {
                   Navigator.of(context).pop();
                 },
@@ -326,13 +342,16 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
                     borderRadius: ShieldDesign.roundedTwelve,
                     border: Border.all(color: Colors.amber.shade200),
                   ),
-                  child: const Row(
+                  child: Row(
                     children: [
                       Icon(Icons.info_outline, color: Colors.amber),
                       SizedBox(width: 12),
+
                       Expanded(
                         child: Text(
-                          'No safe zones configured yet. Create zones like "School" or "Home" from the Safe Zones menu to enable campus tracking.',
+                          widget.fromLeader == true
+                              ? 'No safe zones configured yet. Create zones like "School" or "Home" from the Safe Zones menu to enable campus tracking.'
+                              : 'No safe zones configured yet.',
                           style: TextStyle(fontSize: 13),
                         ),
                       ),
@@ -591,7 +610,8 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
                               e['event_type'] == 'check_in',
                         )
                         .toList();
-
+                    print("allEvents");
+                    print(allEvents);
                     // Filter based on per-user config
                     final events = allEvents
                         .where((e) {
@@ -654,6 +674,7 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
                       itemBuilder: (context, index) {
                         final evt = events[index];
                         final type = evt['event_type'] as String;
+                        final userName = evt['user_name'] as String?;
                         final desc =
                             evt['description'] as String? ??
                             evt['title'] as String? ??
@@ -692,14 +713,54 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
 
                         return ListTile(
                           leading: Icon(icon, color: color),
-                          title: Text(
-                            desc,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w500,
-                              fontSize: 13,
-                            ),
+                          // title: Row(
+                          //   children: [
+                          //     if(userName!=null&&userName!='')
+                          //       Expanded(
+                          //         child: Text('$userName-'??"", style: TextStyle(
+                          //           fontWeight: FontWeight.bold,
+                          //           color: Colors.black,
+                          //           fontSize: 12,
+                          //         ),),
+                          //       ),
+                          //     Expanded(
+                          //       child: Text(
+                          //         desc,
+                          //         style: const TextStyle(
+                          //           fontWeight: FontWeight.w500,
+                          //           fontSize: 13,
+                          //         ),
+                          //         maxLines: 2,
+                          //         overflow: TextOverflow.ellipsis,
+                          //       ),
+                          //     ),
+                          //   ],
+                          // ),
+                          title: RichText(
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
+                            text: TextSpan(
+                              children: [
+                                if (userName != null && userName != '')
+                                  TextSpan(
+                                    text: '$userName - ',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+
+                                TextSpan(
+                                  text: desc,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w500,
+                                    color: ShieldColors.activeTeal,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                           trailing: Text(
                             timeStr,

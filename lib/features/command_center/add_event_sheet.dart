@@ -1,3 +1,4 @@
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -113,13 +114,24 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
             ? null
             : _notesController.text.trim(),
       });
-
+      int level =
+      100; // Safe default for simulators and aggressive background iOS policies
+      try {
+        final battery = Battery();
+        level = await battery.batteryLevel;
+      } catch (e) {
+        debugPrint(
+          'Battery info not available over isolate, using default: $e',
+        );
+      }
       // Emit to family network
       await Supabase.instance.client.from('well_events').insert({
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'event_type': 'calendar',
         'title': 'New Event Scheduled',
+        'battery_level': level,
+
         'description':
             '$title scheduled for ${DateFormat.jm().format(finalDateTime)} on ${DateFormat.yMd().format(finalDateTime)}',
       });
