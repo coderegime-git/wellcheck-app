@@ -47,6 +47,16 @@ class _BiometricGateScreenState extends ConsumerState<BiometricGateScreen> {
 
   Future<void> _authenticate() async {
     try {
+      final canCheck = await _localAuth.canCheckBiometrics;
+      final isSupported = await _localAuth.isDeviceSupported();
+
+      debugPrint("canCheckBiometrics = $canCheck");
+      debugPrint("isDeviceSupported = $isSupported");
+
+      final available = await _localAuth.getAvailableBiometrics();
+
+      debugPrint("available biometrics = $available");
+
       final result = await _localAuth.authenticate(
         localizedReason: 'Authenticate to access your Family Shield',
         options: const AuthenticationOptions(
@@ -54,22 +64,29 @@ class _BiometricGateScreenState extends ConsumerState<BiometricGateScreen> {
           biometricOnly: false,
         ),
       );
-      if (mounted) {
-        setState(() {
-          _authenticated = result;
-          _checking = false;
-        });
 
-        if (!result) {
-          // Auth failed/cancelled — go back to welcome
-          GoRouter.of(context).go('/');
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _checking = false);
+      debugPrint("auth result = $result");
+
+      if (!mounted) return;
+
+      setState(() {
+        _authenticated = result;
+        _checking = false;
+      });
+
+      if (!result) {
         GoRouter.of(context).go('/');
       }
+    } catch (e) {
+      debugPrint("AUTH ERROR = $e");
+
+      if (!mounted) return;
+
+      setState(() {
+        _checking = false;
+      });
+
+      GoRouter.of(context).go('/');
     }
   }
 

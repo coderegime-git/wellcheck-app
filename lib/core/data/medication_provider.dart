@@ -214,6 +214,27 @@ final allDoseLogsProvider = StreamProvider<List<DoseLog>>((ref) {
       .stream(primaryKey: ['id'])
       .map((data) => data.map((e) => DoseLog.fromJson(e)).toList());
 });
+final allMedicationHistoryProvider = FutureProvider<List<Map<String, dynamic>>>(
+  (ref) async {
+    final data = await Supabase.instance.client
+        .from('dose_logs')
+        .select('''
+  taken_at,
+  status,
+  medications!dose_logs_medication_id_fkey(
+    medication_name,
+    dosage
+  ),
+  profiles!dose_logs_user_id_fkey(
+    full_name,
+    id
+  )
+''')
+        .order('taken_at', ascending: false);
+
+    return List<Map<String, dynamic>>.from(data);
+  },
+);
 //
 // @riverpod
 // Stream<List<DoseLog>> doseLogs(Ref ref, String medicationId) async* {

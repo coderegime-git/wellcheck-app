@@ -6,7 +6,6 @@ import 'package:well_check_v3/core/data/user_profile_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ContactsSheet extends ConsumerStatefulWidget {
-
   const ContactsSheet({super.key});
 
   @override
@@ -16,6 +15,7 @@ class ContactsSheet extends ConsumerStatefulWidget {
 class _ContactsSheetState extends ConsumerState<ContactsSheet> {
   List<Map<String, dynamic>> _contacts = [];
   bool _isLoading = true;
+  String? currentUserRole;
 
   @override
   void initState() {
@@ -26,35 +26,26 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
   Future<void> _fetchContacts() async {
     try {
       final profile = await ref.read(currentUserProfileProvider.future);
+
       if (profile == null) return;
 
-      // Fetch family members with profile data including phone
-      // final res = await Supabase.instance.client
-      //     .from('family_members')
-      //     .select('user_id, role, profiles(full_name, phone, email)')
-      //     .eq('family_id', profile.familyId);
       final res = await Supabase.instance.client
           .from('family_members')
           .select('user_id, role, profiles(full_name, phone)')
           .eq('family_id', profile.familyId);
-      print(res);
-      print("resresres");
-      if (mounted) {
-        setState(() {
-          _contacts = List<Map<String, dynamic>>.from(res);
-          _contacts.sort((a, b) {
-            final roleA = a['role'] as String;
-            final roleB = b['role'] as String;
-            if (roleA == 'leader') return -1;
-            if (roleB == 'leader') return 1;
-            return 0;
-          });
-          _isLoading = false;
-        });
-      }
+
+      // find current logged-in user role
+      final myData = res.firstWhere((e) => e['user_id'] == profile.userId);
+
+      currentUserRole = myData['role'];
+
+      setState(() {
+        _contacts = List<Map<String, dynamic>>.from(res);
+
+        _isLoading = false;
+      });
     } catch (e) {
-      print(e.toString());
-      if (mounted) setState(() => _isLoading = false);
+      print(e);
     }
   }
 
@@ -101,6 +92,7 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
   }
 
   Widget _buildContactRow(
+    String memberId,
     String name,
     String relation,
     String? phone,
@@ -114,73 +106,106 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: ShieldColors.surfaceLight,
-          child: Text(
-            name.isNotEmpty ? name[0] : '?',
-            style: const TextStyle(
-              color: ShieldColors.activeTeal,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          child: Text(name.isNotEmpty ? name[0] : '?'),
         ),
+
         title: Text(
           name + (isMe ? ' (Me)' : ''),
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
+
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              relation.toUpperCase(),
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-            ),
-            if (hasPhone && !isMe)
-              Text(
-                phone,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: ShieldColors.textLabel,
-                ),
-              ),
-            if (!hasPhone && !isMe)
-              const Text(
-                'No phone on file',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
+            Text(relation.toUpperCase()),
+
+            if (hasPhone && !isMe) Text(phone),
+
+            if (!hasPhone && !isMe) const Text('No phone on file'),
           ],
         ),
+
         trailing: isMe
             ? null
             : Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  /// DELETE
+                  if (currentUserRole == "leader")
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (_) => AlertDialog(
+                            title: const Text("Remove Member"),
+                            content: Text("Remove $name from family?"),
+                            actions: [
+                              TextButton(
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                },
+                                child: const Text("Cancel"),
+                              ),
+
+                              TextButton(
+                                onPressed: () async {
+                                  Navigator.pop(context);
+
+                                  await removeMember(memberId);
+                                },
+                                child: const Text(
+                                  "Remove",
+                                  style: TextStyle(color: Colors.red),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+
                   IconButton(
                     icon: Icon(
                       Icons.message,
-                      color: hasPhone
-                          ? ShieldColors.activeTeal
-                          : Colors.grey.shade300,
+                      color: hasPhone ? ShieldColors.activeTeal : Colors.grey,
                     ),
                     onPressed: hasPhone ? () => _launchUrl('sms', phone) : null,
-                    tooltip: hasPhone ? 'Send SMS' : 'No phone number',
                   ),
+
                   IconButton(
                     icon: Icon(
                       Icons.phone,
-                      color: hasPhone
-                          ? ShieldColors.alertRed
-                          : Colors.grey.shade300,
+                      color: hasPhone ? ShieldColors.alertRed : Colors.grey,
                     ),
                     onPressed: hasPhone ? () => _launchUrl('tel', phone) : null,
-                    tooltip: hasPhone ? 'Call' : 'No phone number',
                   ),
                 ],
               ),
       ),
     );
+  }
+
+  Future<void> removeMember(String memberId) async {
+    try {
+      final profile = await ref.read(currentUserProfileProvider.future);
+      if (profile == null) return;
+      await Supabase.instance.client
+          .from('family_members')
+          .delete()
+          .eq('family_id', profile!.familyId)
+          .eq('user_id', memberId);
+
+      _contacts.removeWhere((e) => e['user_id'] == memberId);
+
+      setState(() {});
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Member removed')));
+    } catch (e) {
+      print(e);
+    }
   }
 
   @override
@@ -277,6 +302,7 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
                       final contact = _contacts[index];
                       final profileData =
                           contact['profiles'] as Map<String, dynamic>?;
+                      print(profileData);
                       final name =
                           profileData?['full_name'] ??
                           profileData?['email'] ??
@@ -286,7 +312,15 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
                       final isMe =
                           contact['user_id'] ==
                           ref.read(currentUserProfileProvider).value?.userId;
-                      return _buildContactRow(name, role, phone, isMe);
+                      final memberId = contact['user_id'];
+
+                      return _buildContactRow(
+                        contact['user_id'],
+                        name,
+                        role,
+                        phone,
+                        isMe,
+                      );
                     },
                   ),
           ),

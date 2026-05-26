@@ -92,6 +92,7 @@
 // }
 import 'dart:convert';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:firebase_core/firebase_core.dart';
@@ -119,7 +120,7 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   }
 }
 
-class PushNotificationService {
+class PushNotificationService extends ConsumerStatefulWidget {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
 
   static final FlutterLocalNotificationsPlugin _localNotifications =
@@ -132,6 +133,7 @@ class PushNotificationService {
         'General Notifications',
         description: 'General app notifications',
         importance: Importance.high,
+        sound: RawResourceAndroidNotificationSound('custom_sound'),
       );
 
   // Channel for SOS/urgent alerts
@@ -143,6 +145,7 @@ class PushNotificationService {
         importance: Importance.max,
         enableVibration: true,
         playSound: true,
+        sound: RawResourceAndroidNotificationSound('sos_sound'),
       );
 
   static Future<void> initialize() async {
@@ -240,6 +243,7 @@ class PushNotificationService {
         importance: Importance.max,
         playSound: true,
         enableVibration: true,
+        sound: RawResourceAndroidNotificationSound('custom_sound'),
       );
 
   static void _onNotificationTapped(NotificationResponse response) {
@@ -274,12 +278,15 @@ class PushNotificationService {
         message.data['type'] == 'sos' ||
         (notification.title?.toLowerCase().contains('sos') ?? false) ||
         (notification.title?.toLowerCase().contains('emergency') ?? false);
+    final sound = message.data['sound'];
 
+    //final isSos = sound == "sos_sound";
     showNotification(
       title: notification.title ?? 'Well-Check',
       body: notification.body ?? '',
       payload: message.data.toString(),
       isSos: isSos,
+      sound: sound,
     );
   }
 
@@ -293,6 +300,7 @@ class PushNotificationService {
     required String title,
     required String body,
     String? payload,
+    String? sound,
     bool isSos = false,
   }) async {
     final androidDetails = AndroidNotificationDetails(
@@ -303,6 +311,9 @@ class PushNotificationService {
           : _generalChannel.description,
       importance: isSos ? Importance.max : Importance.high,
       priority: isSos ? Priority.max : Priority.high,
+      sound: isSos
+          ? RawResourceAndroidNotificationSound(sound ?? "custom_sound")
+          : null,
       // color: isSos ? const Color(0xFFFF3B30) : Colors.white,
       enableLights: true,
       enableVibration: true,
@@ -313,10 +324,11 @@ class PushNotificationService {
       fullScreenIntent: isSos,
     );
 
-    const iosDetails = DarwinNotificationDetails(
+    final iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
+      sound: sound,
     );
 
     final details = NotificationDetails(
@@ -441,5 +453,11 @@ class PushNotificationService {
           UILocalNotificationDateInterpretation.absoluteTime,
       // no matchDateTimeComponents — check-in is a one-time alarm, not daily repeat
     );
+  }
+
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() {
+    // TODO: implement createState
+    throw UnimplementedError();
   }
 }

@@ -68,6 +68,7 @@ class PulseService {
       final prefs = await SharedPreferences.getInstance();
       final familyId = prefs.getString('last_family_id');
       final persistentUserId = prefs.getString('last_user_id');
+      final persistentUserName = prefs.getString('last_user_name');
 
       final effectiveUserId = persistentUserId ?? fallbackUserId;
 
@@ -168,7 +169,6 @@ class PulseService {
           );
         } catch (e) {
           debugPrint('Failed sync failed in background: $e');
-
         }
       }
 
@@ -178,6 +178,7 @@ class PulseService {
         await healthRepo.syncVitals(
           userId: effectiveUserId,
           familyId: familyId,
+          userName: persistentUserName ?? "",
         );
       } catch (e) {
         print(e.toString());

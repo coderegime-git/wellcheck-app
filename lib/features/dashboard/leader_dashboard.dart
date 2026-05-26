@@ -24,6 +24,7 @@ import 'package:well_check_v3/features/dashboard/widgets/ai_wellness_card.dart';
 import 'package:well_check_v3/features/profile/profile_settings_view.dart';
 import 'package:well_check_v3/features/tools/safe_zone_config_screen.dart';
 
+import '../../core/data/health_repository.dart';
 import '../../core/navigation/shield_router.dart';
 import '../../core/notifications/push_notification_service.dart';
 import '../safety/services/pulse_service.dart';
@@ -43,19 +44,180 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
 
   @override
   void initState() {
-    initializeFCM();
-    super.initState();
+    super.initState(); // ✅ super.initState() must be FIRST
+    initializeFCM(); // ✅ just call it, don't await it
   }
 
+  // ✅ async is here on the separate method, NOT on initState
   void initializeFCM() async {
-    // await  PulseService().broadcastPulse(null);
-    await PulseService().broadcastPulse(null);
-    setState(() {
-      isLoad = false;
-    });
+    try {
+      await PulseService().broadcastPulse(null);
+    } catch (e) {
+      print('broadcastPulse error: $e');
+    }
+
     if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        final profile = await ref.read(currentUserProfileProvider.future);
+        if (profile == null) return;
+
+        final result = await ref
+            .read(healthRepositoryProvider)
+            .syncVitals(
+              userId: profile.userId,
+              familyId: profile.familyId,
+              userName: profile.fullName ?? '',
+            );
+
+        print(
+          'SYNC RESULT: ${result.success} | ${result.status} | ${result.message}',
+        );
+
+        if (!mounted) return;
+
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        if (!mounted) return;
+
+        if (result.success) {
+          _showSuccessSnackbar(context, result.message);
+        } else {
+          _showErrorDialog(context, result);
+        }
+
+        setState(() => isLoad = false);
+      } catch (e) {
+        print('initializeFCM error: $e');
+      }
+    });
+
     await PushNotificationService.initialize();
   }
+
+  void _showSuccessSnackbar(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: Colors.green.shade700,
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Error — blocking dialog with icon + action per scenario
+  // ─────────────────────────────────────────────────────────────
+  void _showErrorDialog(BuildContext context, SyncResult result) {
+    final config = _dialogConfig(result.status);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, // client must read and dismiss
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(config.icon, color: config.color, size: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                config.title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          result.message,
+          style: const TextStyle(fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          // Optional: retry button for network/upload errors
+          if (result.status == SyncStatus.networkError ||
+              result.status == SyncStatus.uploadFailed)
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Retry'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Icon + title per SyncStatus
+  // ─────────────────────────────────────────────────────────────
+  _DialogConfig _dialogConfig(SyncStatus status) {
+    switch (status) {
+      case SyncStatus.permissionDenied:
+        return _DialogConfig(
+          icon: Icons.lock_outline,
+          color: Colors.orange,
+          title: 'Permission Required',
+        );
+      case SyncStatus.noData:
+        return _DialogConfig(
+          icon: Icons.watch_off_outlined,
+          color: Colors.blue,
+          title: 'No Health Data Found',
+        );
+      case SyncStatus.noHeartRate:
+        return _DialogConfig(
+          icon: Icons.favorite_border,
+          color: Colors.red,
+          title: 'No Heart Rate Data',
+        );
+      case SyncStatus.networkError:
+        return _DialogConfig(
+          icon: Icons.wifi_off_outlined,
+          color: Colors.grey,
+          title: 'No Internet Connection',
+        );
+      case SyncStatus.uploadFailed:
+        return _DialogConfig(
+          icon: Icons.cloud_off_outlined,
+          color: Colors.deepOrange,
+          title: 'Upload Failed',
+        );
+      case SyncStatus.unknownError:
+      default:
+        return _DialogConfig(
+          icon: Icons.error_outline,
+          color: Colors.red,
+          title: 'Sync Failed',
+        );
+    }
+  }
+
+  // void initializeFCM() async {
+  //   // await  PulseService().broadcastPulse(null);
+  //   await PulseService().broadcastPulse(null);
+  //   if (!mounted) return;
+  //
+  //   setState(() {
+  //     isLoad = false;
+  //   });
+  //   if (!mounted) return;
+  //   await PushNotificationService.initialize();
+  // }
 
   @override
   void dispose() {
@@ -151,6 +313,7 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                     "title": "Emergency Alert",
                     "body": "${profile.fullName} triggered an emergency alert",
                     "action": "emergency",
+                    "sound": "sos_sound",
                   },
                 );
               } catch (e) {
@@ -937,21 +1100,27 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                                                         12,
                                                                   ),
                                                                 ),
-//
 
-                                                                if (med.assignedName != null) ...[
-                                                                  const SizedBox(height: 4),
+                                                                //
+                                                                if (med.assignedName !=
+                                                                    null) ...[
+                                                                  const SizedBox(
+                                                                    height: 4,
+                                                                  ),
 
                                                                   Text(
                                                                     'Assigned to: ${med.assignedName}',
                                                                     style: TextStyle(
-                                                                      color: Colors.blueGrey,
-                                                                      fontSize: 12,
-                                                                      fontWeight: FontWeight.w500,
+                                                                      color: Colors
+                                                                          .blueGrey,
+                                                                      fontSize:
+                                                                          12,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w500,
                                                                     ),
                                                                   ),
                                                                 ],
-
 
                                                                 // if (nextDose !=
                                                                 //     null) ...[
@@ -1559,8 +1728,11 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
     final title =
         evt['title'] as String? ?? type.replaceAll('_', ' ').toUpperCase();
     final description = evt['description'] as String?;
+    print(description);
     final fullName = evt['user_name'] as String?;
     final battery = evt['battery_level'];
+    print(battery);
+    print("batterybattery12");
     final createdAt = evt['created_at'] as String?;
 
     IconData icon = Icons.favorite_border;
@@ -1703,150 +1875,191 @@ class _MemberStatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final userId = member['id'] as String;
+    final authUserId = member['user_id'] as String;
+
     return StreamBuilder<Map<String, dynamic>?>(
-      stream: safetyRepo.streamMemberLatestEvent(userId),
+      stream: safetyRepo.streamMemberLatestEvent(authUserId),
       builder: (context, eventSnapshot) {
         // Nest a second StreamBuilder to get live vitals
         return StreamBuilder<List<Map<String, dynamic>>>(
-          stream: safetyRepo.streamMemberVitals(userId),
-          builder: (context, vitalsSnapshot) {
-            final lastEvent = eventSnapshot.data;
-            print("lastEvent");
-            print(lastEvent);
-            final vitals = vitalsSnapshot.data ?? [];
-            print("vitals");
-            print(vitals);
-            print(member);
-            print("lastEvent");
-            print(lastEvent);
-            print('created_at');
-            print(member['timestamp']);
-            final role = member['role'] as String;
-            final realName = member['full_name'] ?? 'Family Member';
-            final isMe = userId == currentUserId;
+          stream: safetyRepo.streamMemberEvents(authUserId),
+          // use userId not authUserId
+          builder: (context, eventsSnapshot) {
+            final allEvents = eventsSnapshot.data ?? <Map<String, dynamic>>[];
+            final checkInCount = allEvents
+                .where((e) => e['event_type'] == 'check_in')
+                .length;
+            return StreamBuilder<List<Map<String, dynamic>>>(
+              stream: safetyRepo.streamMemberVitals(authUserId),
+              builder: (context, vitalsSnapshot) {
+                final lastEvent = eventSnapshot.data;
+                final vitals = vitalsSnapshot.data ?? [];
+                print(lastEvent);
+                print("lastEvent");
+                final role = member['role'] as String;
+                final realName = member['full_name'] ?? 'Family Member';
+                final isMe = userId == currentUserId;
 
-            String displayName = isMe ? '$realName (You)' : realName;
-            IconData statusIcon = Icons.info_outline;
-            String statusText = 'Awaiting first pulse...';
-            bool isAlert = false;
-            List<Map<String, String>> metrics = [];
+                String displayName = isMe ? '$realName (You)' : realName;
+                IconData statusIcon = Icons.info_outline;
+                String statusText = 'Awaiting first pulse...';
+                String? title = '';
+                String? description = '';
+                bool isAlert = false;
+                List<Map<String, String>> metrics = [];
 
-            // --- Derive status from latest event ---
-            if (lastEvent != null) {
-              final type = lastEvent['event_type'] as String;
-              final battery = lastEvent['battery_level'];
-              final createdAt = lastEvent['created_at'] as String?;
+                // --- Derive status from latest event ---
+                if (lastEvent != null) {
+                  final type = lastEvent['event_type'] as String;
+                  title = lastEvent['title'] as String?;
+                  description = lastEvent['description'] as String?;
+                  print(description);
+                  print("descriptiondescription");
+                  final battery = lastEvent['battery_level'];
+                  print(battery);
+                  print("batteryyyy");
+                  final createdAt = lastEvent['created_at'] as String?;
 
-              String lastSeen = '';
-              if (createdAt != null) {
-                try {
-                  final dt = DateTime.parse(createdAt);
-                  final diff = DateTime.now().difference(dt);
-                  if (diff.inMinutes < 5) {
-                    lastSeen = 'Just now';
-                  } else if (diff.inMinutes < 60) {
-                    lastSeen = '${diff.inMinutes}m ago';
-                  } else if (diff.inHours < 24) {
-                    lastSeen = '${diff.inHours}h ago';
-                  } else {
-                    lastSeen = '${diff.inDays}d ago';
+                  String lastSeen = '';
+                  if (createdAt != null) {
+                    try {
+                      final dt = DateTime.parse(createdAt);
+                      final diff = DateTime.now().difference(dt);
+                      if (diff.inMinutes < 5) {
+                        lastSeen = 'Just now';
+                      } else if (diff.inMinutes < 60) {
+                        lastSeen = '${diff.inMinutes}m ago';
+                      } else if (diff.inHours < 24) {
+                        lastSeen = '${diff.inHours}h ago';
+                      } else {
+                        lastSeen = '${diff.inDays}d ago';
+                      }
+                    } catch (_) {}
                   }
-                } catch (_) {}
-              }
 
-              if (type == 'sos' &&
-                  lastEvent['metadata']?['status'] != 'resolved') {
-                isAlert = true;
-                statusText = 'EMERGENCY: SOS ACTIVE';
-                statusIcon = Icons.warning;
-              } else if (type == 'driving' || type == 'driving_alert') {
-                statusText = 'In Motion: Driving';
-                statusIcon = Icons.directions_car;
-              } else if (type == 'safe_zone_enter') {
-                statusText = 'In Safe Zone';
-                statusIcon = Icons.verified_user;
-              } else if (type == 'check_in') {
-                statusText = 'Checked In';
-                statusIcon = Icons.how_to_reg;
-              } else {
-                statusText = lastSeen.isNotEmpty
-                    ? 'Last seen $lastSeen'
-                    : 'Online';
-                statusIcon = Icons.check_circle_outline;
-              }
+                  if (type == 'sos' &&
+                      lastEvent['metadata']?['status'] != 'resolved') {
+                    isAlert = true;
+                    statusText = 'EMERGENCY: SOS ACTIVE';
+                    statusIcon = Icons.warning;
+                  } else if (type == 'driving' || type == 'driving_alert') {
+                    statusText = 'In Motion: Driving';
+                    statusIcon = Icons.directions_car;
+                  } else if (type == 'safe_zone_enter') {
+                    statusText = 'In Safe Zone';
+                    statusIcon = Icons.verified_user;
+                  } else if (type == 'check_in') {
+                    statusText = '$title\n$description • $lastSeen ';
+                    statusIcon = Icons.how_to_reg;
+                  } else if (type == 'heartbeat') {
+                    statusText = lastSeen.isNotEmpty
+                        ? 'Pulse active • $lastSeen'
+                        : 'Pulse active';
 
-              if (battery != null) {
-                metrics.add({
-                  'label': 'BATTERY',
-                  'value': '$battery',
-                  'unit': '%',
-                });
-              }
+                    statusIcon = Icons.favorite;
+                  } else {
+                    statusText = lastSeen.isNotEmpty
+                        ? 'Last seen $lastSeen'
+                        : 'Online';
+                    statusIcon = Icons.check_circle_outline;
+                  }
 
-              final semLoc = lastEvent['metadata']?['semantic_location'];
-              if (semLoc != null) {
-                metrics.add({'label': 'LOC', 'value': '$semLoc', 'unit': ''});
-              } else if (lastEvent['latitude'] != null) {
-                metrics.add({
-                  'label': 'LOC',
-                  'value': 'GPS Active',
-                  'unit': '',
-                });
-              }
-            } else {
-              statusText = 'No pulse data yet';
-              statusIcon = Icons.radio_button_unchecked;
-            }
+                  if (battery != null) {
+                    metrics.add({
+                      'label': 'BATTERY',
+                      'value': '$battery',
+                      'unit': '%',
+                    });
+                  }
 
-            // --- Live Vitals from health_vitals table ---
-            if (vitals.isNotEmpty) {
-              // Extract latest heart rate
-              final hrEntry = vitals
-                  .where((v) => v['vital_type'] == 'HEART_RATE')
-                  .toList();
-              if (hrEntry.isNotEmpty) {
-                final hrVal = hrEntry.first['value'];
-                final hrNum = (hrVal is num)
-                    ? hrVal.round()
-                    : (double.tryParse(hrVal.toString())?.round() ?? 0);
-                metrics.add({'label': 'HR', 'value': '$hrNum', 'unit': 'BPM'});
-              }
+                  final semLoc = lastEvent['metadata']?['semantic_location'];
+                  if (semLoc != null) {
+                    metrics.add({
+                      'label': 'LOC',
+                      'value': '$semLoc',
+                      'unit': '',
+                    });
+                  } else if (lastEvent['latitude'] != null) {
+                    metrics.add({
+                      'label': 'LOC',
+                      'value': 'GPS Active',
+                      'unit': '',
+                    });
+                  }
+                } else {
+                  statusText = 'No pulse data yet';
+                  statusIcon = Icons.radio_button_unchecked;
+                }
 
-              // Extract latest SpO2
-              final spo2Entry = vitals
-                  .where((v) => v['vital_type'] == 'BLOOD_OXYGEN')
-                  .toList();
-              if (spo2Entry.isNotEmpty) {
-                final spo2Val = spo2Entry.first['value'];
-                final spo2Num = (spo2Val is num)
-                    ? spo2Val.round()
-                    : (double.tryParse(spo2Val.toString())?.round() ?? 0);
-                metrics.add({
-                  'label': 'SpO2',
-                  'value': '$spo2Num',
-                  'unit': '%',
-                });
-              }
-            } else if (role == 'senior') {
-              // No vitals synced yet for senior
-              metrics.add({
-                'label': 'VITALS',
-                'value': 'No wearable',
-                'unit': '',
-              });
-            }
+                // --- Live Vitals from health_vitals table ---
+                if (vitals.isNotEmpty) {
+                  print("vitalsvitalsvitals");
+                  print(vitals.map((v) => v['vital_type']).toList());
+                  // Extract latest heart rate
+                  final hrEntry =
+                      vitals
+                          .where((v) => v['vital_type'] == 'HEART_RATE')
+                          .toList()
+                        ..sort(
+                          (a, b) => DateTime.parse(
+                            b['timestamp'],
+                          ).compareTo(DateTime.parse(a['timestamp'])),
+                        );
+                  if (hrEntry.isNotEmpty) {
+                    final hrVal = hrEntry.first['value'];
+                    final hrNum = (hrVal is num)
+                        ? hrVal.round()
+                        : (double.tryParse(hrVal.toString())?.round() ?? 0);
+                    metrics.add({
+                      'label': 'HR',
+                      'value': '$hrNum',
+                      'unit': 'BPM',
+                    });
+                  }
 
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 16.0),
-              child: ShieldMemberCard(
-                name: displayName,
-                status: role.toUpperCase(),
-                metrics: metrics,
-                subStatusIcon: statusIcon,
-                subStatusText: statusText,
-                isAlert: isAlert,
-                avatarUrl: member['avatar_url'] as String?,
-              ),
+                  // Extract latest SpO2
+                  final spo2Entry = vitals
+                      .where((v) => v['vital_type'] == 'BLOOD_OXYGEN')
+                      .toList();
+                  if (spo2Entry.isNotEmpty) {
+                    final spo2Val = spo2Entry.first['value'];
+                    final spo2Num = (spo2Val is num)
+                        ? spo2Val.round()
+                        : (double.tryParse(spo2Val.toString())?.round() ?? 0);
+                    metrics.add({
+                      'label': 'SpO2',
+                      'value': '$spo2Num',
+                      'unit': '%',
+                    });
+                  }
+                } else if (role == 'senior') {
+                  // No vitals synced yet for senior
+                  metrics.add({
+                    'label': 'VITALS',
+                    'value': 'No wearable',
+                    'unit': '',
+                  });
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: ShieldMemberCard(
+                    name: displayName,
+                    status: role.toUpperCase(),
+                    metrics: metrics,
+                    subStatusIcon: statusIcon,
+                    subStatusText: statusText,
+                    isAlert: isAlert,
+                    avatarUrl: member['avatar_url'] as String?,
+                    batteryLevel: lastEvent?['battery_level'] as num?,
+                    vitals: vitals,
+                    title: title,
+                    description: description,
+                    checkInCount: checkInCount,
+                    isActive: lastEvent != null,
+                  ),
+                );
+              },
             );
           },
         );
@@ -2111,6 +2324,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                   "title": "Emergency Alert",
                   "body": "${profile.fullName} triggered an emergency alert",
                   "action": "emergency",
+                  "sound": "sos_sound",
                 },
               );
             } catch (e) {
@@ -2875,3 +3089,11 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
     );
   }
 }
+
+class _DialogConfig {
+  final IconData icon;
+  final Color color;
+  final String title;
+
+  _DialogConfig({required this.icon, required this.color, required this.title});
+} // sync_result.dart

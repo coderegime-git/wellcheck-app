@@ -35,6 +35,7 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
   bool emergencyLoad = false;
   bool isCheckIn = false;
   String? _loggingMedicationId;
+
   @override
   void initState() {
     initializeFCM();
@@ -230,6 +231,7 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
                     "title": "Emergency Alert",
                     "body": "${profile.fullName} triggered an emergency alert",
                     "action": "emergency",
+                    "sound": "sos_sound",
                   },
                 );
               } catch (e) {
@@ -260,6 +262,7 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
       }
     });
   }
+
   Future<void> _logDose(Medication med) async {
     if (_loggingMedicationId != null) return;
 
@@ -273,7 +276,7 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
 
       final now = DateTime.now().toUtc();
       int batteryLevel =
-      100; // Safe default for simulators and aggressive background iOS policies
+          100; // Safe default for simulators and aggressive background iOS policies
       try {
         final battery = Battery();
         batteryLevel = await battery.batteryLevel;
@@ -348,11 +351,11 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
       await Supabase.instance.client
           .from('medications')
           .update({
-        'scheduled_at': nextDate.toUtc().toIso8601String(),
+            'scheduled_at': nextDate.toUtc().toIso8601String(),
 
-        'reminder_sent': false,
-        'reminder_sent_at': null,
-      })
+            'reminder_sent': false,
+            'reminder_sent_at': null,
+          })
           .eq('id', med.id);
       await Supabase.instance.client.from('well_events').insert({
         'family_id': profile.familyId,
@@ -360,7 +363,7 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
         'event_type': 'medication_logged',
         'title': 'Medication Taken',
         'description':
-        '${profile.fullName ?? 'Someone'} logged ${med.medicationName} (${med.dosage})',
+            '${profile.fullName ?? 'Someone'} logged ${med.medicationName} (${med.dosage})',
         'battery_level': batteryLevel,
       });
 
@@ -395,7 +398,7 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
               "target_user_id": targetUserId,
               "title": "Medications",
               "body":
-              "${profile.fullName ?? 'Someone'}: ${med.medicationName} dose logged",
+                  "${profile.fullName ?? 'Someone'}: ${med.medicationName} dose logged",
               "action": "log_dose",
             },
           );
@@ -644,135 +647,179 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
                                                 // final nextDose = med.nextDoseToday;
                                                 DateTime? nextDose;
 
-                                                final allLogsAsync = ref.watch(allDoseLogsProvider);
-                                                final logs = allLogsAsync.value ?? [];
+                                                final allLogsAsync = ref.watch(
+                                                  allDoseLogsProvider,
+                                                );
+                                                final logs =
+                                                    allLogsAsync.value ?? [];
 
                                                 final now = DateTime.now();
-                                                final startDate = med.startDate ?? now;
+                                                final startDate =
+                                                    med.startDate ?? now;
 
                                                 bool isTakenToday = false;
 
-                                                final medicationLogs = logs.where(
+                                                final medicationLogs = logs
+                                                    .where(
                                                       (l) =>
-                                                  l.medicationId == med.id &&
-                                                      l.status == 'taken' &&
-                                                      l.takenAt != null &&
-                                                      med.assignedTo == profile.userId,
-                                                );
+                                                          l.medicationId ==
+                                                              med.id &&
+                                                          l.status == 'taken' &&
+                                                          l.takenAt != null &&
+                                                          med.assignedTo ==
+                                                              profile.userId,
+                                                    );
 
                                                 switch (med.recurrence) {
                                                   case 'daily':
-                                                    isTakenToday = medicationLogs.any(
+                                                    isTakenToday =
+                                                        medicationLogs.any(
                                                           (log) =>
-                                                      log.takenAt!.year == now.year &&
-                                                          log.takenAt!.month == now.month &&
-                                                          log.takenAt!.day == now.day,
-                                                    );
+                                                              log
+                                                                      .takenAt!
+                                                                      .year ==
+                                                                  now.year &&
+                                                              log
+                                                                      .takenAt!
+                                                                      .month ==
+                                                                  now.month &&
+                                                              log
+                                                                      .takenAt!
+                                                                      .day ==
+                                                                  now.day,
+                                                        );
                                                     break;
 
                                                   case 'every_other_day':
-                                                    final diffDays =
-                                                        now.difference(startDate).inDays;
+                                                    final diffDays = now
+                                                        .difference(startDate)
+                                                        .inDays;
 
                                                     final shouldTakeToday =
                                                         diffDays % 2 == 0;
 
                                                     isTakenToday =
                                                         shouldTakeToday &&
-                                                            medicationLogs.any(
-                                                                  (log) =>
-                                                              log.takenAt!.year ==
+                                                        medicationLogs.any(
+                                                          (log) =>
+                                                              log
+                                                                      .takenAt!
+                                                                      .year ==
                                                                   now.year &&
-                                                                  log.takenAt!.month ==
-                                                                      now.month &&
-                                                                  log.takenAt!.day ==
-                                                                      now.day,
-                                                            );
+                                                              log
+                                                                      .takenAt!
+                                                                      .month ==
+                                                                  now.month &&
+                                                              log
+                                                                      .takenAt!
+                                                                      .day ==
+                                                                  now.day,
+                                                        );
                                                     break;
 
                                                   case 'weekly':
                                                     isTakenToday =
-                                                        medicationLogs.any((log) {
-                                                          final d = log.takenAt!;
+                                                        medicationLogs.any((
+                                                          log,
+                                                        ) {
+                                                          final d =
+                                                              log.takenAt!;
 
                                                           return d.weekday ==
-                                                              now.weekday &&
-                                                              d.year == now.year;
+                                                                  now.weekday &&
+                                                              d.year ==
+                                                                  now.year;
                                                         });
                                                     break;
 
                                                   case 'monthly':
                                                     isTakenToday =
-                                                        medicationLogs.any((log) {
-                                                          final d = log.takenAt!;
+                                                        medicationLogs.any((
+                                                          log,
+                                                        ) {
+                                                          final d =
+                                                              log.takenAt!;
 
-                                                          return d.day == now.day &&
-                                                              d.month == now.month &&
-                                                              d.year == now.year;
+                                                          return d.day ==
+                                                                  now.day &&
+                                                              d.month ==
+                                                                  now.month &&
+                                                              d.year ==
+                                                                  now.year;
                                                         });
                                                     break;
                                                 }
 
-                                                if (med.scheduleTimes.isNotEmpty) {
+                                                if (med
+                                                    .scheduleTimes
+                                                    .isNotEmpty) {
                                                   final upcomingDoses =
-                                                  <DateTime>[];
+                                                      <DateTime>[];
 
                                                   for (final time
-                                                  in med.scheduleTimes) {
+                                                      in med.scheduleTimes) {
                                                     try {
-                                                      final parts =
-                                                      time.split(':');
-
-                                                      final hour =
-                                                      int.parse(parts[0]);
-
-                                                      final minute =
-                                                      int.parse(parts[1]);
-
-                                                      DateTime doseTime =
-                                                      DateTime(
-                                                        now.year,
-                                                        now.month,
-                                                        now.day,
-                                                        hour,
-                                                        minute,
+                                                      final parts = time.split(
+                                                        ':',
                                                       );
 
-                                                      final frequency =
-                                                      med.frequency
+                                                      final hour = int.parse(
+                                                        parts[0],
+                                                      );
+
+                                                      final minute = int.parse(
+                                                        parts[1],
+                                                      );
+
+                                                      DateTime doseTime =
+                                                          DateTime(
+                                                            now.year,
+                                                            now.month,
+                                                            now.day,
+                                                            hour,
+                                                            minute,
+                                                          );
+
+                                                      final frequency = med
+                                                          .frequency
                                                           .toLowerCase();
 
                                                       // already logged → move next occurrence
                                                       if (isTakenToday) {
-                                                        switch (med.recurrence) {
+                                                        switch (med
+                                                            .recurrence) {
                                                           case 'daily':
-                                                            doseTime = doseTime.add(
-                                                              const Duration(
-                                                                days: 1,
-                                                              ),
-                                                            );
+                                                            doseTime = doseTime
+                                                                .add(
+                                                                  const Duration(
+                                                                    days: 1,
+                                                                  ),
+                                                                );
                                                             break;
 
                                                           case 'every_other_day':
-                                                            doseTime = doseTime.add(
-                                                              const Duration(
-                                                                days: 2,
-                                                              ),
-                                                            );
+                                                            doseTime = doseTime
+                                                                .add(
+                                                                  const Duration(
+                                                                    days: 2,
+                                                                  ),
+                                                                );
                                                             break;
 
                                                           case 'weekly':
-                                                            doseTime = doseTime.add(
-                                                              const Duration(
-                                                                days: 7,
-                                                              ),
-                                                            );
+                                                            doseTime = doseTime
+                                                                .add(
+                                                                  const Duration(
+                                                                    days: 7,
+                                                                  ),
+                                                                );
                                                             break;
 
                                                           case 'monthly':
                                                             doseTime = DateTime(
                                                               doseTime.year,
-                                                              doseTime.month + 1,
+                                                              doseTime.month +
+                                                                  1,
                                                               doseTime.day,
                                                               doseTime.hour,
                                                               doseTime.minute,
@@ -780,58 +827,54 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
                                                             break;
                                                         }
                                                       }
-
                                                       // normal schedule
                                                       else {
-                                                        if (frequency
-                                                            .contains(
+                                                        if (frequency.contains(
                                                           'daily',
                                                         )) {
-                                                          if (doseTime
-                                                              .isBefore(now)) {
-                                                            doseTime =
-                                                                doseTime.add(
+                                                          if (doseTime.isBefore(
+                                                            now,
+                                                          )) {
+                                                            doseTime = doseTime
+                                                                .add(
                                                                   const Duration(
                                                                     days: 1,
                                                                   ),
                                                                 );
                                                           }
-                                                        }
-
-                                                        else if (frequency
+                                                        } else if (frequency
                                                             .contains(
-                                                          'every other',
-                                                        )) {
+                                                              'every other',
+                                                            )) {
                                                           final daysSinceStart =
                                                               now
                                                                   .difference(
-                                                                startDate,
-                                                              )
+                                                                    startDate,
+                                                                  )
                                                                   .inDays;
 
                                                           final shouldTakeToday =
                                                               daysSinceStart %
                                                                   2 ==
-                                                                  0;
+                                                              0;
 
                                                           if (!shouldTakeToday ||
-                                                              doseTime
-                                                                  .isBefore(
+                                                              doseTime.isBefore(
                                                                 now,
                                                               )) {
-                                                            doseTime =
-                                                                doseTime.add(
+                                                            doseTime = doseTime
+                                                                .add(
                                                                   const Duration(
                                                                     days: 1,
                                                                   ),
                                                                 );
 
                                                             while (doseTime
-                                                                .difference(
-                                                              startDate,
-                                                            )
-                                                                .inDays %
-                                                                2 !=
+                                                                        .difference(
+                                                                          startDate,
+                                                                        )
+                                                                        .inDays %
+                                                                    2 !=
                                                                 0) {
                                                               doseTime =
                                                                   doseTime.add(
@@ -841,61 +884,51 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
                                                                   );
                                                             }
                                                           }
-                                                        }
-
-                                                        else if (frequency
+                                                        } else if (frequency
                                                             .contains(
-                                                          'weekly',
-                                                        )) {
+                                                              'weekly',
+                                                            )) {
                                                           while (doseTime
-                                                              .weekday !=
-                                                              startDate
-                                                                  .weekday ||
-                                                              doseTime
-                                                                  .isBefore(
+                                                                      .weekday !=
+                                                                  startDate
+                                                                      .weekday ||
+                                                              doseTime.isBefore(
                                                                 now,
                                                               )) {
-                                                            doseTime =
-                                                                doseTime.add(
+                                                            doseTime = doseTime
+                                                                .add(
                                                                   const Duration(
                                                                     days: 1,
                                                                   ),
                                                                 );
                                                           }
-                                                        }
-
-                                                        else if (frequency
+                                                        } else if (frequency
                                                             .contains(
-                                                          'monthly',
-                                                        )) {
-                                                          doseTime =
-                                                              DateTime(
-                                                                now.year,
-                                                                now.month,
-                                                                startDate.day,
-                                                                hour,
-                                                                minute,
-                                                              );
+                                                              'monthly',
+                                                            )) {
+                                                          doseTime = DateTime(
+                                                            now.year,
+                                                            now.month,
+                                                            startDate.day,
+                                                            hour,
+                                                            minute,
+                                                          );
 
-                                                          if (doseTime
-                                                              .isBefore(
+                                                          if (doseTime.isBefore(
                                                             now,
                                                           )) {
-                                                            doseTime =
-                                                                DateTime(
-                                                                  now.year,
-                                                                  now.month + 1,
-                                                                  startDate.day,
-                                                                  hour,
-                                                                  minute,
-                                                                );
+                                                            doseTime = DateTime(
+                                                              now.year,
+                                                              now.month + 1,
+                                                              startDate.day,
+                                                              hour,
+                                                              minute,
+                                                            );
                                                           }
-                                                        }
-
-                                                        else if (frequency
+                                                        } else if (frequency
                                                             .contains(
-                                                          'as needed',
-                                                        )) {
+                                                              'as needed',
+                                                            )) {
                                                           continue;
                                                         }
                                                       }
@@ -1006,7 +1039,6 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
                                                                   //     ),
                                                                   //   ),
                                                                   // ],
-
                                                                 ],
                                                               ),
                                                             ),
@@ -1077,56 +1109,72 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
                                                                           .activeTeal,
                                                                     ),
                                                                   ),
-                                                                  const SizedBox(height: 10),
-                                                                if(!isTakenToday)
-                                                                  SizedBox(
-                                                                    width: 110,
-                                                                    height: 34,
-                                                                    child: ElevatedButton(
-                                                                      onPressed: _loggingMedicationId == med.id
-                                                                          ? null
-                                                                          : () => _logDose(med),
+                                                                  const SizedBox(
+                                                                    height: 10,
+                                                                  ),
+                                                                  if (!isTakenToday)
+                                                                    SizedBox(
+                                                                      width:
+                                                                          110,
+                                                                      height:
+                                                                          34,
+                                                                      child: ElevatedButton(
+                                                                        onPressed:
+                                                                            _loggingMedicationId ==
+                                                                                med.id
+                                                                            ? null
+                                                                            : () => _logDose(
+                                                                                med,
+                                                                              ),
 
-                                                                      style: ElevatedButton.styleFrom(
-                                                                        backgroundColor: ShieldColors.activeTeal,
-                                                                        foregroundColor: Colors.white,
-                                                                        elevation: 0,
-                                                                        padding: EdgeInsets.zero,
-                                                                        shape: RoundedRectangleBorder(
-                                                                          borderRadius: BorderRadius.circular(10),
-                                                                        ),
-                                                                      ),
-
-                                                                      child: _loggingMedicationId == med.id
-                                                                          ? const SizedBox(
-                                                                        width: 14,
-                                                                        height: 14,
-                                                                        child: CircularProgressIndicator(
-                                                                          strokeWidth: 2,
-                                                                          color: Colors.white,
-                                                                        ),
-                                                                      )
-                                                                          : const Row(
-                                                                        mainAxisAlignment:
-                                                                        MainAxisAlignment.center,
-                                                                        children: [
-                                                                          Icon(
-                                                                            Icons.check_circle_outline,
-                                                                            size: 15,
-                                                                          ),
-                                                                          SizedBox(width: 5),
-                                                                          Text(
-                                                                            "Log Dose",
-                                                                            style: TextStyle(
-                                                                              fontSize: 11,
-                                                                              fontWeight:
-                                                                              FontWeight.w600,
+                                                                        style: ElevatedButton.styleFrom(
+                                                                          backgroundColor:
+                                                                              ShieldColors.activeTeal,
+                                                                          foregroundColor:
+                                                                              Colors.white,
+                                                                          elevation:
+                                                                              0,
+                                                                          padding:
+                                                                              EdgeInsets.zero,
+                                                                          shape: RoundedRectangleBorder(
+                                                                            borderRadius: BorderRadius.circular(
+                                                                              10,
                                                                             ),
                                                                           ),
-                                                                        ],
+                                                                        ),
+
+                                                                        child:
+                                                                            _loggingMedicationId ==
+                                                                                med.id
+                                                                            ? const SizedBox(
+                                                                                width: 14,
+                                                                                height: 14,
+                                                                                child: CircularProgressIndicator(
+                                                                                  strokeWidth: 2,
+                                                                                  color: Colors.white,
+                                                                                ),
+                                                                              )
+                                                                            : const Row(
+                                                                                mainAxisAlignment: MainAxisAlignment.center,
+                                                                                children: [
+                                                                                  Icon(
+                                                                                    Icons.check_circle_outline,
+                                                                                    size: 15,
+                                                                                  ),
+                                                                                  SizedBox(
+                                                                                    width: 5,
+                                                                                  ),
+                                                                                  Text(
+                                                                                    "Log Dose",
+                                                                                    style: TextStyle(
+                                                                                      fontSize: 11,
+                                                                                      fontWeight: FontWeight.w600,
+                                                                                    ),
+                                                                                  ),
+                                                                                ],
+                                                                              ),
                                                                       ),
                                                                     ),
-                                                                  ),
                                                                 ],
                                                               ),
                                                             ),
@@ -1987,6 +2035,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                     "title": "Emergency Alert",
                     "body": "${profile.fullName} triggered an emergency alert",
                     "action": "emergency",
+                    "sound": "sos_sound",
                   },
                 );
               } catch (e) {

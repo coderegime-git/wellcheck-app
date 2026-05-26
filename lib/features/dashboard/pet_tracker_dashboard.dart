@@ -876,6 +876,31 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                 duration: Duration(seconds: 5),
               ),
             );
+            final members = await Supabase.instance.client
+                .from('family_members')
+                .select('user_id')
+                .eq('family_id', profile.familyId);
+
+            for (final m in members) {
+              final targetUserId = m['user_id'];
+
+              if (targetUserId == profile.userId) continue;
+
+              try {
+                await Supabase.instance.client.functions.invoke(
+                  'push-router',
+                  body: {
+                    "target_user_id": targetUserId,
+                    "title": "Emergency Alert",
+                    "body": "${profile.fullName} triggered an emergency alert",
+                    "action": "emergency",
+                    "sound": "sos_sound",
+                  },
+                );
+              } catch (e) {
+                debugPrint("Push failed: $e");
+              }
+            }
           }
         } catch (e) {
           debugPrint('[SOS] triggerSiren failed: $e');

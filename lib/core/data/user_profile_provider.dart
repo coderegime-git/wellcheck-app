@@ -28,7 +28,8 @@ class UserProfile {
       familyId: json['family_id'] as String,
       role: json['role'] as String,
       phone: json['phone'] as String?,
-      fullName: json['full_name'] as String?, // May be null if not joined
+      fullName: json['full_name'] as String?,
+      // May be null if not joined
       avatarUrl: json['avatar_url'] as String?, // May be null if not joined
     );
   }
@@ -63,6 +64,7 @@ Future<UserProfile?> currentUserProfile(Ref ref) async {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('last_user_id', profile.userId);
       await prefs.setString('last_family_id', profile.familyId);
+      await prefs.setString('last_user_name', profile.fullName ?? "");
 
       return profile;
     }

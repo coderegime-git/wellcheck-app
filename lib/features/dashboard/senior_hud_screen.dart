@@ -64,6 +64,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
   }
+
   Future<void> _logDose(Medication med) async {
     if (_loggingMedicationId != null) return;
 
@@ -77,7 +78,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
 
       final now = DateTime.now().toUtc();
       int batteryLevel =
-      100; // Safe default for simulators and aggressive background iOS policies
+          100; // Safe default for simulators and aggressive background iOS policies
       try {
         final battery = Battery();
         batteryLevel = await battery.batteryLevel;
@@ -152,11 +153,11 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
       await Supabase.instance.client
           .from('medications')
           .update({
-        'scheduled_at': nextDate.toUtc().toIso8601String(),
+            'scheduled_at': nextDate.toUtc().toIso8601String(),
 
-        'reminder_sent': false,
-        'reminder_sent_at': null,
-      })
+            'reminder_sent': false,
+            'reminder_sent_at': null,
+          })
           .eq('id', med.id);
       await Supabase.instance.client.from('well_events').insert({
         'family_id': profile.familyId,
@@ -164,7 +165,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
         'event_type': 'medication_logged',
         'title': 'Medication Taken',
         'description':
-        '${profile.fullName ?? 'Someone'} logged ${med.medicationName} (${med.dosage})',
+            '${profile.fullName ?? 'Someone'} logged ${med.medicationName} (${med.dosage})',
         'battery_level': batteryLevel,
       });
 
@@ -199,7 +200,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
               "target_user_id": targetUserId,
               "title": "Medications",
               "body":
-              "${profile.fullName ?? 'Someone'}: ${med.medicationName} dose logged",
+                  "${profile.fullName ?? 'Someone'}: ${med.medicationName} dose logged",
               "action": "log_dose",
             },
           );
@@ -568,6 +569,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                   "title": "Emergency Alert",
                   "body": "${profile.fullName} triggered an emergency alert",
                   "action": "emergency",
+                  "sound": "sos_sound",
                 },
               );
             } catch (e) {
@@ -685,16 +687,16 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                 builder: (_) => const FamilyChatScreen(),
               );
             }),
-    //         _elderMenuItem(ctx, Icons.phone, 'Call Family', () {
-    //
-    // Navigator.pop(ctx);
-    // showModalBottomSheet(
-    // context: context,
-    // isScrollControlled: true,
-    // backgroundColor: Colors.transparent,
-    // builder: (_) => const ContactsSheet(),
-    // );
-    //         }),
+            //         _elderMenuItem(ctx, Icons.phone, 'Call Family', () {
+            //
+            // Navigator.pop(ctx);
+            // showModalBottomSheet(
+            // context: context,
+            // isScrollControlled: true,
+            // backgroundColor: Colors.transparent,
+            // builder: (_) => const ContactsSheet(),
+            // );
+            //         }),
             _elderMenuItem(ctx, Icons.person_outline, 'My Profile', () {
               Navigator.pop(ctx);
               showModalBottomSheet(
@@ -1549,151 +1551,206 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                     // final nextDose = med.nextDoseToday;
                                                     DateTime? nextDose;
 
-                                                    final allLogsAsync = ref.watch(allDoseLogsProvider);
-                                                    final logs = allLogsAsync.value ?? [];
+                                                    final allLogsAsync = ref
+                                                        .watch(
+                                                          allDoseLogsProvider,
+                                                        );
+                                                    final logs =
+                                                        allLogsAsync.value ??
+                                                        [];
 
                                                     final now = DateTime.now();
-                                                    final startDate = med.startDate ?? now;
+                                                    final startDate =
+                                                        med.startDate ?? now;
 
                                                     bool isTakenToday = false;
 
-                                                    final medicationLogs = logs.where(
+                                                    final medicationLogs = logs
+                                                        .where(
                                                           (l) =>
-                                                      l.medicationId == med.id &&
-                                                          l.status == 'taken' &&
-                                                          l.takenAt != null &&
-                                                          med.assignedTo == profileAsync.value?.userId,
-                                                    );
+                                                              l.medicationId ==
+                                                                  med.id &&
+                                                              l.status ==
+                                                                  'taken' &&
+                                                              l.takenAt !=
+                                                                  null &&
+                                                              med.assignedTo ==
+                                                                  profileAsync
+                                                                      .value
+                                                                      ?.userId,
+                                                        );
 
                                                     switch (med.recurrence) {
                                                       case 'daily':
                                                         isTakenToday = medicationLogs.any(
-                                                              (log) =>
-                                                          log.takenAt!.year == now.year &&
-                                                              log.takenAt!.month == now.month &&
-                                                              log.takenAt!.day == now.day,
+                                                          (log) =>
+                                                              log
+                                                                      .takenAt!
+                                                                      .year ==
+                                                                  now.year &&
+                                                              log
+                                                                      .takenAt!
+                                                                      .month ==
+                                                                  now.month &&
+                                                              log
+                                                                      .takenAt!
+                                                                      .day ==
+                                                                  now.day,
                                                         );
                                                         break;
 
                                                       case 'every_other_day':
-                                                        final diffDays =
-                                                            now.difference(startDate).inDays;
+                                                        final diffDays = now
+                                                            .difference(
+                                                              startDate,
+                                                            )
+                                                            .inDays;
 
                                                         final shouldTakeToday =
                                                             diffDays % 2 == 0;
 
                                                         isTakenToday =
                                                             shouldTakeToday &&
-                                                                medicationLogs.any(
-                                                                      (log) =>
-                                                                  log.takenAt!.year ==
+                                                            medicationLogs.any(
+                                                              (log) =>
+                                                                  log
+                                                                          .takenAt!
+                                                                          .year ==
                                                                       now.year &&
-                                                                      log.takenAt!.month ==
-                                                                          now.month &&
-                                                                      log.takenAt!.day ==
-                                                                          now.day,
-                                                                );
+                                                                  log
+                                                                          .takenAt!
+                                                                          .month ==
+                                                                      now.month &&
+                                                                  log
+                                                                          .takenAt!
+                                                                          .day ==
+                                                                      now.day,
+                                                            );
                                                         break;
 
                                                       case 'weekly':
                                                         isTakenToday =
-                                                            medicationLogs.any((log) {
-                                                              final d = log.takenAt!;
+                                                            medicationLogs.any((
+                                                              log,
+                                                            ) {
+                                                              final d =
+                                                                  log.takenAt!;
 
                                                               return d.weekday ==
-                                                                  now.weekday &&
-                                                                  d.year == now.year;
+                                                                      now.weekday &&
+                                                                  d.year ==
+                                                                      now.year;
                                                             });
                                                         break;
 
                                                       case 'monthly':
                                                         isTakenToday =
-                                                            medicationLogs.any((log) {
-                                                              final d = log.takenAt!;
+                                                            medicationLogs.any((
+                                                              log,
+                                                            ) {
+                                                              final d =
+                                                                  log.takenAt!;
 
-                                                              return d.day == now.day &&
-                                                                  d.month == now.month &&
-                                                                  d.year == now.year;
+                                                              return d.day ==
+                                                                      now.day &&
+                                                                  d.month ==
+                                                                      now.month &&
+                                                                  d.year ==
+                                                                      now.year;
                                                             });
                                                         break;
                                                     }
 
-                                                    if (med.scheduleTimes.isNotEmpty) {
+                                                    if (med
+                                                        .scheduleTimes
+                                                        .isNotEmpty) {
                                                       final upcomingDoses =
-                                                      <DateTime>[];
+                                                          <DateTime>[];
 
                                                       for (final time
-                                                      in med.scheduleTimes) {
+                                                          in med
+                                                              .scheduleTimes) {
                                                         try {
-                                                          final parts =
-                                                          time.split(':');
+                                                          final parts = time
+                                                              .split(':');
 
                                                           final hour =
-                                                          int.parse(parts[0]);
+                                                              int.parse(
+                                                                parts[0],
+                                                              );
 
                                                           final minute =
-                                                          int.parse(parts[1]);
+                                                              int.parse(
+                                                                parts[1],
+                                                              );
 
                                                           DateTime doseTime =
-                                                          DateTime(
-                                                            now.year,
-                                                            now.month,
-                                                            now.day,
-                                                            hour,
-                                                            minute,
-                                                          );
+                                                              DateTime(
+                                                                now.year,
+                                                                now.month,
+                                                                now.day,
+                                                                hour,
+                                                                minute,
+                                                              );
 
-                                                          final frequency =
-                                                          med.frequency
+                                                          final frequency = med
+                                                              .frequency
                                                               .toLowerCase();
 
                                                           // already logged → move next occurrence
                                                           if (isTakenToday) {
-                                                            switch (med.recurrence) {
+                                                            switch (med
+                                                                .recurrence) {
                                                               case 'daily':
-                                                                doseTime = doseTime.add(
-                                                                  const Duration(
-                                                                    days: 1,
-                                                                  ),
-                                                                );
+                                                                doseTime =
+                                                                    doseTime.add(
+                                                                      const Duration(
+                                                                        days: 1,
+                                                                      ),
+                                                                    );
                                                                 break;
 
                                                               case 'every_other_day':
-                                                                doseTime = doseTime.add(
-                                                                  const Duration(
-                                                                    days: 2,
-                                                                  ),
-                                                                );
+                                                                doseTime =
+                                                                    doseTime.add(
+                                                                      const Duration(
+                                                                        days: 2,
+                                                                      ),
+                                                                    );
                                                                 break;
 
                                                               case 'weekly':
-                                                                doseTime = doseTime.add(
-                                                                  const Duration(
-                                                                    days: 7,
-                                                                  ),
-                                                                );
+                                                                doseTime =
+                                                                    doseTime.add(
+                                                                      const Duration(
+                                                                        days: 7,
+                                                                      ),
+                                                                    );
                                                                 break;
 
                                                               case 'monthly':
                                                                 doseTime = DateTime(
                                                                   doseTime.year,
-                                                                  doseTime.month + 1,
+                                                                  doseTime.month +
+                                                                      1,
                                                                   doseTime.day,
                                                                   doseTime.hour,
-                                                                  doseTime.minute,
+                                                                  doseTime
+                                                                      .minute,
                                                                 );
                                                                 break;
                                                             }
                                                           }
-
                                                           // normal schedule
                                                           else {
                                                             if (frequency
                                                                 .contains(
-                                                              'daily',
-                                                            )) {
+                                                                  'daily',
+                                                                )) {
                                                               if (doseTime
-                                                                  .isBefore(now)) {
+                                                                  .isBefore(
+                                                                    now,
+                                                                  )) {
                                                                 doseTime =
                                                                     doseTime.add(
                                                                       const Duration(
@@ -1701,29 +1758,26 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                                       ),
                                                                     );
                                                               }
-                                                            }
-
-                                                            else if (frequency
+                                                            } else if (frequency
                                                                 .contains(
-                                                              'every other',
-                                                            )) {
-                                                              final daysSinceStart =
-                                                                  now
-                                                                      .difference(
+                                                                  'every other',
+                                                                )) {
+                                                              final daysSinceStart = now
+                                                                  .difference(
                                                                     startDate,
                                                                   )
-                                                                      .inDays;
+                                                                  .inDays;
 
                                                               final shouldTakeToday =
                                                                   daysSinceStart %
                                                                       2 ==
-                                                                      0;
+                                                                  0;
 
                                                               if (!shouldTakeToday ||
                                                                   doseTime
                                                                       .isBefore(
-                                                                    now,
-                                                                  )) {
+                                                                        now,
+                                                                      )) {
                                                                 doseTime =
                                                                     doseTime.add(
                                                                       const Duration(
@@ -1732,34 +1786,33 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                                     );
 
                                                                 while (doseTime
-                                                                    .difference(
-                                                                  startDate,
-                                                                )
-                                                                    .inDays %
-                                                                    2 !=
+                                                                            .difference(
+                                                                              startDate,
+                                                                            )
+                                                                            .inDays %
+                                                                        2 !=
                                                                     0) {
                                                                   doseTime =
                                                                       doseTime.add(
                                                                         const Duration(
-                                                                          days: 1,
+                                                                          days:
+                                                                              1,
                                                                         ),
                                                                       );
                                                                 }
                                                               }
-                                                            }
-
-                                                            else if (frequency
+                                                            } else if (frequency
                                                                 .contains(
-                                                              'weekly',
-                                                            )) {
+                                                                  'weekly',
+                                                                )) {
                                                               while (doseTime
-                                                                  .weekday !=
-                                                                  startDate
-                                                                      .weekday ||
+                                                                          .weekday !=
+                                                                      startDate
+                                                                          .weekday ||
                                                                   doseTime
                                                                       .isBefore(
-                                                                    now,
-                                                                  )) {
+                                                                        now,
+                                                                      )) {
                                                                 doseTime =
                                                                     doseTime.add(
                                                                       const Duration(
@@ -1767,40 +1820,39 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                                       ),
                                                                     );
                                                               }
-                                                            }
-
-                                                            else if (frequency
+                                                            } else if (frequency
                                                                 .contains(
-                                                              'monthly',
-                                                            )) {
+                                                                  'monthly',
+                                                                )) {
                                                               doseTime =
                                                                   DateTime(
                                                                     now.year,
                                                                     now.month,
-                                                                    startDate.day,
+                                                                    startDate
+                                                                        .day,
                                                                     hour,
                                                                     minute,
                                                                   );
 
                                                               if (doseTime
                                                                   .isBefore(
-                                                                now,
-                                                              )) {
+                                                                    now,
+                                                                  )) {
                                                                 doseTime =
                                                                     DateTime(
                                                                       now.year,
-                                                                      now.month + 1,
-                                                                      startDate.day,
+                                                                      now.month +
+                                                                          1,
+                                                                      startDate
+                                                                          .day,
                                                                       hour,
                                                                       minute,
                                                                     );
                                                               }
-                                                            }
-
-                                                            else if (frequency
+                                                            } else if (frequency
                                                                 .contains(
-                                                              'as needed',
-                                                            )) {
+                                                                  'as needed',
+                                                                )) {
                                                               continue;
                                                             }
                                                           }
@@ -1824,37 +1876,44 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                       }
                                                     }
                                                     return Container(
-                                                      margin: const EdgeInsets.only(
-                                                        bottom: 12,
-                                                      ),
-                                                      padding: const EdgeInsets.all(
-                                                        14,
-                                                      ),
+                                                      margin:
+                                                          const EdgeInsets.only(
+                                                            bottom: 12,
+                                                          ),
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                            14,
+                                                          ),
                                                       decoration: BoxDecoration(
-                                                        color: Colors.grey.shade50,
+                                                        color:
+                                                            Colors.grey.shade50,
                                                         borderRadius:
-                                                        BorderRadius.circular(
-                                                          16,
-                                                        ),
+                                                            BorderRadius.circular(
+                                                              16,
+                                                            ),
                                                         border: Border.all(
                                                           color: Colors.black
                                                               .withValues(
-                                                            alpha: 0.2,
-                                                          ),
+                                                                alpha: 0.2,
+                                                              ),
                                                         ),
                                                       ),
                                                       child: Row(
                                                         mainAxisAlignment:
-                                                        MainAxisAlignment
-                                                            .spaceBetween,
+                                                            MainAxisAlignment
+                                                                .spaceBetween,
                                                         children: [
                                                           Icon(
-                                                            Icons.local_hospital,
-                                                            color: Colors.purple,
+                                                            Icons
+                                                                .local_hospital,
+                                                            color:
+                                                                Colors.purple,
                                                             size: 26,
                                                           ),
 
-                                                          const SizedBox(width: 7),
+                                                          const SizedBox(
+                                                            width: 7,
+                                                          ),
 
                                                           Expanded(
                                                             child: Row(
@@ -1862,22 +1921,22 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                                 Expanded(
                                                                   child: Column(
                                                                     crossAxisAlignment:
-                                                                    CrossAxisAlignment
-                                                                        .start,
+                                                                        CrossAxisAlignment
+                                                                            .start,
                                                                     children: [
                                                                       Text(
                                                                         med.medicationName,
                                                                         style: const TextStyle(
                                                                           fontWeight:
-                                                                          FontWeight
-                                                                              .bold,
+                                                                              FontWeight.bold,
                                                                           fontSize:
-                                                                          15,
+                                                                              15,
                                                                         ),
                                                                       ),
 
                                                                       const SizedBox(
-                                                                        height: 4,
+                                                                        height:
+                                                                            4,
                                                                       ),
 
                                                                       Text(
@@ -1887,12 +1946,13 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                                               .grey
                                                                               .shade700,
                                                                           fontSize:
-                                                                          12,
+                                                                              12,
                                                                         ),
                                                                       ),
 
                                                                       const SizedBox(
-                                                                        height: 6,
+                                                                        height:
+                                                                            6,
                                                                       ),
 
                                                                       // if (nextDose !=
@@ -1911,23 +1971,21 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                                       //     ),
                                                                       //   ),
                                                                       // ],
-
                                                                     ],
                                                                   ),
                                                                 ),
                                                                 Expanded(
                                                                   child: Column(
                                                                     crossAxisAlignment:
-                                                                    CrossAxisAlignment
-                                                                        .end,
+                                                                        CrossAxisAlignment
+                                                                            .end,
                                                                     mainAxisAlignment:
-                                                                    MainAxisAlignment
-                                                                        .end,
+                                                                        MainAxisAlignment
+                                                                            .end,
                                                                     children: [
                                                                       Row(
                                                                         mainAxisAlignment:
-                                                                        MainAxisAlignment
-                                                                            .end,
+                                                                            MainAxisAlignment.end,
                                                                         children: [
                                                                           if (nextDose !=
                                                                               null)
@@ -1939,34 +1997,34 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                                               ),
                                                                               builder:
                                                                                   (
-                                                                                  context,
-                                                                                  snapshot,
+                                                                                    context,
+                                                                                    snapshot,
                                                                                   ) {
-                                                                                final diff =
-                                                                                    nextDose?.difference(
-                                                                                      DateTime.now(),
-                                                                                    ) ??
+                                                                                    final diff =
+                                                                                        nextDose?.difference(
+                                                                                          DateTime.now(),
+                                                                                        ) ??
                                                                                         Duration.zero;
 
-                                                                                // Prevent negative values
-                                                                                final safeDiff = diff.isNegative
-                                                                                    ? Duration.zero
-                                                                                    : diff;
+                                                                                    // Prevent negative values
+                                                                                    final safeDiff = diff.isNegative
+                                                                                        ? Duration.zero
+                                                                                        : diff;
 
-                                                                                final text =
-                                                                                    '${safeDiff.inHours.toString().padLeft(2, '0')}h '
-                                                                                    '${safeDiff.inMinutes.remainder(60).toString().padLeft(2, '0')}m '
-                                                                                    '${safeDiff.inSeconds.remainder(60).toString().padLeft(2, '0')}s';
+                                                                                    final text =
+                                                                                        '${safeDiff.inHours.toString().padLeft(2, '0')}h '
+                                                                                        '${safeDiff.inMinutes.remainder(60).toString().padLeft(2, '0')}m '
+                                                                                        '${safeDiff.inSeconds.remainder(60).toString().padLeft(2, '0')}s';
 
-                                                                                return Text(
-                                                                                  text,
-                                                                                  style: TextStyle(
-                                                                                    color: ShieldColors.activeTeal,
-                                                                                    fontWeight: FontWeight.w600,
-                                                                                    fontSize: 12,
-                                                                                  ),
-                                                                                );
-                                                                              },
+                                                                                    return Text(
+                                                                                      text,
+                                                                                      style: TextStyle(
+                                                                                        color: ShieldColors.activeTeal,
+                                                                                        fontWeight: FontWeight.w600,
+                                                                                        fontSize: 12,
+                                                                                      ),
+                                                                                    );
+                                                                                  },
                                                                             ),
                                                                         ],
                                                                       ),
@@ -1974,23 +2032,31 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                                         "Until Next Dose",
                                                                         style: TextStyle(
                                                                           fontSize:
-                                                                          12,
+                                                                              12,
                                                                           fontWeight:
-                                                                          FontWeight
-                                                                              .bold,
-                                                                          color: ShieldColors
-                                                                              .activeTeal,
+                                                                              FontWeight.bold,
+                                                                          color:
+                                                                              ShieldColors.activeTeal,
                                                                         ),
                                                                       ),
-                                                                      const SizedBox(height: 10),
-                                                                      if(!isTakenToday)
+                                                                      const SizedBox(
+                                                                        height:
+                                                                            10,
+                                                                      ),
+                                                                      if (!isTakenToday)
                                                                         SizedBox(
-                                                                          width: 110,
-                                                                          height: 34,
+                                                                          width:
+                                                                              110,
+                                                                          height:
+                                                                              34,
                                                                           child: ElevatedButton(
-                                                                            onPressed: _loggingMedicationId == med.id
+                                                                            onPressed:
+                                                                                _loggingMedicationId ==
+                                                                                    med.id
                                                                                 ? null
-                                                                                : () => _logDose(med),
+                                                                                : () => _logDose(
+                                                                                    med,
+                                                                                  ),
 
                                                                             style: ElevatedButton.styleFrom(
                                                                               backgroundColor: ShieldColors.activeTeal,
@@ -1998,38 +2064,42 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                                               elevation: 0,
                                                                               padding: EdgeInsets.zero,
                                                                               shape: RoundedRectangleBorder(
-                                                                                borderRadius: BorderRadius.circular(10),
+                                                                                borderRadius: BorderRadius.circular(
+                                                                                  10,
+                                                                                ),
                                                                               ),
                                                                             ),
 
-                                                                            child: _loggingMedicationId == med.id
+                                                                            child:
+                                                                                _loggingMedicationId ==
+                                                                                    med.id
                                                                                 ? const SizedBox(
-                                                                              width: 14,
-                                                                              height: 14,
-                                                                              child: CircularProgressIndicator(
-                                                                                strokeWidth: 2,
-                                                                                color: Colors.white,
-                                                                              ),
-                                                                            )
+                                                                                    width: 14,
+                                                                                    height: 14,
+                                                                                    child: CircularProgressIndicator(
+                                                                                      strokeWidth: 2,
+                                                                                      color: Colors.white,
+                                                                                    ),
+                                                                                  )
                                                                                 : const Row(
-                                                                              mainAxisAlignment:
-                                                                              MainAxisAlignment.center,
-                                                                              children: [
-                                                                                Icon(
-                                                                                  Icons.check_circle_outline,
-                                                                                  size: 15,
-                                                                                ),
-                                                                                SizedBox(width: 5),
-                                                                                Text(
-                                                                                  "Log Dose",
-                                                                                  style: TextStyle(
-                                                                                    fontSize: 11,
-                                                                                    fontWeight:
-                                                                                    FontWeight.w600,
+                                                                                    mainAxisAlignment: MainAxisAlignment.center,
+                                                                                    children: [
+                                                                                      Icon(
+                                                                                        Icons.check_circle_outline,
+                                                                                        size: 15,
+                                                                                      ),
+                                                                                      SizedBox(
+                                                                                        width: 5,
+                                                                                      ),
+                                                                                      Text(
+                                                                                        "Log Dose",
+                                                                                        style: TextStyle(
+                                                                                          fontSize: 11,
+                                                                                          fontWeight: FontWeight.w600,
+                                                                                        ),
+                                                                                      ),
+                                                                                    ],
                                                                                   ),
-                                                                                ),
-                                                                              ],
-                                                                            ),
                                                                           ),
                                                                         ),
                                                                     ],
@@ -2134,7 +2204,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                               : Icons.health_and_safety,
                                           label: _isCheckingIn
                                               ? 'Broadcasting...'
-                                              : 'Check Status',
+                                              : 'Manual Check-In',
                                           color: const Color(0xFF3366FF),
                                           onPressed: _isCheckingIn
                                               ? null
@@ -2448,6 +2518,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                   "title": "Emergency Alert",
                   "body": "${profile.fullName} triggered an emergency alert",
                   "action": "emergency",
+                  "sound": "sos_sound",
                 },
               );
             } catch (e) {

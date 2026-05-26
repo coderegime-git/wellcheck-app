@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
+import 'package:well_check_v3/features/command_center/medication_history.dart';
 import 'package:well_check_v3/features/dashboard/widgets/invite_member_dialog.dart';
 import 'package:well_check_v3/features/command_center/medications_sheet.dart';
 import 'package:well_check_v3/features/command_center/check_in_sheet.dart';
@@ -37,6 +38,18 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
           true,
         ),
       ),
+      if (widget.fromLeader == true)
+        _CmdItem(
+          Icons.history,
+          'Medications history',
+          'Meds history',
+          ShieldColors.activeTeal,
+          () => _pushSheet(
+            context,
+            MedicationHistoryScreen(fromLeader: widget.fromLeader),
+            true,
+          ),
+        ),
       _CmdItem(
         Icons.calendar_month,
         'Calendar',
@@ -47,14 +60,14 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
           context.push('/sync-calendar');
         },
       ),
-      _CmdItem(
-        Icons.how_to_reg,
-        'Check-in',
-        'Daily check-in',
-
-        ShieldColors.safeZoneGreen,
-        () => _pushSheet(context, const CheckInSheet(), true),
-      ),
+      // _CmdItem(
+      //   Icons.how_to_reg,
+      //   'Check-in',
+      //   'Daily check-in',
+      //
+      //   ShieldColors.safeZoneGreen,
+      //   () => _pushSheet(context, const CheckInSheet(), true),
+      // ),
       if (widget.fromLeader == true)
         _CmdItem(
           Icons.how_to_reg,
@@ -91,30 +104,30 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         ShieldColors.urgentRed,
         () => _pushSheet(context, const StatusSheet(), true),
       ),
-      _CmdItem(
-        Icons.local_hospital,
-        'Medical Vault',
-        'Health records',
-
-        const Color(0xFF9B59B6),
-        () => _pushSheet(
-          context,
-          VaultSheet(isMedical: true, fromLeader: widget.fromLeader ?? false),
-          true,
-        ),
-      ),
-      _CmdItem(
-        Icons.lock,
-        'Vault',
-        'Secure storage',
-
-        const Color(0xFF2C3E50),
-        () => _pushSheet(
-          context,
-          VaultSheet(isMedical: false, fromLeader: widget.fromLeader ?? false),
-          true,
-        ),
-      ),
+      // _CmdItem(
+      //   Icons.local_hospital,
+      //   'Medical Vault',
+      //   'Health records',
+      //
+      //   const Color(0xFF9B59B6),
+      //   () => _pushSheet(
+      //     context,
+      //     VaultSheet(isMedical: true, fromLeader: widget.fromLeader ?? false),
+      //     true,
+      //   ),
+      // ),
+      // _CmdItem(
+      //   Icons.lock,
+      //   'Vault',
+      //   'Secure storage',
+      //
+      //   const Color(0xFF2C3E50),
+      //   () => _pushSheet(
+      //     context,
+      //     VaultSheet(isMedical: false, fromLeader: widget.fromLeader ?? false),
+      //     true,
+      //   ),
+      // ),
       _CmdItem(
         Icons.drive_eta,
         'Driving',

@@ -59,6 +59,8 @@
 	<string>Well Check needs access to your photo library to let you set a profile picture and share images with your safety circle.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Well Check uses speech recognition to process voice commands for hands-free safety check-ins and SOS activation.</string>
+	<key>NSFaceIDUsageDescription</key>
+    <string>Use Face ID to securely log in to Family Shiel</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

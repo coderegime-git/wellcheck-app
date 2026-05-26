@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 
@@ -8,9 +9,24 @@ class ShieldMemberCard extends StatelessWidget {
   final IconData subStatusIcon;
   final String subStatusText;
   final bool isAlert;
-  final bool isReadOnly; // False for leaders/monitors, true for students
-  final VoidCallback? onTap; // Nullable if read-only
-  final String? avatarUrl; // Profile Image URL
+  final bool isReadOnly;
+  final VoidCallback? onTap;
+  final String? avatarUrl;
+  final String? title;
+  final String? description;
+
+  // ── New: bottom stat chips ────────────────────────────────────────────────
+  /// Pass the raw battery level (int/double) from lastEvent['battery_level'].
+  final num? batteryLevel;
+
+  /// Pass vitals list from streamMemberVitals so the card can read HR & SpO2.
+  final List<Map<String, dynamic>> vitals;
+
+  /// Number of check-in events (filter externally: events.where(...).length).
+  final int checkInCount;
+
+  /// Whether any heartbeat / event was received at all.
+  final bool isActive;
 
   const ShieldMemberCard({
     super.key,
@@ -23,7 +39,50 @@ class ShieldMemberCard extends StatelessWidget {
     this.isReadOnly = false,
     this.onTap,
     this.avatarUrl,
+    this.title,
+    this.description,
+    // stat chip params
+    this.batteryLevel,
+    this.vitals = const [],
+    this.checkInCount = 0,
+    this.isActive = false,
   });
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  Color _batteryColor() {
+    if (batteryLevel == null) return Colors.grey;
+    final v = batteryLevel!.toDouble();
+    if (v <= 20) return Colors.red;
+    if (v <= 50) return Colors.orange;
+    return const Color(0xFF2ECC71);
+  }
+
+  String _heartRateLabel() {
+    final hrEntry = vitals
+        .where((v) => v['vital_type'] == 'HEART_RATE')
+        .toList();
+    if (hrEntry.isEmpty) return '--';
+    final hrVal = hrEntry.first['value'];
+    final hrNum = (hrVal is num)
+        ? hrVal.round()
+        : (double.tryParse(hrVal.toString())?.round() ?? 0);
+    return '$hrNum';
+  }
+
+  String _spo2Label() {
+    final spo2Entry = vitals
+        .where((v) => v['vital_type'] == 'BLOOD_OXYGEN')
+        .toList();
+    if (spo2Entry.isEmpty) return '--';
+    final spo2Val = spo2Entry.first['value'];
+    final spo2Num = (spo2Val is num)
+        ? spo2Val.round()
+        : (double.tryParse(spo2Val.toString())?.round() ?? 0);
+    return '$spo2Num%';
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +106,7 @@ class ShieldMemberCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── Header row ────────────────────────────────────────────────
             Row(
               children: [
                 Container(
@@ -86,10 +146,9 @@ class ShieldMemberCard extends StatelessWidget {
                           fontSize: 20,
                         ),
                       ),
-                      SizedBox(height: 5),
+                      const SizedBox(height: 5),
                       Text(
                         status,
-
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontSize: 12.5,
                           color: isAlert
@@ -98,21 +157,62 @@ class ShieldMemberCard extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      SizedBox(height: 5),
-
-                      Row(
+                      const SizedBox(height: 5),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                            Icons.monitor_heart,
-                            color: isAlert
-                                ? ShieldColors.urgentRed
-                                : ShieldColors.activeTeal,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              subStatusText,
+                          // Icon(
+                          //   Icons.monitor_heart,
+                          //   color: isAlert
+                          //       ? ShieldColors.urgentRed
+                          //       : ShieldColors.activeTeal,
+                          //   size: 18,
+                          // ),
+                          // const SizedBox(width: 8),
+                          if (title != "" &&
+                              description != "" &&
+                              title != null &&
+                              description != null) ...[
+                            RichText(
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              text: TextSpan(
+                                children: [
+                                  if (name != null && name != '')
+                                    TextSpan(
+                                      text: '$name - ',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+
+                                  TextSpan(
+                                    text: title,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                      color: ShieldColors.activeTeal,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              description ?? "",
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                    fontWeight: isAlert
+                                        ? FontWeight.w600
+                                        : FontWeight.normal,
+                                  ),
+                            ),
+                          ] else ...[
+                            Text(
+                              subStatusText ?? "",
                               style: Theme.of(context).textTheme.bodyMedium
                                   ?.copyWith(
                                     color: isAlert
@@ -123,7 +223,7 @@ class ShieldMemberCard extends StatelessWidget {
                                         : FontWeight.normal,
                                   ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ],
@@ -139,34 +239,186 @@ class ShieldMemberCard extends StatelessWidget {
                   ),
               ],
             ),
+
             const SizedBox(height: 20),
-            if (metrics.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                decoration: BoxDecoration(
-                  color: isAlert
-                      ? Colors.white.withValues(alpha: 0.5)
-                      : const Color(0xFFF8F9FA),
-                  borderRadius: ShieldDesign.roundedTwelve,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: metrics.map((metric) {
-                    return _buildMetric(
-                      context,
-                      metric['label']!,
-                      metric['value']!,
-                      metric['unit']!,
-                    );
-                  }).toList(),
-                ),
-              ),
-            if (metrics.isNotEmpty) const SizedBox(height: 16),
+
+            // ── Metrics container ─────────────────────────────────────────
+            // if (metrics.isNotEmpty)
+            //   Container(
+            //     padding: const EdgeInsets.symmetric(vertical: 16),
+            //     decoration: BoxDecoration(
+            //       color: isAlert
+            //           ? Colors.white.withValues(alpha: 0.5)
+            //           : const Color(0xFFF8F9FA),
+            //       borderRadius: ShieldDesign.roundedTwelve,
+            //     ),
+            //     child: Row(
+            //       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            //       children: metrics.map((metric) {
+            //         return _buildMetric(
+            //           context,
+            //           metric['label']!,
+            //           metric['value']!,
+            //           metric['unit']!,
+            //         );
+            //       }).toList(),
+            //     ),
+            //   ),
+            //
+            // if (metrics.isNotEmpty) const SizedBox(height: 12),
+            Divider(),
+            // ── Stats chip strip ──────────────────────────────────────────
+            _buildStatsStrip(context),
           ],
         ),
       ),
     );
   }
+
+  // ── Stats strip ───────────────────────────────────────────────────────────
+
+  Widget _buildStatsStrip(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 0, horizontal: 0),
+      decoration: BoxDecoration(),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _buildStatChip(
+            context,
+            bgColor: Colors.red,
+            icon: Icons.favorite_rounded,
+            color: Colors.red.shade400,
+            value: _heartRateLabel(),
+            label: 'Heart Rate',
+            unit: vitals.any((v) => v['vital_type'] == 'HEART_RATE')
+                ? 'BPM'
+                : '',
+          ),
+          //   _buildDivider(),
+          _buildStatChip(
+            bgColor: Colors.green,
+
+            context,
+            icon: CupertinoIcons.battery_75_percent,
+            color: _batteryColor(),
+            value: batteryLevel != null ? '$batteryLevel' : '--',
+            label: 'Battery',
+            unit: batteryLevel != null ? '%' : '',
+          ),
+          // _buildDivider(),
+          _buildStatChip(
+            bgColor: Colors.blue,
+
+            context,
+            icon: Icons.how_to_reg_rounded,
+            color: Colors.blue.shade400,
+            value: '$checkInCount',
+            label: 'Check-ins',
+            unit: '',
+          ),
+          // _buildDivider(),
+          _buildStatChip(
+            bgColor: Colors.green,
+
+            context,
+            icon: Icons.shield_moon,
+            color: isActive ? ShieldColors.activeTeal : Colors.grey,
+            value: isActive ? 'Active' : 'Offline',
+            label: 'Status',
+            unit: '',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDivider() {
+    return Container(
+      width: 1,
+      height: 36,
+      color: ShieldColors.activeTeal.withValues(alpha: 0.15),
+    );
+  }
+
+  Widget _buildStatChip(
+    BuildContext context, {
+    required IconData icon,
+    required Color bgColor,
+    required Color color,
+    required String value,
+    required String label,
+    required String unit,
+  }) {
+    return Expanded(
+      child: Container(
+        margin: EdgeInsets.all(2),
+        padding: EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: bgColor.withAlpha(25),
+          // color: isAlert
+          //     ? Colors.white.withValues(alpha: 0.4)
+          //     : const Color(0xFFF0FAF8),
+          borderRadius: ShieldDesign.roundedTwelve,
+          // border: Border.all(
+          //   color: isAlert
+          //       ? ShieldColors.urgentRed.withValues(alpha: 0.12)
+          //       : ShieldColors.activeTeal.withValues(alpha: 0.15),
+          // ),
+        ),
+
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: color, size: 18),
+                SizedBox(width: 3),
+                RichText(
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: value,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: ShieldColors.textBody,
+                          fontSize: 13,
+                        ),
+                      ),
+                      if (unit.isNotEmpty)
+                        TextSpan(
+                          text: unit,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: ShieldColors.textLabel,
+                                fontSize: 10,
+                              ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            //const SizedBox(height: 4),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: ShieldColors.textLabel,
+                fontSize: 10,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Metric tile (unchanged) ───────────────────────────────────────────────
 
   Widget _buildMetric(
     BuildContext context,

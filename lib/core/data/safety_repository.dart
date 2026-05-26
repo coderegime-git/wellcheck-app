@@ -55,6 +55,7 @@ class SafetyRepository {
               "title": "Check-In",
               "body": "${fullName ?? 'Someone'}: Checked in just now",
               "action": "check_in",
+              "sound": "custom_sound",
             },
           );
         } catch (e) {
@@ -227,38 +228,107 @@ class SafetyRepository {
   }
 
   // Get binary latest status event WITH LOCATION for a specific member
-  Stream<Map<String, dynamic>?> streamMemberLatestEvent(String userId) {
-    return _supabase
-        .from('well_events')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', userId)
-        .order('created_at', ascending: false)
-        // Note: Realtime streams don't support .not('latitude', 'is', null) server-side easily in the public schema without filters on stream
-        // So we filter on the client side to only yield the first event that HAS a location
-        .map((list) {
-          try {
-            return list.firstWhere(
-              (evt) =>
-                  evt['latitude'] != null &&
-                  evt['longitude'] != null &&
-                  evt['latitude'] != 0 &&
-                  evt['longitude'] != 0,
-            );
-          } catch (_) {
-            return null;
-          }
-        });
+  // Stream<Map<String, dynamic>?> streamMemberLatestEvent(String userId) {
+  //   return _supabase
+  //       .from('well_events')
+  //       .stream(primaryKey: ['id'])
+  //       .eq('user_id', userId)
+  //       .order('created_at', ascending: false)
+  //       // Note: Realtime streams don't support .not('latitude', 'is', null) server-side easily in the public schema without filters on stream
+  //       // So we filter on the client side to only yield the first event that HAS a location
+  //       .map((list) {
+  //         try {
+  //           return list.firstWhere(
+  //             (evt) =>
+  //                 evt['latitude'] != null &&
+  //                 evt['longitude'] != null &&
+  //                 evt['latitude'] != 0 &&
+  //                 evt['longitude'] != 0,
+  //           );
+  //         } catch (_) {
+  //           return null;
+  //         }
+  //       });
+  // }
+  // Stream<Map<String, dynamic>?> streamMemberLatestEvent(String userId) {
+  //   return _supabase.from('well_events').stream(primaryKey: ['id']).map((rows) {
+  //     final filtered = rows.where((evt) => evt['user_id'] == userId).toList();
+  //
+  //     if (filtered.isEmpty) return null;
+  //
+  //     filtered.sort(
+  //       (a, b) => DateTime.parse(
+  //         b['created_at'],
+  //       ).compareTo(DateTime.parse(a['created_at'])),
+  //     );
+  //
+  //     return filtered.first;
+  //   });
+  // }
+  Stream<List<Map<String, dynamic>>> streamMemberEvents(String userId) async* {
+    while (true) {
+      try {
+        final data = await _supabase
+            .from('well_events')
+            .select()
+            .eq('user_id', userId)
+            .order('created_at', ascending: false);
+
+        yield List<Map<String, dynamic>>.from(data);
+      } catch (e) {
+        print("EVENTS STREAM ERROR => $e");
+        yield [];
+      }
+
+      await Future.delayed(const Duration(seconds: 5));
+    }
+  }
+
+  Stream<Map<String, dynamic>?> streamMemberLatestEvent(String userId) async* {
+    while (true) {
+      try {
+        final data = await _supabase
+            .from('well_events')
+            .select()
+            .eq('user_id', userId)
+            .order('created_at', ascending: false)
+            .limit(1);
+
+        print("LATEST EVENT QUERY => $data");
+
+        if (data.isNotEmpty) {
+          yield data.first;
+        } else {
+          yield null;
+        }
+      } catch (e) {
+        print("EVENT STREAM ERROR => $e");
+      }
+
+      await Future.delayed(const Duration(seconds: 5));
+    }
   }
 
   // Stream latest vitals for a specific member
   Stream<List<Map<String, dynamic>>> streamMemberVitals(String userId) {
+    print("datadata");
+
     return _supabase
         .from('health_vitals')
-        .stream(primaryKey: ['id'])
+        .stream(primaryKey: ['user_id', 'vital_type', 'timestamp'])
         .eq('user_id', userId)
         .order('timestamp', ascending: false)
         .limit(10);
   }
+
+  // Stream<List<Map<String, dynamic>>> streamMemberVitals(String userId) {
+  //   return _supabase
+  //       .from('health_vitals')
+  //       .stream(primaryKey: ['id'])
+  //       .map(
+  //         (data) => data.where((item) => item['user_id'] == userId).toList(),
+  //       );
+  // }
 
   // Get the family name from families table (or fallback)
   Future<String> getFamilyName(String familyId) async {

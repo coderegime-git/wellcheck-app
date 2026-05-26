@@ -147,6 +147,7 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                     "title": "Emergency Alert",
                     "body": "${profile.fullName} triggered an emergency alert",
                     "action": "emergency",
+                    "sound": "sos_sound",
                   },
                 );
               } catch (e) {
@@ -1028,19 +1029,27 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                                             ),
                                                           ),
 
-                                                          if (med.assignedName != null) ...[
-                                                            const SizedBox(height: 4),
+                                                          if (med
+                                                              .assignedName !=
+                                                              null) ...[
+                                                            const SizedBox(
+                                                              height: 4,
+                                                            ),
 
                                                             Text(
-                                                              'Assigned to: ${med.assignedName}',
+                                                              'Assigned to: ${med
+                                                                  .assignedName}',
                                                               style: TextStyle(
-                                                                color: Colors.blueGrey,
-                                                                fontSize: 12,
-                                                                fontWeight: FontWeight.w500,
+                                                                color: Colors
+                                                                    .blueGrey,
+                                                                fontSize:
+                                                                12,
+                                                                fontWeight:
+                                                                FontWeight
+                                                                    .w500,
                                                               ),
                                                             ),
                                                           ],
-
 
                                                           // if (nextDose !=
                                                           //     null) ...[
@@ -1585,96 +1594,142 @@ class _LiveMemberCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<Map<String, dynamic>?>(
-      stream: safetyRepo.streamMemberLatestEvent(member['id']),
-      builder: (context, snapshot) {
-        final lastEvent = snapshot.data;
-        final role = member['role'] as String;
-        final realName = member['full_name'] ?? 'Family Member';
-        final isMe = member['id'] == currentUserId;
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: safetyRepo.streamMemberVitals(currentUserId),
+      builder: (context, vitalsSnapshot) {
+        final vitals = vitalsSnapshot.data ?? [];
 
-        String displayName = isMe ? '$realName (You)' : realName;
-        IconData statusIcon = Icons.radio_button_unchecked;
-        String statusText = 'Awaiting first pulse...';
-        bool isAlert = false;
-        List<Map<String, String>> metrics = [];
+        return StreamBuilder<List<Map<String, dynamic>>>(
+          stream: safetyRepo.streamMemberEvents(currentUserId),
+          // use userId not authUserId
+          builder: (context, eventsSnapshot) {
+            final allEvents = eventsSnapshot.data ?? <Map<String, dynamic>>[];
+            final checkInCount = allEvents
+                .where((e) => e['event_type'] == 'check_in')
+                .length;
+            return StreamBuilder<Map<String, dynamic>?>(
+              stream: safetyRepo.streamMemberLatestEvent(member['id']),
+              builder: (context, snapshot) {
+                final lastEvent = snapshot.data;
+                final role = member['role'] as String;
+                final realName = member['full_name'] ?? 'Family Member';
+                final isMe = member['id'] == currentUserId;
 
-        if (lastEvent != null) {
-          final type = lastEvent['event_type'] as String;
-          final battery = lastEvent['battery_level'];
-          final createdAt = lastEvent['created_at'] as String?;
+                String displayName = isMe ? '$realName (You)' : realName;
+                IconData statusIcon = Icons.radio_button_unchecked;
+                String statusText = 'Awaiting first pulse...';
+                bool isAlert = false;
+                List<Map<String, String>> metrics = [];
 
-          // Last seen
-          String lastSeen = '';
-          if (createdAt != null) {
-            try {
-              final dt = DateTime.parse(createdAt);
-              final diff = DateTime.now().difference(dt);
-              if (diff.inMinutes < 5) {
-                lastSeen = 'Just now';
-              } else if (diff.inMinutes < 60) {
-                lastSeen = '${diff.inMinutes}m ago';
-              } else if (diff.inHours < 24) {
-                lastSeen = '${diff.inHours}h ago';
-              } else {
-                lastSeen = '${diff.inDays}d ago';
-              }
-            } catch (_) {}
-          }
+                if (lastEvent != null) {
+                  final type = lastEvent['event_type'] as String;
+                  final battery = lastEvent['battery_level'];
+                  final createdAt = lastEvent['created_at'] as String?;
 
-          // Status from event type
-          if (type == 'sos' && lastEvent['metadata']?['status'] != 'resolved') {
-            isAlert = true;
-            statusText = 'EMERGENCY: SOS ACTIVE';
-            statusIcon = Icons.warning;
-          } else if (type == 'driving' || type == 'driving_alert') {
-            statusText = 'In Motion';
-            statusIcon = Icons.directions_car;
-          } else if (type == 'safe_zone_enter') {
-            statusText = 'In Safe Zone';
-            statusIcon = Icons.verified_user;
-          } else if (type == 'check_in') {
-            statusText = 'Checked In';
-            statusIcon = Icons.how_to_reg;
-          } else {
-            statusText = lastSeen.isNotEmpty ? 'Last seen $lastSeen' : 'Online';
-            statusIcon = Icons.check_circle_outline;
-          }
+                  // Last seen
+                  String lastSeen = '';
+                  if (createdAt != null) {
+                    try {
+                      final dt = DateTime.parse(createdAt);
+                      final diff = DateTime.now().difference(dt);
+                      if (diff.inMinutes < 5) {
+                        lastSeen = 'Just now';
+                      } else if (diff.inMinutes < 60) {
+                        lastSeen = '${diff.inMinutes}m ago';
+                      } else if (diff.inHours < 24) {
+                        lastSeen = '${diff.inHours}h ago';
+                      } else {
+                        lastSeen = '${diff.inDays}d ago';
+                      }
+                    } catch (_) {}
+                  }
 
-          // Metrics from real data
-          if (battery != null) {
-            metrics.add({'label': 'BATTERY', 'value': '$battery', 'unit': '%'});
-          }
+                  // Status from event type
+                  if (type == 'sos' &&
+                      lastEvent['metadata']?['status'] != 'resolved') {
+                    isAlert = true;
+                    statusText = 'EMERGENCY: SOS ACTIVE';
+                    statusIcon = Icons.warning;
+                  } else if (type == 'driving' || type == 'driving_alert') {
+                    statusText = 'In Motion';
+                    statusIcon = Icons.directions_car;
+                  } else if (type == 'safe_zone_enter') {
+                    statusText = 'In Safe Zone';
+                    statusIcon = Icons.verified_user;
+                  } else if (type == 'check_in') {
+                    statusText = 'Checked In';
+                    statusIcon = Icons.how_to_reg;
+                  } else if (type == 'heartbeat') {
+                    statusText = lastSeen.isNotEmpty
+                        ? 'Pulse active • $lastSeen'
+                        : 'Pulse active';
 
-          // Location
-          final lat = lastEvent['latitude'];
-          final lng = lastEvent['longitude'];
-          final semLoc = lastEvent['metadata']?['semantic_location'];
-          if (semLoc != null) {
-            metrics.add({'label': 'LOC', 'value': '$semLoc', 'unit': ''});
-          } else if (lat != null && lng != null) {
-            metrics.add({'label': 'LOC', 'value': 'GPS Active', 'unit': ''});
-          }
-        } else {
-          statusText = 'No data received yet';
-        }
+                    statusIcon = Icons.favorite;
+                  } else {
+                    statusText = lastSeen.isNotEmpty
+                        ? 'Last seen $lastSeen'
+                        : 'Online';
+                    statusIcon = Icons.check_circle_outline;
+                  }
 
-        if (role == 'senior' && metrics.isEmpty) {
-          metrics.add({'label': 'VITALS', 'value': 'No wearable', 'unit': ''});
-        }
+                  // Metrics from real data
+                  if (battery != null) {
+                    metrics.add({
+                      'label': 'BATTERY',
+                      'value': '$battery',
+                      'unit': '%',
+                    });
+                  }
 
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 16.0),
-          child: ShieldMemberCard(
-            name: displayName,
-            status: role.toUpperCase(),
-            metrics: metrics,
-            subStatusIcon: statusIcon,
-            subStatusText: statusText,
-            isAlert: isAlert,
-            isReadOnly: true,
-            avatarUrl: member['avatar_url'] as String?,
-          ),
+                  // Location
+                  final lat = lastEvent['latitude'];
+                  final lng = lastEvent['longitude'];
+                  final semLoc = lastEvent['metadata']?['semantic_location'];
+                  if (semLoc != null) {
+                    metrics.add({
+                      'label': 'LOC',
+                      'value': '$semLoc',
+                      'unit': '',
+                    });
+                  } else if (lat != null && lng != null) {
+                    metrics.add({
+                      'label': 'LOC',
+                      'value': 'GPS Active',
+                      'unit': '',
+                    });
+                  }
+                } else {
+                  statusText = 'No data received yet';
+                }
+
+                if (role == 'senior' && metrics.isEmpty) {
+                  metrics.add({
+                    'label': 'VITALS',
+                    'value': 'No wearable',
+                    'unit': '',
+                  });
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: ShieldMemberCard(
+                    name: displayName,
+                    status: role.toUpperCase(),
+                    metrics: metrics,
+                    subStatusIcon: statusIcon,
+                    subStatusText: statusText,
+                    isAlert: isAlert,
+                    isReadOnly: true,
+                    avatarUrl: member['avatar_url'] as String?,
+                    batteryLevel: lastEvent?['battery_level'] as num?,
+                    vitals: vitals,
+                    checkInCount: checkInCount,
+                    isActive: lastEvent != null,
+                  ),
+                );
+              },
+            );
+          },
         );
       },
     );
@@ -1969,6 +2024,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                   "title": "Emergency Alert",
                   "body": "${profile.fullName} triggered an emergency alert",
                   "action": "emergency",
+                  "sound": "sos_sound",
                 },
               );
             } catch (e) {
@@ -2413,8 +2469,8 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
 
                   _timeBox(secs, "SECS"),
                 ],
-              ), if (widget.profile?.userId == widget.assignedUserId)
-
+              ),
+              if (widget.profile?.userId == widget.assignedUserId)
                 SizedBox(height: 10),
               if (widget.profile?.userId == widget.assignedUserId)
                 SizedBox(
