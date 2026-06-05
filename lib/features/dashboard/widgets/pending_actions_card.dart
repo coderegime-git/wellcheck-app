@@ -10,7 +10,13 @@ import 'package:intl/intl.dart';
 class PendingActionsCard extends ConsumerWidget {
   const PendingActionsCard({super.key});
 
-  Future<void> _logDose(BuildContext context, WidgetRef ref, Medication med, String userId, String familyId) async {
+  Future<void> _logDose(
+    BuildContext context,
+    WidgetRef ref,
+    Medication med,
+    String userId,
+    String familyId,
+  ) async {
     final now = DateTime.now().toUtc();
     try {
       await Supabase.instance.client.from('dose_logs').insert({
@@ -22,7 +28,7 @@ class PendingActionsCard extends ConsumerWidget {
         'status': 'taken',
       });
       int batteryLevel =
-      100; // Safe default for simulators and aggressive background iOS policies
+          100; // Safe default for simulators and aggressive background iOS policies
       try {
         final battery = Battery();
         batteryLevel = await battery.batteryLevel;
@@ -37,8 +43,9 @@ class PendingActionsCard extends ConsumerWidget {
         'user_id': userId,
         'event_type': 'medication_logged',
         'title': 'Medication Taken',
-        'battery_level':batteryLevel,
-        'description': '${profile?.fullName ?? 'User'} logged ${med.medicationName} (${med.dosage})',
+        'battery_level': batteryLevel,
+        'description':
+            '${profile?.fullName ?? 'User'} logged ${med.medicationName} (${med.dosage})',
       });
 
       if (context.mounted) {
@@ -51,9 +58,9 @@ class PendingActionsCard extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to log dose: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to log dose: $e')));
       }
     }
   }
@@ -69,8 +76,15 @@ class PendingActionsCard extends ConsumerWidget {
     return medicationsAsync.when(
       data: (meds) {
         // Find medications assigned to ME that are active
-        final myMeds = meds.where((m) => m.isActive && m.assignedTo == profile.userId && m.scheduleTimes.isNotEmpty).toList();
-        
+        final myMeds = meds
+            .where(
+              (m) =>
+                  m.isActive &&
+                  m.assignedTo == profile.userId &&
+                  m.scheduleTimes.isNotEmpty,
+            )
+            .toList();
+
         if (myMeds.isEmpty) return const SizedBox.shrink();
 
         return Column(
@@ -81,7 +95,8 @@ class PendingActionsCard extends ConsumerWidget {
               med: med,
               userId: profile.userId,
               familyId: profile.familyId,
-              onLogDose: () => _logDose(context, ref, med, profile.userId, profile.familyId),
+              onLogDose: () =>
+                  _logDose(context, ref, med, profile.userId, profile.familyId),
             );
           }).toList(),
         );
@@ -109,6 +124,7 @@ class _ActionItemConsumer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final doseLogsAsync = ref.watch(doseLogsProvider(med.id));
     final nextDose = med.nextDoseToday;
+    ref.invalidate(doseLogsProvider);
 
     // We only want to show the prompt if they are scheduled today
     if (nextDose == null) return const SizedBox.shrink();
@@ -116,13 +132,29 @@ class _ActionItemConsumer extends ConsumerWidget {
     return doseLogsAsync.when(
       data: (logs) {
         final now = DateTime.now();
-        final isTakenToday = logs.any((log) =>
-            log.status == 'taken' &&
-            log.takenAt != null &&
-            log.takenAt!.year == now.year &&
-            log.takenAt!.month == now.month &&
-            log.takenAt!.day == now.day);
+        // final isTakenToday = logs.any(
+        //   (log) =>
+        //       log.status == 'taken' &&
+        //       log.takenAt != null &&
+        //       log.takenAt!.year == now.year &&
+        //       log.takenAt!.month == now.month &&
+        //       log.takenAt!.day == now.day,
+        // );
+        final medicationLogs = logs
+            .where((log) => log.medicationId == med.id)
+            .toList();
 
+        medicationLogs.sort((a, b) => b.scheduledAt!.compareTo(a.scheduledAt!));
+
+        final latestLog = medicationLogs.isNotEmpty
+            ? medicationLogs.first
+            : null;
+
+        final isTakenToday = latestLog?.status == 'taken';
+        final isMissed = latestLog?.status == 'missed';
+        print(isMissed);
+        print("isMissed");
+        print("isMissed");
         if (isTakenToday) return const SizedBox.shrink(); // Already taken!
 
         final diff = nextDose.difference(now).inMinutes;
@@ -135,7 +167,9 @@ class _ActionItemConsumer extends ConsumerWidget {
           margin: const EdgeInsets.only(bottom: 16),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: isOverdue ? ShieldColors.alertRed.withValues(alpha: 0.1) : Colors.amber.shade50,
+            color: isOverdue
+                ? ShieldColors.alertRed.withValues(alpha: 0.1)
+                : Colors.amber.shade50,
             border: Border.all(
               color: isOverdue ? ShieldColors.alertRed : Colors.amber,
               width: 1.5,
@@ -149,13 +183,17 @@ class _ActionItemConsumer extends ConsumerWidget {
                 children: [
                   Icon(
                     Icons.warning_amber_rounded,
-                    color: isOverdue ? ShieldColors.alertRed : Colors.amber.shade700,
+                    color: isOverdue
+                        ? ShieldColors.alertRed
+                        : Colors.amber.shade700,
                   ),
                   const SizedBox(width: 8),
                   Text(
                     'ACTION REQUIRED',
                     style: TextStyle(
-                      color: isOverdue ? ShieldColors.alertRed : Colors.amber.shade800,
+                      color: isOverdue
+                          ? ShieldColors.alertRed
+                          : Colors.amber.shade800,
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
                       letterSpacing: 1.2,
@@ -181,7 +219,10 @@ class _ActionItemConsumer extends ConsumerWidget {
                   padding: const EdgeInsets.only(top: 4.0),
                   child: Text(
                     med.instructions!,
-                    style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.black54),
+                    style: const TextStyle(
+                      fontStyle: FontStyle.italic,
+                      color: Colors.black54,
+                    ),
                   ),
                 ),
               const SizedBox(height: 16),

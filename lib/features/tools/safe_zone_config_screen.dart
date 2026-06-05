@@ -232,7 +232,7 @@ class SafeZoneConfigScreen extends ConsumerWidget {
                     shadowColor: Colors.grey.shade300,
                     surfaceTintColor: Colors.white,
                     elevation: 3,
-                    margin: const EdgeInsets.only(bottom: 16),
+                    margin: const EdgeInsets.only(bottom: 12),
                     child: ListTile(
                       contentPadding: const EdgeInsets.all(16),
                       leading: const CircleAvatar(
@@ -242,9 +242,33 @@ class SafeZoneConfigScreen extends ConsumerWidget {
                           color: ShieldColors.activeTeal,
                         ),
                       ),
-                      title: Text(
-                        zone['name'] ?? 'Unnamed Zone',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      title: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            zone['name'] ?? 'Unnamed Zone',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+
+                          SizedBox(height: 5),
+                          if (zone['assigned_user_name'] != null)
+                            RichText(
+                              text: TextSpan(
+                                text: 'Assigned to - ',
+                                style: TextStyle(color: Colors.grey.shade500),
+                                children: [
+                                  TextSpan(
+                                    text: '${zone['assigned_user_name']}',
+                                    style: TextStyle(
+                                      color: Colors.black,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
                       ),
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,

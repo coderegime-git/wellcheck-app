@@ -17,6 +17,9 @@
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
+		99BBF54C2FB838CA0024B848 /* sos_sound.aiff in Resources */ = {isa = PBXBuildFile; fileRef = 99BBF54B2FB838CA0024B848 /* sos_sound.aiff */; };
+		99BBF5502FB853F80024B848 /* custom_sound.aiff in Resources */ = {isa = PBXBuildFile; fileRef = 99BBF54F2FB853F80024B848 /* custom_sound.aiff */; };
+		99C4A2BE2FCFFCA2009DCB95 /* missed_checkin.aiff in Resources */ = {isa = PBXBuildFile; fileRef = 99C4A2BD2FCFFCA2009DCB95 /* missed_checkin.aiff */; };
 		AABBCC001122334400FIREBASE /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = AABBCC001122334401FIREBASE /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
@@ -63,6 +66,9 @@
 		97C146FD1CF9000F007C117D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		99BBF54B2FB838CA0024B848 /* sos_sound.aiff */ = {isa = PBXFileReference; lastKnownFileType = audio.aiff; path = sos_sound.aiff; sourceTree = "<group>"; };
+		99BBF54F2FB853F80024B848 /* custom_sound.aiff */ = {isa = PBXFileReference; lastKnownFileType = audio.aiff; path = custom_sound.aiff; sourceTree = "<group>"; };
+		99C4A2BD2FCFFCA2009DCB95 /* missed_checkin.aiff */ = {isa = PBXFileReference; lastKnownFileType = audio.aiff; path = missed_checkin.aiff; sourceTree = "<group>"; };
 		AABBCC001122334401FIREBASE /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		AABBCC001122334402ENTITLE /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Runner.entitlements; sourceTree = "<group>"; };
 		BE3729DFE454034D08AD60AF /* Pods_RunnerTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_RunnerTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -135,6 +141,8 @@
 		97C146F01CF9000F007C117D /* Runner */ = {
 			isa = PBXGroup;
 			children = (
+				99C4A2BD2FCFFCA2009DCB95 /* missed_checkin.aiff */,
+				99BBF54B2FB838CA0024B848 /* sos_sound.aiff */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
 				97C146FD1CF9000F007C117D /* Assets.xcassets */,
 				97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */,
@@ -146,6 +154,7 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
+				99BBF54F2FB853F80024B848 /* custom_sound.aiff */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -268,11 +277,14 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				99C4A2BE2FCFFCA2009DCB95 /* missed_checkin.aiff in Resources */,
+				99BBF5502FB853F80024B848 /* custom_sound.aiff in Resources */,
 				97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */,
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
 				97C146FC1CF9000F007C117D /* Main.storyboard in Resources */,
 				AABBCC001122334400FIREBASE /* GoogleService-Info.plist in Resources */,
+				99BBF54C2FB838CA0024B848 /* sos_sound.aiff in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -502,7 +514,7 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 26;
 				DEVELOPMENT_TEAM = 2VK52ZSSUR;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
@@ -701,7 +713,7 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 26;
 				DEVELOPMENT_TEAM = 2VK52ZSSUR;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
@@ -736,7 +748,7 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 26;
 				DEVELOPMENT_TEAM = 2VK52ZSSUR;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;

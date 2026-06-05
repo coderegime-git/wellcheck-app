@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:health/health.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
+
+import '../../core/data/health_repository.dart';
+import '../../core/notifications/push_notification_service.dart';
 
 class ProfileSettingsView extends ConsumerStatefulWidget {
   const ProfileSettingsView({super.key});
@@ -128,8 +133,11 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
 
     setState(() => _isLoggingOut = true);
     try {
+      PushNotificationService.saveTokenToProfile(null);
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('priv_biometric', false);
+      FlutterBackgroundService().invoke('stopService');
       await Supabase.instance.client.auth.signOut();
       // Router will handle navigation to login via auth state listener
     } catch (e) {
@@ -296,7 +304,8 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
           ),
 
           const Spacer(),
-
+          Text("Version:1.0.0"),
+          SizedBox(height: 10),
           // Log Out Button
           SizedBox(
             width: double.infinity,
@@ -365,6 +374,16 @@ class _NotificationPrefsSheetState extends State<_NotificationPrefsSheet> {
   bool _calendarReminders = true;
   bool _safeZoneAlerts = true;
   bool _drivingAlerts = false;
+  bool heartBeat = true;
+  final Health _health = Health();
+  final List<HealthDataType> _healthTypes = [
+    HealthDataType.HEART_RATE,
+    HealthDataType.STEPS,
+    HealthDataType.SLEEP_ASLEEP,
+    HealthDataType.BLOOD_OXYGEN,
+    HealthDataType.HEART_RATE_VARIABILITY_SDNN,
+    HealthDataType.ELECTRODERMAL_ACTIVITY,
+  ];
 
   @override
   void initState() {
@@ -381,6 +400,7 @@ class _NotificationPrefsSheetState extends State<_NotificationPrefsSheet> {
       _calendarReminders = prefs.getBool('notif_cal') ?? true;
       _safeZoneAlerts = prefs.getBool('notif_safezone') ?? true;
       _drivingAlerts = prefs.getBool('notif_driving') ?? false;
+      heartBeat = prefs.getBool('priv_heartbeat') ?? true;
     });
   }
 
@@ -392,6 +412,7 @@ class _NotificationPrefsSheetState extends State<_NotificationPrefsSheet> {
     await prefs.setBool('notif_cal', _calendarReminders);
     await prefs.setBool('notif_safezone', _safeZoneAlerts);
     await prefs.setBool('notif_driving', _drivingAlerts);
+    await prefs.setBool('priv_heartbeat', heartBeat);
   }
 
   @override
@@ -429,6 +450,44 @@ class _NotificationPrefsSheetState extends State<_NotificationPrefsSheet> {
             onChanged: (v) => setState(() => _sosAlerts = v),
           ),
           SwitchListTile(
+            title: const Text('Sync Heart Rate'),
+            //    subtitle: const Text('AES-256 encryption for all vault files'),
+            value: heartBeat,
+            activeColor: ShieldColors.activeTeal,
+            onChanged: (value) async {
+              if (value) {
+                final healthRepo = HealthRepository(Supabase.instance.client);
+
+                try {
+                  final granted = await healthRepo.requestPermissions();
+
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('priv_heartbeat', granted);
+                  setState(() => heartBeat = granted);
+                } catch (e) {
+                  final prefs = await SharedPreferences.getInstance();
+
+                  await prefs.setBool('priv_heartbeat', false);
+
+                  debugPrint(
+                    '[ProfileSetup] HealthKit permission request failed: $e',
+                  );
+                  // ScaffoldMessenger.of(context).showSnackBar(
+                  //   SnackBar(
+                  //     content: Text('HealthKit permission request failed: $e'),
+                  //   ),
+                  // );
+                  setState(() => heartBeat = false);
+                }
+              } else {
+                setState(() => heartBeat = false);
+              }
+              //final prefs = await SharedPreferences.getInstance();
+
+              // prefs.getBool('priv_heartbeat') ?? true;
+            },
+          ),
+          SwitchListTile(
             title: const Text('Check-In Notifications'),
             value: _checkInAlerts,
             activeColor: ShieldColors.activeTeal,
@@ -446,6 +505,7 @@ class _NotificationPrefsSheetState extends State<_NotificationPrefsSheet> {
             activeColor: ShieldColors.activeTeal,
             onChanged: (v) => setState(() => _calendarReminders = v),
           ),
+
           SwitchListTile(
             title: const Text('Safe Zone Entry/Exit'),
             value: _safeZoneAlerts,
@@ -572,6 +632,7 @@ class _PrivacySecuritySheetState extends State<_PrivacySecuritySheet> {
             activeColor: ShieldColors.activeTeal,
             onChanged: (v) => setState(() => _encryptedVault = v),
           ),
+
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(16),

@@ -75,10 +75,11 @@ class _CheckInSheetState extends ConsumerState<CheckInSheet> {
 
   Future<void> _performCheckIn() async {
     setState(() => _isLoading = true);
-
+    double lat = 0.0;
+    double lng = 0.0;
+    int level = 100;
     try {
-      int level =
-          100; // Safe default for simulators and aggressive background iOS policies
+      // Safe default for simulators and aggressive background iOS policies
       try {
         final battery = Battery();
         level = await battery.batteryLevel;
@@ -94,8 +95,6 @@ class _CheckInSheetState extends ConsumerState<CheckInSheet> {
       final defaultMsg = "Checked in from Current Location.";
 
       bool gpsSuccess = false;
-      double lat = 0.0;
-      double lng = 0.0;
 
       try {
         bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -205,15 +204,27 @@ class _CheckInSheetState extends ConsumerState<CheckInSheet> {
 
       final members = await Supabase.instance.client
           .from('family_members')
-          .select('user_id')
+          .select('user_id, role')
           .eq('family_id', profile.familyId);
-
+      final response =
+          await Supabase.instance.client.from('live_locations').upsert({
+            'user_id': profile.userId,
+            'family_id': profile.familyId,
+            'user_name': profile.fullName,
+            'role': profile.role,
+            'latitude': lat,
+            'longitude': lng,
+            'battery_level': level,
+            'updated_at': DateTime.now().toIso8601String(),
+          }, onConflict: 'user_id').select();
       // 3. Send push
       for (final m in members) {
         final targetUserId = m['user_id'];
 
-        if (targetUserId == profile.userId) continue;
-
+        if (targetUserId == profile.userId ||
+            (m['role'] != "leader" && m['role'] != "monitor")) {
+          continue;
+        }
         try {
           await Supabase.instance.client.functions.invoke(
             'push-router',
@@ -471,7 +482,11 @@ class _CheckInSheetState extends ConsumerState<CheckInSheet> {
 }
 
 class ScheduleCheckInSheet extends ConsumerStatefulWidget {
-  const ScheduleCheckInSheet({super.key});
+  final Map<String, dynamic>? schedule;
+
+  const ScheduleCheckInSheet({super.key, this.schedule});
+
+  bool get isEdit => schedule != null;
 
   @override
   ConsumerState<ScheduleCheckInSheet> createState() =>
@@ -502,6 +517,7 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
   @override
   void initState() {
     _fetchFamilyMembers();
+
     super.initState();
   }
 
@@ -542,6 +558,25 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
     } catch (e) {
       debugPrint('Error fetching members: $e');
       if (mounted) setState(() => _isLoadingMembers = false);
+    }
+    if (widget.schedule != null) {
+      final s = widget.schedule!;
+
+      _selectedUserId = s['assigned_user_id'];
+      _selectedUserName = s['assigned_user_name'];
+
+      _recurrence = s['recurrence'] ?? 'daily';
+
+      _selectedDays = List<int>.from(s['days_of_week'] ?? []);
+
+      final scheduledAt = DateTime.parse(s['scheduled_at']).toLocal();
+
+      _selectedDate = scheduledAt;
+
+      _selectedTime = TimeOfDay(
+        hour: scheduledAt.hour,
+        minute: scheduledAt.minute,
+      );
     }
   }
 
@@ -677,15 +712,17 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
 
       final members = await Supabase.instance.client
           .from('family_members')
-          .select('user_id')
+          .select('user_id, role')
           .eq('family_id', profile.familyId);
 
       // 3. Send push
       for (final m in members) {
         final targetUserId = m['user_id'];
 
-        if (targetUserId == profile.userId) continue;
-
+        if (targetUserId == profile.userId ||
+            (m['role'] != "leader" && m['role'] != "monitor")) {
+          continue;
+        }
         try {
           await Supabase.instance.client.functions.invoke(
             'push-router',
@@ -760,37 +797,78 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
       }
       setState(() => setCheckIn = true);
 
-      final localDateTime = DateTime(
+      DateTime localDateTime = DateTime(
         _selectedDate!.year,
         _selectedDate!.month,
         _selectedDate!.day,
         _selectedTime!.hour,
         _selectedTime!.minute,
       );
+      if (_recurrence == 'weekly' && _selectedDays.isNotEmpty) {
+        final targetDay = _selectedDays.first;
 
+        int currentDay = localDateTime.weekday % 7;
+        int diff = targetDay - currentDay;
+
+        if (diff < 0) diff += 7;
+
+        localDateTime = localDateTime.add(Duration(days: diff));
+      }
       final utcDateTime = localDateTime.toUtc();
+      final payload = {
+        'assigned_user_id': _selectedUserId,
+        'assigned_user_name': _selectedUserName,
+        'checkin_date': _selectedDate?.toIso8601String(),
+        'checkin_time': '${_selectedTime!.hour}:${_selectedTime!.minute}:00',
+        'scheduled_at': utcDateTime.toIso8601String(),
+        'recurrence': _recurrence,
+        'days_of_week': _selectedDays,
+      };
+      Map<String, dynamic> scheduleRecord;
 
-      final inserted = await Supabase.instance.client
-          .from('checkin_schedules')
-          .insert({
-            'family_id': profile.familyId,
-            'assigned_user_id': _selectedUserId,
-            'assigned_user_name': _selectedUserName,
-            'created_by': profile.userId,
-            'checkin_date': _selectedDate?.toIso8601String(),
-            'checkin_time':
-                '${_selectedTime!.hour}:${_selectedTime!.minute}:00',
-            // NEW UTC FIELD
-            'scheduled_at': utcDateTime.toIso8601String(),
-            'recurrence': _recurrence,
-            'is_active': true,
-            'is_completed': false,
-            'status': 'pending',
-            'reminder_sent': false,
-            'days_of_week': _selectedDays,
-          })
-          .select()
-          .single();
+      if (widget.isEdit) {
+        scheduleRecord = await Supabase.instance.client
+            .from('checkin_schedules')
+            .update(payload)
+            .eq('id', widget.schedule!['id'])
+            .select()
+            .single();
+      } else {
+        // final inserted = await Supabase.instance.client
+        //     .from('checkin_schedules')
+        //     .insert({
+        //       'family_id': profile.familyId,
+        //       'assigned_user_id': _selectedUserId,
+        //       'assigned_user_name': _selectedUserName,
+        //       'created_by': profile.userId,
+        //       'checkin_date': _selectedDate?.toIso8601String(),
+        //       'checkin_time':
+        //           '${_selectedTime!.hour}:${_selectedTime!.minute}:00',
+        //       // NEW UTC FIELD
+        //       'scheduled_at': utcDateTime.toIso8601String(),
+        //       'recurrence': _recurrence,
+        //       'is_active': true,
+        //       'is_completed': false,
+        //       'status': 'pending',
+        //       'reminder_sent': false,
+        //       'days_of_week': _selectedDays,
+        //     })
+        //     .select()
+        //     .single();
+        scheduleRecord = await Supabase.instance.client
+            .from('checkin_schedules')
+            .insert({
+              ...payload,
+              'family_id': profile.familyId,
+              'created_by': profile.userId,
+              'is_active': true,
+              'is_completed': false,
+              'status': 'pending',
+              'reminder_sent': false,
+            })
+            .select()
+            .single();
+      }
       debugPrint("_selectedUserId");
       debugPrint(_selectedUserId);
       debugPrint("checkIn Local notification");
@@ -818,7 +896,7 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
       });
       final response = await Supabase.instance.client.functions.invoke(
         'checkin-reminder-cron',
-        body: {"schedule_id": inserted["id"]},
+        body: {"schedule_id": scheduleRecord["id"]},
       );
 
       debugPrint(response.data.toString());
@@ -839,7 +917,7 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
           body: {
             "target_user_id": _selectedUserId,
             "action": "schedule_checkin",
-            "schedule": jsonEncode(inserted),
+            "schedule": jsonEncode(scheduleRecord),
           },
         );
 
@@ -850,7 +928,7 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
             "title": "✅ Check-In Scheduled",
             "body": "You'll be reminded at ${_selectedTime!.format(context)}",
             "action": "schedule_checkin",
-            "schedule": jsonEncode(inserted),
+            "schedule": jsonEncode(scheduleRecord),
           },
         );
       } else {
@@ -1016,6 +1094,12 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
                         setState(() {
                           _recurrence = val;
                         });
+                        print(_recurrence);
+                        print("_recurrence_recurrence");
+                        if (_recurrence != "weekly") {
+                          _selectedDays = [];
+                        }
+                        print(_selectedDays);
                       }
                     },
                   ),
@@ -1057,7 +1141,7 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
                       }),
                     ),
                   ],
-                  const SizedBox(height: 15),
+                  const SizedBox(height: 8),
 
                   ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -1070,7 +1154,9 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
                     onTap: () async {
                       final picked = await showTimePicker(
                         context: context,
-                        initialTime: TimeOfDay.now(),
+                        initialTime: _selectedTime != null
+                            ? _selectedTime!
+                            : TimeOfDay.now(),
                       );
 
                       if (picked != null) {
@@ -1092,7 +1178,9 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
                         context: context,
                         firstDate: DateTime.now(),
                         lastDate: DateTime(2100),
-                        initialDate: DateTime.now(),
+                        initialDate: _selectedDate != null
+                            ? _selectedDate
+                            : DateTime.now(),
                       );
 
                       if (picked != null) {
@@ -1100,8 +1188,9 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
                       }
                     },
                   ),
+                  SizedBox(height: 8),
                   SizedBox(
-                    height: 56,
+                    height: 53,
                     child: ElevatedButton(
                       onPressed: setCheckIn ? null : saveCheckIn,
                       style: ElevatedButton.styleFrom(
@@ -1113,13 +1202,15 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
                       ),
                       child: setCheckIn
                           ? const CircularProgressIndicator(color: Colors.white)
-                          : const Row(
+                          : Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(Icons.how_to_reg),
                                 SizedBox(width: 8),
                                 Text(
-                                  'Schedule Check-In',
+                                  widget.isEdit
+                                      ? 'Update Check-In'
+                                      : 'Schedule Check-In',
                                   style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
@@ -1127,6 +1218,32 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
                                 ),
                               ],
                             ),
+                    ),
+                  ),
+                  SizedBox(height: 18),
+                  SizedBox(
+                    height: 51,
+
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(
+                          color: ShieldColors.activeTeal,
+                          width: 1,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ScheduledCheckinsScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.list_alt),
+                      label: const Text('View Scheduled Check-Ins'),
                     ),
                   ),
                   SizedBox(height: 10),
@@ -1154,3 +1271,169 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
     );
   }
 }
+
+class ScheduledCheckinsScreen extends ConsumerWidget {
+  const ScheduledCheckinsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final schedulesAsync = ref.watch(schedulesProvider);
+    ref.invalidate(schedulesProvider);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Scheduled Check-Ins')),
+      // floatingActionButton: FloatingActionButton(
+      //   onPressed: () async {
+      //     await showModalBottomSheet(
+      //       context: context,
+      //       useSafeArea: true,
+      //       isScrollControlled: true,
+      //       builder: (_) => const ScheduleCheckInSheet(),
+      //     );
+      //     ref.invalidate(schedulesProvider);
+      //   },
+      //   child: const Icon(Icons.add),
+      // ),
+      body: schedulesAsync.when(
+        data: (schedules) {
+          if (schedules.isEmpty) {
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.check_circle_outline,
+                    size: 72,
+                    color: Colors.grey,
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'No scheduled check-ins yet',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Create a check-in schedule to get started.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            itemCount: schedules.length,
+            padding: const EdgeInsets.only(bottom: 120),
+            itemBuilder: (context, index) {
+              final schedule = schedules[index];
+              final scheduledAt = DateTime.parse(
+                schedule['scheduled_at'],
+              ).toLocal();
+              final formatted = DateFormat(
+                'dd MMM yyyy, hh:mm a',
+              ).format(scheduledAt);
+              return Card(
+                margin: const EdgeInsets.all(8),
+                child: ListTile(
+                  title: Text(schedule['assigned_user_name'] ?? ''),
+                  subtitle: Text(
+                    '${schedule['recurrence'] == 'every_other_day'
+                        ? "Every other day"
+                        : schedule['recurrence'] == 'weekly'
+                        ? "Weekly"
+                        : schedule['recurrence'] == "monthly"
+                        ? "Monthly"
+                        : schedule['recurrence'] == "daily"
+                        ? "Daily"
+                        : schedule['recurrence']} • $formatted',
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit),
+                        onPressed: () async {
+                          await showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            useSafeArea: true,
+                            builder: (_) =>
+                                ScheduleCheckInSheet(schedule: schedule),
+                          );
+                          ref.invalidate(schedulesProvider);
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () async {
+                          final confirmed = await showDialog<bool>(
+                            context: context,
+                            builder: (context) {
+                              return AlertDialog(
+                                title: const Text('Delete Check-In'),
+                                content: const Text(
+                                  'Are you sure you want to delete this scheduled check-in?',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context, false),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context, true),
+                                    child: const Text('Delete'),
+                                  ),
+                                ],
+                              );
+                            },
+                          );
+
+                          if (confirmed != true) return;
+
+                          await Supabase.instance.client
+                              .from('checkin_schedules')
+                              .delete()
+                              .eq('id', schedule['id']);
+
+                          ref.invalidate(schedulesProvider);
+
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Check-in deleted successfully'),
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text(e.toString())),
+      ),
+    );
+  }
+}
+
+final schedulesProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
+  final profile = await ref.read(currentUserProfileProvider.future);
+
+  if (profile == null) return [];
+
+  final response = await Supabase.instance.client
+      .from('checkin_schedules')
+      .select()
+      .eq('family_id', profile.familyId)
+      .order('scheduled_at');
+
+  return List<Map<String, dynamic>>.from(response);
+});

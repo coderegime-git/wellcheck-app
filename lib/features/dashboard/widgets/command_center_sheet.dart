@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
+import 'package:well_check_v3/features/command_center/checkin_history.dart';
 import 'package:well_check_v3/features/command_center/medication_history.dart';
 import 'package:well_check_v3/features/dashboard/widgets/invite_member_dialog.dart';
 import 'package:well_check_v3/features/command_center/medications_sheet.dart';
@@ -27,6 +28,24 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
   @override
   Widget build(BuildContext context) {
     final items = [
+      if (widget.fromLeader == true)
+        _CmdItem(
+          Icons.how_to_reg,
+          'Schedule Check-in',
+          'Assign check-in',
+          //
+          ShieldColors.safeZoneGreen,
+          () => _pushSheet(context, const ScheduleCheckInSheet(), true),
+          //            Navigator.push(context, MaterialPageRoute(builder: (context)=>ScheduledCheckinsScreen()));
+        ),
+      if (widget.fromLeader == true)
+        _CmdItem(
+          Icons.check_circle,
+          'Check-in history',
+          'Logs history',
+          ShieldColors.activeTeal,
+          () => _pushSheet(context, CheckInHistoryScreen(), true),
+        ),
       _CmdItem(
         Icons.medical_services,
         'Medications',
@@ -50,6 +69,7 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
             true,
           ),
         ),
+
       _CmdItem(
         Icons.calendar_month,
         'Calendar',
@@ -60,6 +80,7 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
           context.push('/sync-calendar');
         },
       ),
+
       // _CmdItem(
       //   Icons.how_to_reg,
       //   'Check-in',
@@ -68,15 +89,6 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
       //   ShieldColors.safeZoneGreen,
       //   () => _pushSheet(context, const CheckInSheet(), true),
       // ),
-      if (widget.fromLeader == true)
-        _CmdItem(
-          Icons.how_to_reg,
-          'Schedule Check-in',
-          'Assign check-in',
-
-          ShieldColors.safeZoneGreen,
-          () => _pushSheet(context, const ScheduleCheckInSheet(), true),
-        ),
       _CmdItem(
         Icons.contacts,
         'Contacts',

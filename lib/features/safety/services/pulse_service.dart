@@ -61,15 +61,12 @@ class PulseService {
     });
   }
 
-  // Send a pulse broadcast directly
   Future<void> broadcastPulse(String? fallbackUserId) async {
     try {
-      debugPrint('heartbeatheartbeatheartbeat');
       final prefs = await SharedPreferences.getInstance();
       final familyId = prefs.getString('last_family_id');
       final persistentUserId = prefs.getString('last_user_id');
       final persistentUserName = prefs.getString('last_user_name');
-
       final effectiveUserId = persistentUserId ?? fallbackUserId;
 
       if (familyId == null || effectiveUserId == null) {
@@ -85,7 +82,18 @@ class PulseService {
       double speed = 0.0;
 
       try {
-        final permission = await Geolocator.checkPermission();
+        LocationPermission permission = await Geolocator.checkPermission();
+
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+        }
+
+        if (permission == LocationPermission.deniedForever) {
+          await Geolocator.openAppSettings();
+
+          return;
+        }
+
         if (permission == LocationPermission.always ||
             permission == LocationPermission.whileInUse) {
           final position = await Geolocator.getCurrentPosition(
@@ -93,13 +101,14 @@ class PulseService {
               accuracy: LocationAccuracy.high,
             ),
           );
+
           lat = position.latitude;
           lng = position.longitude;
-          speed = position.speed; // Speed in m/s
-          altitude = position.altitude;
+          print(position.latitude);
+          print(position.longitude);
         }
       } catch (e) {
-        await Geolocator.openLocationSettings();
+        // await Geolocator.openAppSettings();
 
         debugPrint('Could not retrieve location: $e');
       }
@@ -134,6 +143,7 @@ class PulseService {
         'longitude': lng ?? 0.0,
         'battery_level': level,
         'event_type': 'heartbeat',
+        'user_name': persistentUserName,
         'metadata': {'semantic_location': semanticLabel},
       };
 
@@ -175,11 +185,18 @@ class PulseService {
       // 2. Biometric Sync (Physiological Awareness)
       try {
         print("syncVitals");
-        await healthRepo.syncVitals(
-          userId: effectiveUserId,
-          familyId: familyId,
-          userName: persistentUserName ?? "",
-        );
+        final heartRateEnabled = prefs.getBool('priv_heartbeat') ?? true;
+        print(heartRateEnabled);
+        print("heartRateEnabledheartRateEnabled2");
+        if (heartRateEnabled) {
+          await healthRepo.syncVitals(
+            userId: effectiveUserId,
+            familyId: familyId,
+            userName: persistentUserName ?? "",
+          );
+        } else {
+          debugPrint('Heart rate sync disabled by user');
+        }
       } catch (e) {
         print(e.toString());
         debugPrint('Biometric sync failed in background: $e');
@@ -235,6 +252,87 @@ class PulseService {
       debugPrint('Pulse successfully transmitted for Family: $familyId');
     } catch (e) {
       debugPrint('Pulse failed entirely: $e');
+    }
+  }
+
+  Position? _lastPosition;
+
+  Future<void> updateLocation(String? fallbackUserId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final familyId = prefs.getString('last_family_id');
+    final persistentUserId = prefs.getString('last_user_id');
+    final persistentUserName = prefs.getString('last_user_name');
+    final persistentUserRole = prefs.getString('last_user_role');
+
+    final effectiveUserId = persistentUserId ?? fallbackUserId;
+
+    if (familyId == null || effectiveUserId == null) {
+      return;
+    }
+
+    Position? position;
+
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        return;
+      }
+
+      if (permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse) {
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+          ),
+        );
+      }
+
+      if (position == null) return;
+
+      // Check movement distance
+      if (_lastPosition != null) {
+        final distance = Geolocator.distanceBetween(
+          _lastPosition!.latitude,
+          _lastPosition!.longitude,
+          position.latitude,
+          position.longitude,
+        );
+
+        if (distance < 10) {
+          // debugPrint("Location unchanged (${distance.toStringAsFixed(1)}m)");
+          return;
+        }
+      }
+
+      _lastPosition = position;
+
+      int level = 100;
+      try {
+        final battery = Battery();
+        level = await battery.batteryLevel;
+      } catch (_) {}
+
+      final response =
+          await Supabase.instance.client.from('live_locations').upsert({
+            'user_id': persistentUserId,
+            'family_id': familyId,
+            'user_name': persistentUserName,
+            'latitude': position.latitude,
+            'longitude': position.longitude,
+            'role': persistentUserRole,
+            'battery_level': level,
+            'updated_at': DateTime.now().toIso8601String(),
+          }, onConflict: 'user_id').select();
+
+      debugPrint("UPSERT RESPONSE");
+      debugPrint(response.toString());
+    } catch (e) {
+      debugPrint("updateLocation error: $e");
     }
   }
 }

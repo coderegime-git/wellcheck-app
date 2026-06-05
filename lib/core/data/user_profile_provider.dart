@@ -65,6 +65,7 @@ Future<UserProfile?> currentUserProfile(Ref ref) async {
       await prefs.setString('last_user_id', profile.userId);
       await prefs.setString('last_family_id', profile.familyId);
       await prefs.setString('last_user_name', profile.fullName ?? "");
+      await prefs.setString('last_user_role', profile.role ?? "");
 
       return profile;
     }

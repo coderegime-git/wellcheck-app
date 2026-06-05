@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/navigation/shield_router.dart';
 import 'package:flutter/foundation.dart';
@@ -19,6 +21,7 @@ import 'package:well_check_v3/core/notifications/global_notification_wrapper.dar
 import 'package:well_check_v3/features/safety/services/pulse_service.dart';
 
 import 'core/notifications/checkin_service.dart';
+import 'features/safety/services/location_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,7 +67,15 @@ Future<void> main() async {
   if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
     await initializeBackgroundService();
   }
+  // final locationGranted = await LocationService.requestLocationPermissions(context);
+  // if (!locationGranted) {
+  //   debugPrint(
+  //     'Location permission not granted — service may lack location data',
+  //   );
+  // }
 
+  //await initializeBackgroundService();
+  await FlutterBackgroundService().startService();
   runApp(const ProviderScope(child: WellCheckApp()));
 }
 
@@ -114,7 +125,13 @@ class _WellCheckAppState extends ConsumerState<WellCheckApp> {
         );
         ref.read(userRoleProvider.notifier).setRole(matchedRole);
         await PulseService().broadcastPulse(null);
+        final service = FlutterBackgroundService();
 
+        bool isRunning = await service.isRunning();
+
+        if (!isRunning) {
+          service.startService();
+        }
         ref.read(shieldRouterProvider).go('/dashboard');
       } else {
         ref.read(shieldRouterProvider).go('/role-selection');

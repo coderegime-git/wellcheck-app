@@ -19,20 +19,58 @@ class CampusWatchSheet extends ConsumerStatefulWidget {
 
 class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
   bool _isLoadingMembers = true;
+  List<Map<String, dynamic>> familyMembersAssign = [];
   List<Map<String, dynamic>> _familyMembers = [];
 
   // Per-user config: userId -> config map
   Map<String, Map<String, dynamic>> _memberConfigs = {};
   String? _expandedUserId;
+  String? _selectedUserId;
+  String? _selectedUserName;
 
   @override
   void initState() {
     super.initState();
+    _fetchFamilyMembers();
     _fetchMembers();
+  }
+
+  Future<void> _fetchFamilyMembers() async {
+    try {
+      final profile = await ref.read(currentUserProfileProvider.future);
+      if (profile == null) return;
+
+      final res = await Supabase.instance.client
+          .from('family_members')
+          .select('user_id, role, profiles(full_name)')
+          .eq('family_id', profile.familyId);
+
+      if (mounted) {
+        setState(() {
+          familyMembersAssign = List<Map<String, dynamic>>.from(res);
+          _isLoadingMembers = false;
+          if (familyMembersAssign.isNotEmpty) {
+            final me = familyMembersAssign
+                .where((m) => m['user_id'] == profile.userId)
+                .toList();
+            _selectedUserId = me.isNotEmpty
+                ? me.first['user_id']
+                : familyMembersAssign.first['user_id'];
+            _selectedUserName = me.isNotEmpty
+                ? me.first['profiles']['full_name']
+                : familyMembersAssign.first['profile']['user_id'];
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching members: $e');
+      if (mounted) setState(() => _isLoadingMembers = false);
+    }
   }
 
   Future<void> _fetchMembers() async {
     try {
+      print("_familyMembers");
       final profile = await ref.read(currentUserProfileProvider.future);
       ref.invalidate(safetyRepositoryProvider);
       if (profile == null) return;
@@ -60,7 +98,10 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
           _isLoadingMembers = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
+      print(e.toString());
+      print("_familyMembers11");
+
       if (mounted) setState(() => _isLoadingMembers = false);
     }
   }
@@ -108,69 +149,136 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
   final TextEditingController _campusAddressController =
       TextEditingController();
 
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: ShieldColors.activeTeal,
+          letterSpacing: 0.8,
+        ),
+      ),
+    );
+  }
+
   Future<void> _showAddCampusDialog() async {
     _campusNameController.clear();
     _campusAddressController.clear();
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: ShieldDesign.roundedTwelve),
-        title: const Row(
-          children: [
-            Icon(Icons.school, color: ShieldColors.activeTeal),
-            SizedBox(width: 8),
-            Text('Add Campus'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _campusNameController,
-              decoration: InputDecoration(
-                labelText: 'Campus Name',
-                hintText: 'e.g. Lincoln High School',
-                prefixIcon: const Icon(Icons.school_outlined),
-                border: OutlineInputBorder(
-                  borderRadius: ShieldDesign.roundedTwelve,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: ShieldDesign.roundedTwelve,
+            ),
+            title: const Row(
+              children: [
+                Icon(Icons.school, color: ShieldColors.activeTeal),
+                SizedBox(width: 8),
+                Text('Add Campus'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _sectionLabel('Assign To'),
+                if (_isLoadingMembers)
+                  const Center(child: CircularProgressIndicator()),
+                if (familyMembersAssign.isEmpty)
+                  Text("No Family member")
+                else if (familyMembersAssign.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    value: _selectedUserId,
+
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                        borderRadius: ShieldDesign.roundedTwelve,
+                      ),
+                      prefixIcon: const Icon(Icons.person),
+                    ),
+                    items: familyMembersAssign.map((m) {
+                      final name = m['profiles']?['full_name'] ?? 'Unknown';
+
+                      final role = m['role'];
+
+                      return DropdownMenuItem<String>(
+                        value: m['user_id'] as String,
+                        child: Text(
+                          '$name ($role)',
+                          style: TextStyle(fontSize: 15),
+                        ),
+                      );
+                    }).toList(),
+
+                    onChanged: (val) {
+                      final selectedMember = familyMembersAssign.firstWhere(
+                        (m) => m['user_id'] == val,
+                      );
+
+                      setDialogState(() {
+                        _selectedUserId = val;
+
+                        _selectedUserName =
+                            selectedMember['profiles']?['full_name'] ??
+                            'Unknown';
+                      });
+                    },
+
+                    validator: (val) => val == null ? 'Required' : null,
+                  ),
+                SizedBox(height: 20),
+                TextField(
+                  controller: _campusNameController,
+                  decoration: InputDecoration(
+                    labelText: 'Campus Name',
+                    hintText: 'e.g. Lincoln High School',
+                    prefixIcon: const Icon(Icons.school_outlined),
+                    border: OutlineInputBorder(
+                      borderRadius: ShieldDesign.roundedTwelve,
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _campusAddressController,
-              maxLines: 2,
-              decoration: InputDecoration(
-                labelText: 'Campus Address',
-                hintText: 'e.g. 123 Main St, City, State',
-                prefixIcon: const Icon(Icons.place),
-                border: OutlineInputBorder(
-                  borderRadius: ShieldDesign.roundedTwelve,
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _campusAddressController,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    labelText: 'Campus Address',
+                    hintText: 'e.g. 123 Main St, City, State',
+                    prefixIcon: const Icon(Icons.place),
+                    border: OutlineInputBorder(
+                      borderRadius: ShieldDesign.roundedTwelve,
+                    ),
+                  ),
                 ),
+                const SizedBox(height: 8),
+                const Text(
+                  'This will create a geo-fence zone around the campus to track student proximity.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'This will create a geo-fence zone around the campus to track student proximity.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: ShieldColors.activeTeal,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Add Campus'),
-          ),
-        ],
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: ShieldColors.activeTeal,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Add Campus'),
+              ),
+            ],
+          );
+        },
       ),
     );
 
@@ -190,6 +298,9 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
       await Supabase.instance.client.from('locations_safe_zones').insert({
         'family_id': profile.familyId,
         'name': name,
+        'assigned_user_id': _selectedUserId,
+
+        'assigned_user_name': _selectedUserName,
         'latitude': 0.0,
         'longitude': 0.0,
         'radius_meters': 300,
@@ -600,6 +711,7 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
                       .read(safetyRepositoryProvider)
                       .streamFamilyEvents(profile.familyId),
                   builder: (context, snapshot) {
+                    print(snapshot.data);
                     final allEvents = (snapshot.data ?? [])
                         .where(
                           (e) =>

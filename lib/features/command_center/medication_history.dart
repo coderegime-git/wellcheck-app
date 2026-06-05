@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 
 import '../../core/data/medication_provider.dart';
@@ -21,19 +22,78 @@ class _MedicationHistoryScreenState
   @override
   initState() {
     super.initState();
-
+    generateMissedLogs();
     // loadData();
   }
 
-  loadData() {
-    final history = ref.invalidate(allMedicationHistoryProvider);
+  Future<void> generateMissedLogs() async {
+    final profile = await ref.read(currentUserProfileProvider.future);
+
+    final meds = await Supabase.instance.client
+        .from('medications')
+        .select()
+        .eq('family_id', profile!.familyId)
+        .eq('is_active', true);
+
+    final now = DateTime.now();
+
+    for (final med in meds) {
+      final assignedTo = med['assigned_to'];
+
+      // Example: ["08:00","21:00"]
+      final times = List<String>.from(med['schedule_times'] ?? []);
+
+      for (final time in times) {
+        final split = time.split(':');
+
+        final scheduledTime = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          int.parse(split[0]),
+          int.parse(split[1]),
+        );
+
+        // only if time already passed
+        if (scheduledTime.isBefore(now)) {
+          // check whether user already took it
+          final existing = await Supabase.instance.client
+              .from('dose_logs')
+              .select()
+              .eq('medication_id', med['id'])
+              .eq('user_id', assignedTo)
+              .gte(
+                'scheduled_at',
+                DateTime(now.year, now.month, now.day).toIso8601String(),
+              )
+              .limit(1);
+
+          if (existing.isEmpty) {
+            await Supabase.instance.client.from('dose_logs').insert({
+              'medication_id': med['id'],
+              'user_id': assignedTo,
+              'family_id': profile.familyId,
+              'scheduled_at': scheduledTime.toIso8601String(),
+              'status': 'missed',
+            });
+          }
+        }
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final historyd = ref.invalidate(allMedicationHistoryProvider);
-    final history = ref.watch(allMedicationHistoryProvider);
+    final historyData = ref.invalidate(allMedicationHistoryProvider);
     final profile = ref.watch(currentUserProfileProvider);
+
+    if (!profile.hasValue) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    final history = ref.watch(
+      allMedicationHistoryProvider(profile.value!.familyId),
+    );
     return Scaffold(
       appBar: AppBar(
         backgroundColor: ShieldColors.backgroundWhite,
@@ -47,11 +107,11 @@ class _MedicationHistoryScreenState
         loading: () => const Center(child: CircularProgressIndicator()),
 
         error: (e, _) {
-          print(e.toString());
           return Center(child: Text(e.toString()));
         },
 
         data: (items) {
+          print(items);
           if (items.isEmpty) {
             return const Center(child: Text('No medication logs'));
           }
@@ -76,9 +136,11 @@ class _MedicationHistoryScreenState
 
               final medication = item['medications'];
               final profileData = item['profiles'];
+              final status = item['status'] ?? '';
 
-              final date = DateTime.parse(item['taken_at']).toLocal();
-
+              final date = item['taken_at'] != null
+                  ? DateTime.parse(item['taken_at']).toLocal()
+                  : DateTime.parse(medication['scheduled_at']).toLocal();
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
 
@@ -98,7 +160,11 @@ class _MedicationHistoryScreenState
 
                       Text("Dose: ${medication['dosage'] ?? ''}"),
 
-                      Text(DateFormat('dd MMM yyyy • hh:mm a').format(date)),
+                      Text(
+                        status == 'missed'
+                            ? 'Missed at: ${DateFormat('dd MMM yyyy • hh:mm a').format(date)}'
+                            : 'Taken at: ${DateFormat('dd MMM yyyy • hh:mm a').format(date)}',
+                      ),
                     ],
                   ),
 
@@ -108,10 +174,17 @@ class _MedicationHistoryScreenState
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.green.shade100,
+                      color: status == 'missed'
+                          ? Colors.red.shade50
+                          : Colors.green.shade50,
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Text(item['status']),
+                    child: Text(
+                      status,
+                      style: TextStyle(
+                        color: status == 'missed' ? Colors.red : Colors.green,
+                      ),
+                    ),
                   ),
                 ),
               );

@@ -2,9 +2,12 @@ import 'dart:async';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:well_check_v3/core/data/auth_repository.dart';
 import 'package:well_check_v3/core/data/medication_provider.dart';
@@ -27,6 +30,7 @@ import 'package:well_check_v3/features/tools/safe_zone_config_screen.dart';
 import '../../core/data/health_repository.dart';
 import '../../core/navigation/shield_router.dart';
 import '../../core/notifications/push_notification_service.dart';
+import '../safety/services/location_service.dart';
 import '../safety/services/pulse_service.dart';
 
 class LeaderDashboard extends ConsumerStatefulWidget {
@@ -41,10 +45,11 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
   int _sosCountdown = 5;
   Timer? _sosTimer;
   bool isLoad = true;
+  Stream<List<Map<String, dynamic>>>? _locationStream;
 
   @override
   void initState() {
-    super.initState(); // ✅ super.initState() must be FIRST
+    super.initState();
     initializeFCM(); // ✅ just call it, don't await it
   }
 
@@ -52,6 +57,7 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
   void initializeFCM() async {
     try {
       await PulseService().broadcastPulse(null);
+      await PushNotificationService.initialize();
     } catch (e) {
       print('broadcastPulse error: $e');
     }
@@ -62,38 +68,60 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
       try {
         final profile = await ref.read(currentUserProfileProvider.future);
         if (profile == null) return;
+        final safetyRepo = ref.watch(safetyRepositoryProvider);
 
-        final result = await ref
-            .read(healthRepositoryProvider)
-            .syncVitals(
-              userId: profile.userId,
-              familyId: profile.familyId,
-              userName: profile.fullName ?? '',
-            );
-
-        print(
-          'SYNC RESULT: ${result.success} | ${result.status} | ${result.message}',
-        );
-
-        if (!mounted) return;
-
-        await Future.delayed(const Duration(milliseconds: 500));
-
-        if (!mounted) return;
-
-        if (result.success) {
-          _showSuccessSnackbar(context, result.message);
-        } else {
-          _showErrorDialog(context, result);
+        _locationStream = safetyRepo.streamFamilyLocation(profile.familyId);
+        if (mounted) {
+          setState(() {});
         }
+        final prefs = await SharedPreferences.getInstance();
 
+        final heartRateEnabled = prefs.getBool('priv_heartbeat') ?? true;
+
+        if (heartRateEnabled) {
+          final result = await ref
+              .read(healthRepositoryProvider)
+              .syncVitals(
+                userId: profile.userId,
+                familyId: profile.familyId,
+                userName: profile.fullName ?? '',
+              );
+
+          print(
+            'SYNC RESULT: ${result.success} | ${result.status} | ${result.message}',
+          );
+
+          if (!mounted) return;
+
+          await Future.delayed(const Duration(milliseconds: 500));
+
+          if (!mounted) return;
+
+          if (result.success) {
+            _showSuccessSnackbar(context, result.message);
+          } else {
+            _showErrorDialog(context, result);
+          }
+        }
         setState(() => isLoad = false);
       } catch (e) {
         print('initializeFCM error: $e');
       }
     });
-
-    await PushNotificationService.initialize();
+    final granted = await LocationService.requestLocationPermissions(context);
+    if (!granted) {
+      // Optionally show a snackbar/dialog explaining why it's needed
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Location access is required for your safety. Please enable it in Settings.',
+            ),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    }
   }
 
   void _showSuccessSnackbar(BuildContext context, String message) {
@@ -576,61 +604,88 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                             profileAsync.value!.familyId,
                                           ),
                                       builder: (context, snapshot) {
-                                        final events = snapshot.data ?? [];
-                                        final hasRecent = events.any((e) {
-                                          final dt = DateTime.tryParse(
-                                            e['created_at'] ?? '',
-                                          );
-                                          return dt != null &&
-                                              DateTime.now()
-                                                      .difference(dt)
-                                                      .inHours <
-                                                  24;
-                                        });
-                                        return Stack(
-                                          alignment: Alignment.topRight,
-                                          children: [
-                                            GestureDetector(
-                                              child: const Icon(
-                                                size: 20,
-
-                                                Icons.notifications_none,
-                                                color: ShieldColors.textBody,
-                                              ),
-                                              onTap: () {
-                                                showModalBottomSheet(
-                                                  context: context,
-                                                  isScrollControlled: true,
-                                                  backgroundColor:
-                                                      Colors.transparent,
-                                                  builder: (ctx) =>
-                                                      _NotificationsSheet(
-                                                        familyId: profileAsync
-                                                            .value!
-                                                            .familyId,
-                                                        safetyRepo: ref.read(
-                                                          safetyRepositoryProvider,
-                                                        ),
-                                                      ),
-                                                );
-                                              },
-                                            ),
-                                            if (hasRecent)
-                                              Positioned(
-                                                right: 3,
-                                                top: 0,
-                                                child: Container(
-                                                  width: 6,
-                                                  height: 6,
-                                                  decoration:
-                                                      const BoxDecoration(
-                                                        color: ShieldColors
-                                                            .urgentRed,
-                                                        shape: BoxShape.circle,
-                                                      ),
+                                        return FutureBuilder(
+                                          future: SharedPreferences.getInstance()
+                                              .then(
+                                                (p) => p.getString(
+                                                  'last_notification_opened',
                                                 ),
                                               ),
-                                          ],
+                                          builder: (context, prefSnap) {
+                                            final lastSeen = DateTime.tryParse(
+                                              prefSnap.data ?? '',
+                                            );
+                                            final events = snapshot.data ?? [];
+                                            final hasUnread = events.any((e) {
+                                              final dt = DateTime.tryParse(
+                                                e['created_at'] ?? '',
+                                              );
+
+                                              if (dt == null) return false;
+
+                                              if (lastSeen == null) return true;
+
+                                              return dt.isAfter(lastSeen);
+                                            });
+                                            return Stack(
+                                              alignment: Alignment.topRight,
+                                              children: [
+                                                GestureDetector(
+                                                  child: const Icon(
+                                                    size: 20,
+                                                    Icons.notifications_none,
+                                                    color:
+                                                        ShieldColors.textBody,
+                                                  ),
+                                                  onTap: () async {
+                                                    final prefs =
+                                                        await SharedPreferences.getInstance();
+
+                                                    await prefs.setString(
+                                                      'last_notification_opened',
+                                                      DateTime.now()
+                                                          .toIso8601String(),
+                                                    );
+                                                    setState(() {});
+
+                                                    showModalBottomSheet(
+                                                      context: context,
+                                                      isScrollControlled: true,
+                                                      backgroundColor:
+                                                          Colors.transparent,
+                                                      builder: (ctx) =>
+                                                          _NotificationsSheet(
+                                                            familyId:
+                                                                profileAsync
+                                                                    .value!
+                                                                    .familyId,
+                                                            safetyRepo: ref.read(
+                                                              safetyRepositoryProvider,
+                                                            ),
+                                                          ),
+                                                    );
+                                                  },
+                                                ),
+
+                                                if (hasUnread)
+                                                  Positioned(
+                                                    right: 3,
+                                                    top: 0,
+                                                    child: Container(
+                                                      width: 6,
+                                                      height: 6,
+                                                      decoration:
+                                                          const BoxDecoration(
+                                                            color: ShieldColors
+                                                                .urgentRed,
+                                                            shape:
+                                                                BoxShape.circle,
+                                                          ),
+                                                    ),
+                                                  ),
+                                              ],
+                                            );
+                                          },
                                         );
                                       },
                                     ),
@@ -669,6 +724,33 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const PendingActionsCard(),
+                                  const SizedBox(height: 16),
+                                  if (_locationStream == null)
+                                    Center(child: CircularProgressIndicator()),
+
+                                  StreamBuilder<List<Map<String, dynamic>>>(
+                                    stream: _locationStream,
+                                    builder: (context, eventSnapshot) {
+                                      // if (eventSnapshot.connectionState ==
+                                      //     ConnectionState.waiting) {
+                                      //   return const Center(
+                                      //     child: CircularProgressIndicator(),
+                                      //   );
+                                      // }
+
+                                      final events = eventSnapshot.data ?? [];
+
+                                      if (events.isEmpty) {
+                                        return const SizedBox();
+                                      }
+
+                                      print("eventsevents");
+                                      print(events);
+                                      return LiveMembersMap(events: events);
+                                    },
+                                  ),
+                                  const SizedBox(height: 16),
+
                                   // Pending Members List
                                   StreamBuilder<List<Map<String, dynamic>>>(
                                     stream: safetyRepo.streamPendingMembers(
@@ -758,6 +840,8 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                       );
                                     },
                                   ),
+                                  const SizedBox(height: 16),
+
                                   StreamBuilder<List<Map<String, dynamic>>>(
                                     stream: safetyRepo.streamLeaderSchedules(
                                       profile.familyId,
@@ -781,6 +865,12 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                         final name = s['assigned_user_name'];
 
                                         final next = _getNextCheckinTime(s);
+                                        print(
+                                          'ID=${s['id']} '
+                                          'recurrence=${s['recurrence']} '
+                                          'scheduled_at=${s['scheduled_at']} '
+                                          'next=$next',
+                                        );
 
                                         if (next == null) continue;
                                         if (nextCheckin == null ||
@@ -790,7 +880,11 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                           assignedUser = name;
                                         }
                                       }
-
+                                      print(
+                                        'SELECTED: ${selectedSchedule?['id']} '
+                                        '${selectedSchedule?['recurrence']} '
+                                        '$nextCheckin',
+                                      );
                                       if (nextCheckin == null ||
                                           selectedSchedule == null) {
                                         return const SizedBox.shrink();
@@ -2138,7 +2232,7 @@ class _NotificationsSheet extends StatelessWidget {
                     String timeStr = '';
                     if (createdAt != null) {
                       try {
-                        final dt = DateTime.parse(createdAt);
+                        final dt = DateTime.parse(createdAt).toLocal();
                         timeStr = DateFormat.jm().format(dt);
                       } catch (_) {}
                     }
@@ -2359,265 +2453,267 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
     if (now.isAfter(nextCheckin) && !_showCheckinPopup) {
       _showCheckinPopup = true;
 
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (mounted) {
-          var value = await _showCheckinDialog();
-          print(value);
-          print("valuevalue");
-
-          if (value == true) {
-            if (isLoad) return;
-            if (widget.profile == null) return;
-            setState(() {
-              isLoad = true;
-            });
-            int level =
-                100; // Safe default for simulators and aggressive background iOS policies
-            try {
-              final battery = Battery();
-              level = await battery.batteryLevel;
-            } catch (e) {
-              debugPrint(
-                'Battery info not available over isolate, using default: $e',
-              );
-            }
-
-            final defaultMsg = "Checked in from Current Location.";
-
-            bool gpsSuccess = false;
-            double lat = 0.0;
-            double lng = 0.0;
-
-            try {
-              bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-              if (serviceEnabled) {
-                LocationPermission permission =
-                    await Geolocator.checkPermission();
-                if (permission == LocationPermission.denied) {
-                  permission = await Geolocator.requestPermission();
-                }
-                if (permission == LocationPermission.deniedForever) {
-                  setState(() {
-                    isLoad = false;
-                  });
-                  throw Exception(
-                    'Location permissions are permanently denied, we cannot request permissions. Please enable in Settings.',
-                  );
-                }
-
-                if (permission == LocationPermission.whileInUse ||
-                    permission == LocationPermission.always) {
-                  // First attempt: High accuracy, short timeout
-                  try {
-                    final position = await Geolocator.getCurrentPosition(
-                      locationSettings: const LocationSettings(
-                        accuracy: LocationAccuracy.high,
-                      ),
-                      timeLimit: const Duration(seconds: 5),
-                    );
-                    lat = position.latitude;
-                    lng = position.longitude;
-                    gpsSuccess = true;
-                  } catch (_) {
-                    setState(() {
-                      isLoad = false;
-                    });
-                    // Fallback 1: Low accuracy (Cell tower/Wi-Fi), very fast
-                    try {
-                      final position = await Geolocator.getCurrentPosition(
-                        locationSettings: const LocationSettings(
-                          accuracy: LocationAccuracy.low,
-                        ),
-                        timeLimit: const Duration(seconds: 4),
-                      );
-                      lat = position.latitude;
-                      lng = position.longitude;
-                      gpsSuccess = true;
-                    } catch (_) {
-                      setState(() {
-                        isLoad = false;
-                      });
-                      // Fallback 2: Last known position
-                      final lastPos = await Geolocator.getLastKnownPosition();
-                      if (lastPos != null) {
-                        lat = lastPos.latitude;
-                        lng = lastPos.longitude;
-                        gpsSuccess = true;
-                      }
-                    }
-                  }
-                }
-              } else {
-                setState(() {
-                  isLoad = false;
-                });
-                await Geolocator.openLocationSettings();
-                throw Exception(
-                  'GPS Location Services are disabled on this device.',
-                );
-              }
-            } catch (e) {
-              setState(() {
-                isLoad = false;
-              });
-              if (e is Exception &&
-                      e.toString().contains('permanently denied') ||
-                  e.toString().contains('disabled')) {
-                rethrow;
-              }
-            }
-
-            await Supabase.instance.client.from('check_ins').insert({
-              'family_id': widget.profile?.familyId,
-              'user_id': widget.profile?.userId,
-              'latitude': lat,
-              'longitude': lng,
-              'status_message': "Scheduled check-in completed",
-            });
-
-            // Also register this as a well_event to ensure it shows up securely on the stream!
-            await Supabase.instance.client.from('well_events').insert({
-              'family_id': widget.profile?.familyId,
-              'user_id': widget.profile?.userId,
-              'user_name': widget.profile?.fullName,
-              'event_type': 'check_in',
-              'title': 'Manual Check-in',
-              'description': 'Scheduled check-in completed',
-              'latitude': lat,
-              'longitude': lng,
-              'battery_level': level,
-            });
-            final schedule = await Supabase.instance.client
-                .from('checkin_schedules')
-                .select('recurrence')
-                .eq('id', widget.scheduleId)
-                .single();
-            final recurrence = schedule['recurrence'];
-
-            final isRecurring =
-                recurrence == 'daily' ||
-                recurrence == 'every_other_day' ||
-                recurrence == 'weekly' ||
-                recurrence == 'monthly';
-
-            DateTime? nextDate;
-
-            if (isRecurring) {
-              final fullSchedule = await Supabase.instance.client
-                  .from('checkin_schedules')
-                  .select()
-                  .eq('id', widget.scheduleId)
-                  .single();
-
-              nextDate = DateTime.parse(fullSchedule['scheduled_at']);
-
-              switch (recurrence) {
-                case 'daily':
-                  nextDate = nextDate.add(const Duration(days: 1));
-                  break;
-
-                case 'every_other_day':
-                  nextDate = nextDate.add(const Duration(days: 2));
-                  break;
-
-                case 'weekly':
-                  final days = List<int>.from(
-                    fullSchedule['days_of_week'] ?? [],
-                  );
-
-                  if (days.isEmpty) {
-                    nextDate = nextDate.add(const Duration(days: 7));
-                  } else {
-                    final currentDay = nextDate.weekday % 7;
-
-                    int? found;
-
-                    for (final d in days) {
-                      if (d > currentDay) {
-                        found = d;
-                        break;
-                      }
-                    }
-
-                    found ??= days.first + 7;
-
-                    nextDate = nextDate.add(Duration(days: found - currentDay));
-                  }
-
-                  break;
-
-                case 'monthly':
-                  nextDate = DateTime(
-                    nextDate.year,
-                    nextDate.month + 1,
-                    nextDate.day,
-                    nextDate.hour,
-                    nextDate.minute,
-                  );
-                  break;
-              }
-            }
-
-            await Supabase.instance.client
-                .from('checkin_schedules')
-                .update({
-                  if (!isRecurring) 'is_completed': true,
-
-                  'completed_at': DateTime.now().toIso8601String(),
-
-                  if (!isRecurring) 'status': 'completed',
-
-                  if (isRecurring) ...{
-                    'status': 'pending',
-                    'scheduled_at': nextDate?.toIso8601String(),
-                    'reminder_sent': false,
-                    'reminder_sent_at': null,
-                  },
-                })
-                .eq('id', widget.scheduleId);
-            if (!mounted) return;
-
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text("Scheduled check-in completed")),
-            );
-            final safety = ref.invalidate(safetyRepositoryProvider);
-
-            final profile = await ref.read(currentUserProfileProvider.future);
-            if (profile == null) throw Exception('No profile');
-
-            final members = await Supabase.instance.client
-                .from('family_members')
-                .select('user_id')
-                .eq('family_id', profile.familyId);
-
-            for (final m in members) {
-              final targetUserId = m['user_id'];
-
-              if (targetUserId == profile.userId) continue;
-
-              try {
-                await Supabase.instance.client.functions.invoke(
-                  'push-router',
-                  body: {
-                    "target_user_id": targetUserId,
-                    "title": "Check-In",
-                    "body":
-                        "${profile.fullName ?? 'Someone'}: Checked in just now",
-                    "action": "check_in",
-                  },
-                );
-                setState(() {
-                  isLoad = false;
-                });
-              } catch (e) {
-                print("Push failed: $e");
-              }
-            }
-          } else if (value == false) {
-            _startSosCountdown();
-          }
-        }
-      });
+      // WidgetsBinding.instance.addPostFrameCallback((_) async {
+      //   if (mounted) {
+      //     var value = await _showCheckinDialog();
+      //     print(value);
+      //     print("valuevalue");
+      //
+      //     if (value == true) {
+      //       if (isLoad) return;
+      //       if (widget.profile == null) return;
+      //       setState(() {
+      //         isLoad = true;
+      //       });
+      //       int level =
+      //           100; // Safe default for simulators and aggressive background iOS policies
+      //       try {
+      //         final battery = Battery();
+      //         level = await battery.batteryLevel;
+      //       } catch (e) {
+      //         debugPrint(
+      //           'Battery info not available over isolate, using default: $e',
+      //         );
+      //       }
+      //
+      //       final defaultMsg = "Checked in from Current Location.";
+      //
+      //       bool gpsSuccess = false;
+      //       double lat = 0.0;
+      //       double lng = 0.0;
+      //
+      //       try {
+      //         bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      //         if (serviceEnabled) {
+      //           LocationPermission permission =
+      //               await Geolocator.checkPermission();
+      //           if (permission == LocationPermission.denied) {
+      //             permission = await Geolocator.requestPermission();
+      //           }
+      //           if (permission == LocationPermission.deniedForever) {
+      //             setState(() {
+      //               isLoad = false;
+      //             });
+      //             throw Exception(
+      //               'Location permissions are permanently denied, we cannot request permissions. Please enable in Settings.',
+      //             );
+      //           }
+      //
+      //           if (permission == LocationPermission.whileInUse ||
+      //               permission == LocationPermission.always) {
+      //             // First attempt: High accuracy, short timeout
+      //             try {
+      //               final position = await Geolocator.getCurrentPosition(
+      //                 locationSettings: const LocationSettings(
+      //                   accuracy: LocationAccuracy.high,
+      //                 ),
+      //                 timeLimit: const Duration(seconds: 5),
+      //               );
+      //               lat = position.latitude;
+      //               lng = position.longitude;
+      //               gpsSuccess = true;
+      //             } catch (_) {
+      //               setState(() {
+      //                 isLoad = false;
+      //               });
+      //               // Fallback 1: Low accuracy (Cell tower/Wi-Fi), very fast
+      //               try {
+      //                 final position = await Geolocator.getCurrentPosition(
+      //                   locationSettings: const LocationSettings(
+      //                     accuracy: LocationAccuracy.low,
+      //                   ),
+      //                   timeLimit: const Duration(seconds: 4),
+      //                 );
+      //                 lat = position.latitude;
+      //                 lng = position.longitude;
+      //                 gpsSuccess = true;
+      //               } catch (_) {
+      //                 setState(() {
+      //                   isLoad = false;
+      //                 });
+      //                 // Fallback 2: Last known position
+      //                 final lastPos = await Geolocator.getLastKnownPosition();
+      //                 if (lastPos != null) {
+      //                   lat = lastPos.latitude;
+      //                   lng = lastPos.longitude;
+      //                   gpsSuccess = true;
+      //                 }
+      //               }
+      //             }
+      //           }
+      //         } else {
+      //           setState(() {
+      //             isLoad = false;
+      //           });
+      //           await Geolocator.openLocationSettings();
+      //           throw Exception(
+      //             'GPS Location Services are disabled on this device.',
+      //           );
+      //         }
+      //       } catch (e) {
+      //         setState(() {
+      //           isLoad = false;
+      //         });
+      //         if (e is Exception &&
+      //                 e.toString().contains('permanently denied') ||
+      //             e.toString().contains('disabled')) {
+      //           rethrow;
+      //         }
+      //       }
+      //
+      //       await Supabase.instance.client.from('check_ins').insert({
+      //         'family_id': widget.profile?.familyId,
+      //         'user_id': widget.profile?.userId,
+      //         'latitude': lat,
+      //         'longitude': lng,
+      //         'status_message': "Scheduled check-in completed",
+      //       });
+      //
+      //       // Also register this as a well_event to ensure it shows up securely on the stream!
+      //       await Supabase.instance.client.from('well_events').insert({
+      //         'family_id': widget.profile?.familyId,
+      //         'user_id': widget.profile?.userId,
+      //         'user_name': widget.profile?.fullName,
+      //         'event_type': 'check_in',
+      //         'title': 'Manual Check-in',
+      //         'description': 'Scheduled check-in completed',
+      //         'latitude': lat,
+      //         'longitude': lng,
+      //         'battery_level': level,
+      //       });
+      //       final schedule = await Supabase.instance.client
+      //           .from('checkin_schedules')
+      //           .select('recurrence')
+      //           .eq('id', widget.scheduleId)
+      //           .single();
+      //       final recurrence = schedule['recurrence'];
+      //
+      //       final isRecurring =
+      //           recurrence == 'daily' ||
+      //           recurrence == 'every_other_day' ||
+      //           recurrence == 'weekly' ||
+      //           recurrence == 'monthly';
+      //
+      //       DateTime? nextDate;
+      //
+      //       if (isRecurring) {
+      //         final fullSchedule = await Supabase.instance.client
+      //             .from('checkin_schedules')
+      //             .select()
+      //             .eq('id', widget.scheduleId)
+      //             .single();
+      //
+      //         nextDate = DateTime.parse(fullSchedule['scheduled_at']);
+      //
+      //         switch (recurrence) {
+      //           case 'daily':
+      //             nextDate = nextDate.add(const Duration(days: 1));
+      //             break;
+      //
+      //           case 'every_other_day':
+      //             nextDate = nextDate.add(const Duration(days: 2));
+      //             break;
+      //
+      //           case 'weekly':
+      //             final days = List<int>.from(
+      //               fullSchedule['days_of_week'] ?? [],
+      //             );
+      //
+      //             if (days.isEmpty) {
+      //               nextDate = nextDate.add(const Duration(days: 7));
+      //             } else {
+      //               final currentDay = nextDate.weekday % 7;
+      //
+      //               int? found;
+      //
+      //               for (final d in days) {
+      //                 if (d > currentDay) {
+      //                   found = d;
+      //                   break;
+      //                 }
+      //               }
+      //
+      //               found ??= days.first + 7;
+      //
+      //               nextDate = nextDate.add(Duration(days: found - currentDay));
+      //             }
+      //
+      //             break;
+      //
+      //           case 'monthly':
+      //             nextDate = DateTime(
+      //               nextDate.year,
+      //               nextDate.month + 1,
+      //               nextDate.day,
+      //               nextDate.hour,
+      //               nextDate.minute,
+      //             );
+      //             break;
+      //         }
+      //       }
+      //
+      //       await Supabase.instance.client
+      //           .from('checkin_schedules')
+      //           .update({
+      //             if (!isRecurring) 'is_completed': true,
+      //
+      //             'completed_at': DateTime.now().toIso8601String(),
+      //
+      //             if (!isRecurring) 'status': 'completed',
+      //
+      //             if (isRecurring) ...{
+      //               'status': 'pending',
+      //               'scheduled_at': nextDate?.toIso8601String(),
+      //               'reminder_sent': false,
+      //               'reminder_sent_at': null,
+      //             },
+      //           })
+      //           .eq('id', widget.scheduleId);
+      //       if (!mounted) return;
+      //
+      //       ScaffoldMessenger.of(context).showSnackBar(
+      //         SnackBar(content: Text("Scheduled check-in completed")),
+      //       );
+      //       final safety = ref.invalidate(safetyRepositoryProvider);
+      //
+      //       final profile = await ref.read(currentUserProfileProvider.future);
+      //       if (profile == null) throw Exception('No profile');
+      //
+      //       final members = await Supabase.instance.client
+      //           .from('family_members')
+      //           .select('user_id, role')
+      //           .eq('family_id', profile.familyId);
+      //
+      //       for (final m in members) {
+      //         final targetUserId = m['user_id'];
+      //
+      //         if (targetUserId == profile.userId ||
+      //             (m['role'] != "leader" && m['role'] != "monitor")) {
+      //           continue;
+      //         }
+      //         try {
+      //           await Supabase.instance.client.functions.invoke(
+      //             'push-router',
+      //             body: {
+      //               "target_user_id": targetUserId,
+      //               "title": "Check-In",
+      //               "body":
+      //                   "${profile.fullName ?? 'Someone'}: Checked in just now",
+      //               "action": "check_in",
+      //             },
+      //           );
+      //           setState(() {
+      //             isLoad = false;
+      //           });
+      //         } catch (e) {
+      //           print("Push failed: $e");
+      //         }
+      //       }
+      //     } else if (value == false) {
+      //       _startSosCountdown();
+      //     }
+      //   }
+      // });
     }
   }
 
@@ -2669,7 +2765,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
 
         final secs = diff.inSeconds.remainder(60).toString().padLeft(2, '0');
         if (widget.profile?.userId == widget.assignedUserId) {
-          _checkScheduleTime(widget.nextCheckin);
+          //  _checkScheduleTime(widget.nextCheckin);
         }
         return Container(
           width: double.infinity,
@@ -2889,53 +2985,82 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                         }
                       }
 
+                      final fullSchedule = await Supabase.instance.client
+                          .from('checkin_schedules')
+                          .select()
+                          .eq('id', widget.scheduleId)
+                          .single();
+
+                      final recurrence = fullSchedule['recurrence'] as String?;
+                      final scheduledAtUtc = DateTime.parse(
+                        fullSchedule['scheduled_at'],
+                      ).toUtc();
+                      final nowUtc = DateTime.now().toUtc();
+
+                      print("🕐 nowUtc: $nowUtc");
+                      print("🕐 scheduledAtUtc: $scheduledAtUtc");
+                      print(
+                        "🕐 diff: ${scheduledAtUtc.difference(nowUtc).inMinutes} mins away",
+                      );
+
+                      // ── Within 5 min early window? ───────────────────────────────────
+                      final isWithin5MinEarly =
+                          nowUtc.isAfter(
+                            scheduledAtUtc.subtract(const Duration(minutes: 5)),
+                          ) &&
+                          nowUtc.isBefore(
+                            scheduledAtUtc.add(const Duration(minutes: 1)),
+                          );
+
+                      final isRecurring =
+                          isWithin5MinEarly &&
+                          (recurrence == 'daily' ||
+                              recurrence == 'every_other_day' ||
+                              recurrence == 'weekly' ||
+                              recurrence == 'monthly');
+
+                      // ── Insert check_in ──────────────────────────────────────────────
                       await Supabase.instance.client.from('check_ins').insert({
-                        'family_id': widget.profile?.familyId,
-                        'user_id': widget.profile?.userId,
+                        'family_id': widget.profile!.familyId,
+                        'user_id': widget.profile!.userId,
                         'latitude': lat,
                         'longitude': lng,
-                        'status_message': "Scheduled check-in completed",
+                        'status_message': isWithin5MinEarly
+                            ? "Scheduled check-in completed"
+                            : "Manual check-in",
                       });
 
-                      // Also register this as a well_event to ensure it shows up securely on the stream!
+                      // ── Insert well_event ────────────────────────────────────────────
                       await Supabase.instance.client
                           .from('well_events')
                           .insert({
-                            'family_id': widget.profile?.familyId,
-                            'user_id': widget.profile?.userId,
-                            'user_name': widget.profile?.fullName,
+                            'family_id': widget.profile!.familyId,
+                            'user_id': widget.profile!.userId,
+                            'user_name': widget.profile!.fullName,
                             'event_type': 'check_in',
-                            'title': 'Manual Check-in',
-                            'description': 'Scheduled check-in completed',
+                            'title': isWithin5MinEarly
+                                ? 'Scheduled Check-in'
+                                : 'Manual Check-in',
+                            'description': isWithin5MinEarly
+                                ? 'Scheduled check-in completed'
+                                : 'Manual check-in outside schedule window',
                             'latitude': lat,
                             'longitude': lng,
                             'battery_level': level,
                           });
-                      final schedule = await Supabase.instance.client
-                          .from('checkin_schedules')
-                          .select('recurrence')
-                          .eq('id', widget.scheduleId)
-                          .single();
-                      final recurrence = schedule['recurrence'];
 
-                      final isRecurring =
-                          recurrence == 'daily' ||
-                          recurrence == 'every_other_day' ||
-                          recurrence == 'weekly' ||
-                          recurrence == 'monthly';
+                      // ── Compute next date if recurring ───────────────────────────────
+                      // ❌ DELETE the old `final schedule = ...` fetch here — REMOVE IT
+                      // ❌ DELETE the second `fullSchedule` fetch inside if(isRecurring) — REMOVE IT
 
                       DateTime? nextDate;
 
                       if (isRecurring) {
-                        final fullSchedule = await Supabase.instance.client
-                            .from('checkin_schedules')
-                            .select()
-                            .eq('id', widget.scheduleId)
-                            .single();
-
-                        nextDate = DateTime.parse(fullSchedule['scheduled_at']);
+                        nextDate =
+                            scheduledAtUtc; // ✅ reuse already fetched value
 
                         switch (recurrence) {
+                          // continues below...
                           case 'daily':
                             nextDate = nextDate.add(const Duration(days: 1));
                             break;
@@ -2986,25 +3111,40 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
 
                       await Supabase.instance.client
                           .from('checkin_schedules')
-                          .update({
-                            if (!isRecurring) 'is_completed': true,
-
-                            'completed_at': DateTime.now().toIso8601String(),
-
-                            if (!isRecurring) 'status': 'completed',
-
-                            if (isRecurring) ...{
-                              'status': 'pending',
-                              'scheduled_at': nextDate?.toIso8601String(),
-                              'reminder_sent': false,
-                              'reminder_sent_at': null,
-                            },
-                          })
+                          .update(
+                            isRecurring
+                                ? {
+                                    'status': 'pending',
+                                    'completed_at': DateTime.now()
+                                        .toIso8601String(),
+                                    'scheduled_at': nextDate!.toIso8601String(),
+                                    'reminder_sent': false,
+                                    'reminder_sent_at': null,
+                                  }
+                                : isWithin5MinEarly
+                                ? {
+                                    'is_completed': true,
+                                    'completed_at': DateTime.now()
+                                        .toIso8601String(),
+                                    'status': 'completed',
+                                  }
+                                : {
+                                    // ✅ Manual check-in — just log the time, keep status as-is
+                                    'completed_at': DateTime.now()
+                                        .toIso8601String(),
+                                  },
+                          )
                           .eq('id', widget.scheduleId);
                       if (!mounted) return;
 
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("Scheduled check-in completed")),
+                        SnackBar(
+                          content: Text(
+                            !isWithin5MinEarly
+                                ? "Manual check-in completed"
+                                : "Scheduled check-in completed",
+                          ),
+                        ),
                       );
                       final safety = ref.invalidate(safetyRepositoryProvider);
 
@@ -3012,17 +3152,31 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                         currentUserProfileProvider.future,
                       );
                       if (profile == null) throw Exception('No profile');
-
+                      final response = await Supabase.instance.client
+                          .from('live_locations')
+                          .upsert({
+                            'user_id': profile.userId,
+                            'family_id': profile.familyId,
+                            'user_name': profile.fullName,
+                            'role': profile.role,
+                            'latitude': lat,
+                            'longitude': lng,
+                            'battery_level': level,
+                            'updated_at': DateTime.now().toIso8601String(),
+                          }, onConflict: 'user_id')
+                          .select();
                       final members = await Supabase.instance.client
                           .from('family_members')
-                          .select('user_id')
+                          .select('user_id, role')
                           .eq('family_id', profile.familyId);
 
                       for (final m in members) {
                         final targetUserId = m['user_id'];
 
-                        if (targetUserId == profile.userId) continue;
-
+                        if (targetUserId == profile.userId ||
+                            (m['role'] != "leader" && m['role'] != "monitor")) {
+                          continue;
+                        }
                         try {
                           await Supabase.instance.client.functions.invoke(
                             'push-router',
@@ -3097,3 +3251,146 @@ class _DialogConfig {
 
   _DialogConfig({required this.icon, required this.color, required this.title});
 } // sync_result.dart
+
+class LiveMembersMap extends StatefulWidget {
+  final List<Map<String, dynamic>> events;
+
+  const LiveMembersMap({super.key, required this.events});
+
+  @override
+  State<LiveMembersMap> createState() => _LiveMembersMapState();
+}
+
+class _LiveMembersMapState extends State<LiveMembersMap> {
+  final MapController _mapController = MapController();
+
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Auto refresh map every 15 seconds
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    /// Remove duplicate users and keep latest location
+    final Map<String, Map<String, dynamic>> latestUsers = {};
+
+    for (final item in widget.events) {
+      final userId = item['user_id'];
+
+      if (userId == null) continue;
+
+      latestUsers[userId] = item;
+    }
+
+    final locations = latestUsers.values.toList();
+
+    /// Remove leader & monitor
+    final filteredLocations = locations.where((e) {
+      final role = (e['role'] ?? '').toString().toLowerCase();
+
+      return role != 'leader' && role != 'monitor';
+    }).toList();
+
+    if (filteredLocations.isEmpty) {
+      return const SizedBox();
+    }
+
+    final first = filteredLocations.first;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 0),
+      height: 280,
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(18)),
+      clipBehavior: Clip.antiAlias,
+      child: FlutterMap(
+        mapController: _mapController,
+        options: MapOptions(
+          initialCenter: LatLng(
+            first['latitude'] != null
+                ? (first['latitude'] as num).toDouble()
+                : 0.0,
+            first['longitude'] != null
+                ? (first['longitude'] as num).toDouble()
+                : 0.0,
+          ),
+          initialZoom: 10,
+          maxZoom: 22,
+          minZoom: 8,
+        ),
+
+        children: [
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.anwiik.wellcheck',
+          ),
+
+          MarkerLayer(
+            markers: filteredLocations.map((item) {
+              final lat = item['latitude'] != null
+                  ? (item['latitude'] as num).toDouble()
+                  : 0.0;
+              final lng = item['longitude'] != null
+                  ? (item['longitude'] as num).toDouble()
+                  : 0.0;
+
+              final userName = item['user_name'] ?? 'Unknown';
+
+              return Marker(
+                point: LatLng(lat, lng),
+                width: 120,
+                height: 80,
+
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            blurRadius: 4,
+                            color: Colors.black.withOpacity(0.1),
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        userName,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    const Icon(Icons.location_on, size: 36, color: Colors.red),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}

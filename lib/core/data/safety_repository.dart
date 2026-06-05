@@ -29,24 +29,49 @@ class SafetyRepository {
     final fullName = profileRes['full_name'];
     await _supabase.from('well_events').insert({
       'user_id': userId,
-      'user_name': fullName,
       'family_id': familyId,
       'event_type': type,
+      "title": type == "check_in"
+          ? "Manual Check-in"
+          : type == "safe_zone_enter"
+          ? "Entered Safe Zone"
+          : type == "safe_zone_exit"
+          ? "Exited Safe Zone"
+          : type == "heartbeat"
+          ? "Heartbeat Alert"
+          : type == "driving"
+          ? "Driving Detected"
+          : "Activity Update",
+
+      "description": type == "check_in"
+          ? "Check-in completed successfully"
+          : type == "safe_zone_enter"
+          ? "Has entered the safe zone"
+          : type == "safe_zone_exit"
+          ? "Has exited the safe zone"
+          : type == "heartbeat"
+          ? "Heartbeat event recorded"
+          : type == "driving"
+          ? "$fullName is currently driving"
+          : "Activity recorded",
       'latitude': latitude,
       'longitude': longitude,
+      'user_name': fullName,
       'battery_level': batteryLevel,
       'verification_source': 'app_foreground', // or 'background_service'
     });
     final members = await Supabase.instance.client
         .from('family_members')
-        .select('user_id')
+        .select('user_id, role')
         .eq('family_id', familyId);
     if (type == 'check_in') {
       for (final m in members) {
         final targetUserId = m['user_id'];
 
-        if (targetUserId == userId) continue;
-
+        if (targetUserId == userId ||
+            (m['role'] != "leader" && m['role'] != "monitor")) {
+          continue;
+        }
         try {
           await Supabase.instance.client.functions.invoke(
             'push-router',
@@ -91,6 +116,13 @@ class SafetyRepository {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null)
       throw Exception('User not logged in — cannot trigger SOS');
+    if (userId == null) return;
+    final profileRes = await Supabase.instance.client
+        .from('profiles')
+        .select('full_name')
+        .eq('id', userId)
+        .single();
+    final fullName = profileRes['full_name'];
     int batteryLevel =
         100; // Safe default for simulators and aggressive background iOS policies
     try {
@@ -102,6 +134,7 @@ class SafetyRepository {
     await _supabase.from('well_events').insert({
       'user_id': userId,
       'family_id': familyId,
+      'user_name': fullName,
       'event_type': 'sos',
       'title': '🚨 Emergency SOS',
       'description': reason,
@@ -121,6 +154,13 @@ class SafetyRepository {
           ascending: false,
         ) // Corrected from timestamp to created_at
         .limit(50);
+  }
+
+  Stream<List<Map<String, dynamic>>> streamFamilyLocation(String familyId) {
+    return _supabase
+        .from('live_locations')
+        .stream(primaryKey: ['id'])
+        .eq('family_id', familyId);
   }
 
   // Stream active family members
@@ -294,7 +334,7 @@ class SafetyRepository {
             .order('created_at', ascending: false)
             .limit(1);
 
-        print("LATEST EVENT QUERY => $data");
+        //  print("LATEST EVENT QUERY => $data");
 
         if (data.isNotEmpty) {
           yield data.first;
@@ -348,14 +388,9 @@ class SafetyRepository {
   Future<Map<String, dynamic>?> getLatestEventForUser(String userId) async {
     try {
       final result = await _supabase
-          .from('well_events')
+          .from('live_locations')
           .select()
           .eq('user_id', userId)
-          .neq('latitude', 0.0)
-          .neq('longitude', 0.0)
-          .not('latitude', 'is', null)
-          .not('longitude', 'is', null)
-          .order('created_at', ascending: false)
           .limit(1)
           .maybeSingle();
       return result;
@@ -377,7 +412,7 @@ class SafetyRepository {
   }
 
   Stream<List<Map<String, dynamic>>> streamLeaderSchedules(String familyId) {
-    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    //final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     return Supabase.instance.client
         .from('checkin_schedules')
@@ -385,7 +420,7 @@ class SafetyRepository {
         .map((data) {
           return data.where((e) {
             return e['family_id'] == familyId &&
-                e['checkin_date'] == today &&
+                // e['checkin_date'] == today &&
                 e['is_active'] == true &&
                 e['is_completed'] != true;
           }).toList();

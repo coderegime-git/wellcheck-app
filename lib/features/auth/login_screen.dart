@@ -556,63 +556,62 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 24),
-
-                // OR divider
-                Row(
-                  children: [
-                    Expanded(
-                      child: Divider(
-                        color: Colors.grey.shade400,
-                        thickness: 0.5,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text(
-                        'OR',
-                        style: TextStyle(
-                          color: Colors.grey.shade500,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Divider(
-                        color: Colors.grey.shade400,
-                        thickness: 0.5,
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 20),
-
-                // Biometrics
-                GestureDetector(
-                  onTap: () {
-                    // trigger biometric auth
-                  },
-                  child: Column(
-                    children: [
-                      Icon(
-                        Icons.fingerprint,
-                        size: 48,
-                        color: const Color(0xFF00796B),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Use Biometrics',
-                        style: TextStyle(
-                          color: Color(0xFF00796B),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
+                // const SizedBox(height: 24),
+                //
+                // // OR divider
+                // Row(
+                //   children: [
+                //     Expanded(
+                //       child: Divider(
+                //         color: Colors.grey.shade400,
+                //         thickness: 0.5,
+                //       ),
+                //     ),
+                //     Padding(
+                //       padding: const EdgeInsets.symmetric(horizontal: 12),
+                //       child: Text(
+                //         'OR',
+                //         style: TextStyle(
+                //           color: Colors.grey.shade500,
+                //           fontSize: 13,
+                //         ),
+                //       ),
+                //     ),
+                //     Expanded(
+                //       child: Divider(
+                //         color: Colors.grey.shade400,
+                //         thickness: 0.5,
+                //       ),
+                //     ),
+                //   ],
+                // ),
+                //
+                // const SizedBox(height: 20),
+                //
+                // // Biometrics
+                // GestureDetector(
+                //   onTap: () {
+                //     // trigger biometric auth
+                //   },
+                //   child: Column(
+                //     children: [
+                //       Icon(
+                //         Icons.fingerprint,
+                //         size: 48,
+                //         color: const Color(0xFF00796B),
+                //       ),
+                //       const SizedBox(height: 6),
+                //       const Text(
+                //         'Use Biometrics',
+                //         style: TextStyle(
+                //           color: Color(0xFF00796B),
+                //           fontSize: 14,
+                //           fontWeight: FontWeight.w500,
+                //         ),
+                //       ),
+                //     ],
+                //   ),
+                // ),
                 const SizedBox(height: 32),
 
                 // Sign up link

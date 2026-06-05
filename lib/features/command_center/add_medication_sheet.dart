@@ -54,8 +54,6 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
     _fetchFamilyMembers();
     final med = widget.existingMedication;
     if (med != null) {
-      print(med.assignedName);
-      print("aas");
       _nameController.text = med.medicationName;
       _selectedUserId = med.assignedTo;
       _selectedUserName = med.assignedName;
@@ -101,8 +99,6 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
             _selectedUserName = me.isNotEmpty
                 ? me.first['profiles']['full_name']
                 : _familyMembers.first['profiles']['full_name'];
-                print(_selectedUserName);
-                print("_selectedUserName");
           }
         });
       }
@@ -111,7 +107,6 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
       if (mounted) setState(() => _isLoadingMembers = false);
     }
     final med = widget.existingMedication;
-    print("medmed");
     if (med != null) {
       _selectedUserId = med.assignedTo;
       _selectedUserName = med.assignedName;
@@ -270,7 +265,7 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
       debugPrint(_selectedUserId);
       final timeStrings = _scheduleTimes.map(_formatTime).toList();
       DateTime? utcDateTime;
-      print("nnnn");
+
       if (_recurrence != 'as_needed' && _scheduleTimes.isNotEmpty) {
         final firstTime = _scheduleTimes.first;
 
@@ -288,15 +283,8 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
         //   nextDate.hour,
         //   nextDate.minute,
         // );
-        print("utcDateTime");
-        print(utcDateTime);
+
         utcDateTime = nextDate.toUtc();
-
-        print("Local:");
-        print(nextDate);
-
-        print("UTC:");
-        print(utcDateTime);
       }
       // Build frequency string for backward compatibility
       final freqLabel = _recurrenceOptions
@@ -316,9 +304,9 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
             .update({
               'family_id': profile.familyId,
               'assigned_to': _selectedUserId,
-          'assigned_name': _selectedUserName,
+              'assigned_name': _selectedUserName,
 
-          'medication_name': _nameController.text.trim(),
+              'medication_name': _nameController.text.trim(),
               'dosage': _dosageController.text.trim(),
               'frequency': freqStr,
               'instructions': _instructionsController.text.trim().isEmpty
@@ -533,8 +521,7 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
                     ),
 
                     items: _familyMembers.map((m) {
-                      final name =
-                          m['profiles']?['full_name'] ?? 'Unknown';
+                      final name = m['profiles']?['full_name'] ?? 'Unknown';
 
                       final role = m['role'];
 
@@ -545,24 +532,18 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
                     }).toList(),
 
                     onChanged: (val) {
-
                       final member = _familyMembers.firstWhere(
-                            (m) => m['user_id'] == val,
+                        (m) => m['user_id'] == val,
                       );
 
                       setState(() {
                         _selectedUserId = val;
 
-                        _selectedUserName =
-                        member['profiles']
-                        ?['full_name'];
+                        _selectedUserName = member['profiles']?['full_name'];
                       });
                     },
 
-                    validator: (val) =>
-                    val == null
-                        ? 'Required'
-                        : null,
+                    validator: (val) => val == null ? 'Required' : null,
                   ),
 
                 const SizedBox(height: 16),

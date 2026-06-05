@@ -60,6 +60,34 @@ class ToolsRepository {
         .eq('family_id', familyId);
   }
 
+  Stream<List<Map<String, dynamic>>> streamAssignedSafeZones(
+    String familyId,
+    String userId,
+  ) {
+    return _supabase
+        .from('locations_safe_zones')
+        .stream(primaryKey: ['id'])
+        .map(
+          (rows) => rows
+              .where(
+                (e) =>
+                    e['family_id'] == familyId &&
+                    e['assigned_user_id'] == userId,
+              )
+              .toList(),
+        );
+  }
+
+  final assignedSafeZonesStreamProvider =
+      StreamProvider.family<
+        List<Map<String, dynamic>>,
+        ({String familyId, String userId})
+      >((ref, params) {
+        return ref
+            .watch(toolsRepositoryProvider)
+            .streamAssignedSafeZones(params.familyId, params.userId);
+      });
+
   Future<void> addSafeZone({
     required String familyId,
     required String name,

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:health/health.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -19,9 +20,50 @@ class HealthRepository {
   // 1. Request Permissions
   // ─────────────────────────────────────────────
   Future<bool> requestPermissions() async {
-    final types = _healthTypes;
-    final permissions = types.map((e) => HealthDataAccess.READ_WRITE).toList();
-    return await _health.requestAuthorization(types, permissions: permissions);
+    try {
+      final types = _healthTypes;
+
+      final permissions = types
+          .map((e) => HealthDataAccess.READ_WRITE)
+          .toList();
+      bool heartRateEnabled = false;
+      // Request Health Connect / HealthKit permissions
+      final granted = await _health.requestAuthorization(
+        types,
+        permissions: permissions,
+      );
+
+      // Persist preference
+
+      // Optional: verify we can actually access heart rate data
+      if (granted) {
+        try {
+          final now = DateTime.now();
+          final yesterday = now.subtract(const Duration(days: 1));
+
+          final data = await _health.getHealthDataFromTypes(
+            startTime: yesterday,
+            endTime: now,
+            types: [HealthDataType.HEART_RATE],
+          );
+          heartRateEnabled = data.isNotEmpty;
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('priv_heartbeat', heartRateEnabled);
+        } catch (e) {
+          debugPrint('Heart rate read test failed: $e');
+        }
+      } else {
+        heartRateEnabled = false;
+      }
+
+      return heartRateEnabled;
+    } catch (e) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('priv_heartbeat', false);
+
+      debugPrint('Health permission request failed: $e');
+      return false;
+    }
   }
 
   // ─────────────────────────────────────────────
@@ -56,7 +98,36 @@ class HealthRepository {
         types,
         permissions: permissions,
       );
+      bool heartRateEnabled = false;
+
+      if (granted) {
+        try {
+          final now = DateTime.now();
+          final yesterday = now.subtract(const Duration(days: 1));
+
+          final data = await _health.getHealthDataFromTypes(
+            startTime: yesterday,
+            endTime: now,
+            types: [HealthDataType.HEART_RATE],
+          );
+          print("heartRateEnabledheartRateEnabled");
+          print(heartRateEnabled);
+          heartRateEnabled = data.isNotEmpty;
+        } catch (e) {
+          final prefs = await SharedPreferences.getInstance();
+          heartRateEnabled = false;
+          await prefs.setBool('priv_heartbeat', false);
+          debugPrint('Heart rate read failed: $e');
+        }
+      }
+      final prefs = await SharedPreferences.getInstance();
+      print("heartRateEnabledheartRateEnabled1");
+      print(heartRateEnabled);
+      await prefs.setBool('priv_heartbeat', heartRateEnabled);
     } catch (e) {
+      final prefs = await SharedPreferences.getInstance();
+
+      await prefs.setBool('priv_heartbeat', false);
       debugPrint('Permission request error: $e');
       return SyncResult(
         success: false,
@@ -70,6 +141,9 @@ class HealthRepository {
     }
 
     if (!granted) {
+      final prefs = await SharedPreferences.getInstance();
+
+      await prefs.setBool('priv_heartbeat', false);
       return SyncResult(
         success: false,
         status: SyncStatus.permissionDenied,
@@ -220,7 +294,8 @@ class HealthRepository {
         'user_id': userId,
         'family_id': familyId,
         'event_type': 'heartbeat',
-        'title': 'Health Sync Active - $userName',
+        'user_name': userName,
+        'title': 'Health Sync Active',
         'description': 'Health data synced from device.',
         'battery_level': batteryLevel,
         'metadata': {

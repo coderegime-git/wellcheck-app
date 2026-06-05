@@ -147,6 +147,16 @@ class PushNotificationService extends ConsumerStatefulWidget {
         playSound: true,
         sound: RawResourceAndroidNotificationSound('sos_sound'),
       );
+  static const AndroidNotificationChannel _missedCheckinChannel =
+      AndroidNotificationChannel(
+        'missed_channel',
+        'Missed Alerts',
+        description: 'Missed Check-in',
+        importance: Importance.max,
+        enableVibration: true,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound('missed_checkin'),
+      );
 
   static Future<void> initialize() async {
     tz.initializeTimeZones();
@@ -179,10 +189,10 @@ class PushNotificationService extends ConsumerStatefulWidget {
       final fcmToken = await FirebaseMessaging.instance.getToken();
       debugPrint('[FCM] fcmToken: $token');
       print(token);
-      if (token != null) await _saveTokenToProfile(token);
+      if (token != null) await saveTokenToProfile(token);
 
       // Listen for token refresh
-      _messaging.onTokenRefresh.listen(_saveTokenToProfile);
+      _messaging.onTokenRefresh.listen(saveTokenToProfile);
 
       // Handle foreground messages — show local notification
       FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
@@ -218,7 +228,6 @@ class PushNotificationService extends ConsumerStatefulWidget {
       android: androidSettings,
       iOS: iosSettings,
     );
-
     await _localNotifications.initialize(
       initSettings,
       onDidReceiveNotificationResponse: _onNotificationTapped,
@@ -233,6 +242,7 @@ class PushNotificationService extends ConsumerStatefulWidget {
     await androidPlugin?.createNotificationChannel(_generalChannel);
     await androidPlugin?.createNotificationChannel(_sosChannel);
     await androidPlugin?.createNotificationChannel(_checkinChannel);
+    await androidPlugin?.createNotificationChannel(_missedCheckinChannel);
   }
 
   static const AndroidNotificationChannel _checkinChannel =
@@ -281,13 +291,15 @@ class PushNotificationService extends ConsumerStatefulWidget {
     final sound = message.data['sound'];
 
     //final isSos = sound == "sos_sound";
-    showNotification(
-      title: notification.title ?? 'Well-Check',
-      body: notification.body ?? '',
-      payload: message.data.toString(),
-      isSos: isSos,
-      sound: sound,
-    );
+    if (notification.body != null) {
+      showNotification(
+        title: notification.title ?? 'Well-Check',
+        body: notification.body ?? '',
+        payload: message.data.toString(),
+        isSos: isSos,
+        sound: sound,
+      );
+    }
   }
 
   static void _handleMessageOpenedApp(RemoteMessage message) {
@@ -304,8 +316,16 @@ class PushNotificationService extends ConsumerStatefulWidget {
     bool isSos = false,
   }) async {
     final androidDetails = AndroidNotificationDetails(
-      isSos ? _sosChannel.id : _generalChannel.id,
-      isSos ? _sosChannel.name : _generalChannel.name,
+      isSos
+          ? _sosChannel.id
+          : title.toLowerCase().contains("missed")
+          ? _missedCheckinChannel.id
+          : _generalChannel.id,
+      isSos
+          ? _sosChannel.name
+          : title.toLowerCase().contains("missed")
+          ? _missedCheckinChannel.name
+          : _generalChannel.name,
       channelDescription: isSos
           ? _sosChannel.description
           : _generalChannel.description,
@@ -313,6 +333,8 @@ class PushNotificationService extends ConsumerStatefulWidget {
       priority: isSos ? Priority.max : Priority.high,
       sound: isSos
           ? RawResourceAndroidNotificationSound(sound ?? "custom_sound")
+          : title.toLowerCase().contains("missed")
+          ? RawResourceAndroidNotificationSound(sound ?? "missed_checkin")
           : null,
       // color: isSos ? const Color(0xFFFF3B30) : Colors.white,
       enableLights: true,
@@ -345,7 +367,7 @@ class PushNotificationService extends ConsumerStatefulWidget {
     );
   }
 
-  static Future<void> _saveTokenToProfile(String token) async {
+  static Future<void> saveTokenToProfile(String? token) async {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) return;

@@ -1,12 +1,16 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:well_check_v3/features/safety/services/pulse_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+import 'location_service.dart';
 
 // Future<void> initializeBackgroundService() async {
 //   final service = FlutterBackgroundService();
@@ -59,7 +63,11 @@ Future<void> initializeBackgroundService() async {
       initialNotificationContent: 'Monitoring family shield status',
       foregroundServiceNotificationId: 888,
     ),
-    iosConfiguration: IosConfiguration(),
+    iosConfiguration: IosConfiguration(
+      autoStart: true,
+      onForeground: onStart,
+      onBackground: onIosBackground,
+    ),
   );
 }
 
@@ -131,4 +139,30 @@ void onStart(ServiceInstance service) async {
       await pulseService.broadcastPulse(userId);
     }
   });
+  final prefs = await SharedPreferences.getInstance();
+  final userId = prefs.getString('last_user_id');
+  Position? _lastPosition;
+
+  LocationService.getPositionStream().listen((position) async {
+    // print("Background location ${position.latitude}  ${position.longitude}");
+    await pulseService.updateLocation(userId);
+  });
 }
+
+// Timer.periodic(const Duration(seconds: 20), (timer) async {
+//   final prefs = await SharedPreferences.getInstance();
+//   final userId = prefs.getString('last_user_id');
+//
+//   if (userId == null) {
+//     debugPrint('Background Service: Still waiting for user identity...');
+//     return;
+//   }
+//
+//   if (service is AndroidServiceInstance) {
+//     if (await service.isForegroundService()) {
+//       await pulseService.updateLocation(userId);
+//     }
+//   } else {
+//     await pulseService.updateLocation(userId);
+//   }
+// });

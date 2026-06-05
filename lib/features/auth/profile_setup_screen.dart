@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
@@ -36,7 +37,8 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
         ),
       );
       return;
-    } if (phone.isEmpty) {
+    }
+    if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter your phone number'),
@@ -62,7 +64,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
           .from('profiles')
           .update({
             'full_name': name,
-        "phone":phone
+            "phone": phone,
             // If your database has an age column, write it here:
             // 'age': int.tryParse(_ageController.text) ?? 0,
           })
@@ -85,9 +87,20 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       // Request HealthKit permissions (Issue #8: Apple Watch pulse)
       try {
         final healthRepo = ref.read(healthRepositoryProvider);
-        await healthRepo.requestPermissions();
-        debugPrint('[ProfileSetup] HealthKit permissions requested');
+
+        final granted = await healthRepo.requestPermissions();
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('priv_heartbeat', granted);
+
+        debugPrint(
+          '[ProfileSetup] HealthKit permissions ${granted ? "granted" : "denied"}',
+        );
       } catch (e) {
+        final prefs = await SharedPreferences.getInstance();
+
+        await prefs.setBool('priv_heartbeat', false);
+
         debugPrint('[ProfileSetup] HealthKit permission request failed: $e');
       }
 
@@ -139,25 +152,26 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
         padding: MediaQuery.viewInsetsOf(context),
         child: Padding(
           padding: const EdgeInsets.all(12.0),
-          child: SafeArea(child:                 ElevatedButton(
-            onPressed: _isLoading ? null : _saveProfile,
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 18),
-            ),
-            child: _isLoading
-                ? const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                color: Colors.white,
-                strokeWidth: 3,
+          child: SafeArea(
+            child: ElevatedButton(
+              onPressed: _isLoading ? null : _saveProfile,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 18),
               ),
-            )
-                : const Text(
-              'SAVE & ENTER DASHBOARD',
-              style: TextStyle(fontSize: 16),
+              child: _isLoading
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 3,
+                      ),
+                    )
+                  : const Text(
+                      'SAVE & ENTER DASHBOARD',
+                      style: TextStyle(fontSize: 16),
+                    ),
             ),
-          ),
           ),
         ),
       ),
@@ -201,7 +215,8 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 24), TextField(
+                const SizedBox(height: 24),
+                TextField(
                   focusNode: phoneNumberNode,
                   controller: phoneNumber,
                   keyboardType: TextInputType.number,
@@ -224,7 +239,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                     ),
                   ),
                 ),
-               // const Spacer(),
+                // const Spacer(),
               ],
             ),
           ),

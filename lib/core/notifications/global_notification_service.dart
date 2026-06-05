@@ -12,20 +12,22 @@ class GlobalNotificationService {
     if (kIsWeb) return;
     if (_initialized) return;
 
-    const androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const iosSettings = DarwinInitializationSettings();
     const settings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
     );
 
-    await _plugin.initialize( settings);
+    await _plugin.initialize(settings);
 
     // Request permissions
     await _plugin
         .resolvePlatformSpecificImplementation<
-            IOSFlutterLocalNotificationsPlugin>()
+          IOSFlutterLocalNotificationsPlugin
+        >()
         ?.requestPermissions(alert: true, badge: true, sound: true);
 
     _initialized = true;
@@ -63,13 +65,7 @@ class GlobalNotificationService {
       iOS: iosDetails,
     );
 
-    await _plugin.show(
-      id,
-      title,
-      body,
-       details,
-      payload: payload,
-    );
+    await _plugin.show(id, title, body, details, payload: payload);
   }
 
   /// Start listening to family `well_events` and fire a local notification on insert.
@@ -90,22 +86,22 @@ class GlobalNotificationService {
           callback: (payload) {
             final newRow = payload.newRecord;
             final eventUserId = newRow['user_id'] as String?;
-            
+
             // Only notify if someone ELSE did an action
             if (eventUserId != null && eventUserId != myUserId) {
               final title = newRow['title'] as String? ?? 'Family Update';
               final desc = newRow['description'] as String? ?? '';
-              
-              showNotification(
-                id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-                title: title,
-                body: desc,
-              );
+
+              // showNotification(
+              //   id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
+              //   title: title,
+              //   body: desc,
+              // );
             }
           },
         )
         .subscribe();
-        
+
     debugPrint('[GlobalNotif] Listening to well_events for family $familyId');
   }
 
