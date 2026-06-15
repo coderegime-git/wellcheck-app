@@ -133,7 +133,7 @@ class HealthRepository {
         success: false,
         status: SyncStatus.permissionDenied,
         message:
-            'Could not request Health permissions.\n\n'
+        'Could not request Health permissions.\n\n'
             'Please go to:\nSettings → Privacy & Security → Health → [App Name]\n'
             'and enable all permissions manually.',
         debugInfo: {'stage': 'permission_request', 'error': e.toString()},
@@ -148,7 +148,7 @@ class HealthRepository {
         success: false,
         status: SyncStatus.permissionDenied,
         message:
-            'Health access not granted.\n\n'
+        'Health access not granted.\n\n'
             'Please go to:\nSettings → Privacy & Security → Health → [App Name]\n'
             'and turn ON all health permissions, then try again.',
         debugInfo: {'stage': 'permission', 'granted': false},
@@ -169,7 +169,7 @@ class HealthRepository {
         success: false,
         status: SyncStatus.unknownError,
         message:
-            'Failed to read health data from your device.\n\n'
+        'Failed to read health data from your device.\n\n'
             'Please make sure:\n'
             '• Your watch is worn and connected to iPhone\n'
             '• Apple Health app is open and syncing\n'
@@ -184,7 +184,7 @@ class HealthRepository {
         success: false,
         status: SyncStatus.noData,
         message:
-            'No health data found in the last 24 hours.\n\n'
+        'No health data found in the last 24 hours.\n\n'
             'Please make sure:\n'
             '• Your watch is worn and connected\n'
             '• Apple Health is syncing with your watch\n'
@@ -201,14 +201,14 @@ class HealthRepository {
 
     // ── STAGE 4: Heart Rate Specific Check ───────
     final hasHeartRate = healthData.any(
-      (p) => p.type == HealthDataType.HEART_RATE,
+          (p) => p.type == HealthDataType.HEART_RATE,
     );
     if (!hasHeartRate) {
       return SyncResult(
         success: false,
         status: SyncStatus.noHeartRate,
         message:
-            'Watch is connected but no Heart Rate data was found.\n\n'
+        'Watch is connected but no Heart Rate data was found.\n\n'
             'Please make sure:\n'
             '• Heart Rate monitoring is enabled on your watch\n'
             '• Wear your watch snugly on your wrist\n'
@@ -258,20 +258,20 @@ class HealthRepository {
       // Check if it's a network issue
       final isNetwork =
           e.toString().toLowerCase().contains('socket') ||
-          e.toString().toLowerCase().contains('network') ||
-          e.toString().toLowerCase().contains('connection') ||
-          e.toString().toLowerCase().contains('timeout');
+              e.toString().toLowerCase().contains('network') ||
+              e.toString().toLowerCase().contains('connection') ||
+              e.toString().toLowerCase().contains('timeout');
 
       return SyncResult(
         success: false,
         status: isNetwork ? SyncStatus.networkError : SyncStatus.uploadFailed,
         message: isNetwork
             ? 'No internet connection.\n\n'
-                  'Health data was read from your watch but could not be uploaded.\n'
-                  'Please check your internet and try again.'
+            'Health data was read from your watch but could not be uploaded.\n'
+            'Please check your internet and try again.'
             : 'Data upload failed.\n\n'
-                  'Health data was read from your watch but could not be saved.\n'
-                  'Please try again. If the issue persists, contact support.',
+            'Health data was read from your watch but could not be saved.\n'
+            'Please try again. If the issue persists, contact support.',
         debugInfo: {
           'stage': 'upload',
           'error': e.toString(),
@@ -344,7 +344,7 @@ class HealthRepository {
       success: true,
       status: SyncStatus.success,
       message:
-          'Health data synced successfully!\n\n'
+      'Health data synced successfully!\n\n'
           '${summaryLines.join('\n')}\n\n'
           'Total: ${filteredHealthData.length} data points uploaded.',
       debugInfo: typeCounts,
@@ -355,11 +355,11 @@ class HealthRepository {
   // 3. Predictive Deviation & Escalation
   // ─────────────────────────────────────────────
   Future<void> _calculateDistressAndEscalate(
-    String userId,
-    String familyId,
-    String userName,
-    List<HealthDataPoint> recentData,
-  ) async {
+      String userId,
+      String familyId,
+      String userName,
+      List<HealthDataPoint> recentData,
+      ) async {
     debugPrint('Running distress analysis...');
 
     final heartRates = recentData
@@ -390,7 +390,7 @@ class HealthRepository {
         .toList();
     final double recentSteps = steps.fold(
       0.0,
-      (sum, p) => sum + (double.tryParse(p.value.toString()) ?? 0.0),
+          (sum, p) => sum + (double.tryParse(p.value.toString()) ?? 0.0),
     );
 
     final baseline = await _client
@@ -417,7 +417,7 @@ class HealthRepository {
       if (latestHrv != null && latestHrv < hrvBaseline * 0.6) {
         isDistressed = true;
         distressReason +=
-            '${distressReason.isEmpty ? '' : ' & '}Low HRV (Psychological Stress)';
+        '${distressReason.isEmpty ? '' : ' & '}Low HRV (Psychological Stress)';
       }
 
       debugPrint('isDistressed: $isDistressed — $distressReason');
@@ -430,7 +430,7 @@ class HealthRepository {
         if (distressReason.toLowerCase().contains('heart')) {
           title = 'Abnormal Heart Rate';
           description =
-              'Heart rate is significantly above the normal baseline.';
+          'Heart rate is significantly above the normal baseline.';
         } else if (distressReason.toLowerCase().contains('hrv')) {
           title = 'High Stress Detected';
           description = 'Low HRV and elevated stress levels were detected.';
@@ -480,10 +480,10 @@ class HealthRepository {
   // 4. Consent Management
   // ─────────────────────────────────────────────
   Future<void> updateConsent(
-    String userId,
-    String dataType,
-    bool granted,
-  ) async {
+      String userId,
+      String dataType,
+      bool granted,
+      ) async {
     await _client.from('consent_ledger').upsert({
       'user_id': userId,
       'data_type': dataType,
@@ -499,12 +499,12 @@ HealthRepository healthRepository(Ref ref) {
 }
 
 Future<void> runHealthSync(
-  BuildContext context,
-  WidgetRef ref, {
-  required String userId,
-  required String familyId,
-  required String userName,
-}) async {
+    BuildContext context,
+    WidgetRef ref, {
+      required String userId,
+      required String familyId,
+      required String userName,
+    }) async {
   // Show loading indicator
   showDialog(
     context: context,

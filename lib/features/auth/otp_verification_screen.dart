@@ -10,6 +10,7 @@ import 'package:well_check_v3/core/navigation/shield_router.dart';
 import 'package:well_check_v3/features/auth/login_screen.dart';
 
 import '../safety/services/pulse_service.dart';
+import '../safety/services/purchase_services.dart';
 
 class OTPVerificationScreen extends ConsumerStatefulWidget {
   final String email;
@@ -49,6 +50,9 @@ class _OTPVerificationScreenState extends ConsumerState<OTPVerificationScreen> {
         //   UserAttributes(password: '12345678'),
         // );
         try {
+          await PurchasesService.instance.identifyUser(
+            Supabase.instance.client.auth.currentUser!.id,
+          );
           final profile = await ref.read(currentUserProfileProvider.future);
           if (!mounted) return;
           final service = FlutterBackgroundService();

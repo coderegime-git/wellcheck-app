@@ -75,6 +75,8 @@ dependencies:
   flutter_map_tile_caching:
   flutter_secure_storage:
   flutter_timezone: ^5.0.2
+  purchases_flutter: ^10.2.3
+  purchases_ui_flutter: ^10.2.3
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -23,6 +24,8 @@ import 'package:well_check_v3/features/tools/safe_zone_config_screen.dart';
 import 'package:well_check_v3/features/tools/sync_calendar_screen.dart';
 import 'package:well_check_v3/features/tools/safe_zone_screen.dart';
 
+import '../../features/auth/wellcheck_paywall_screen.dart';
+import '../../features/safety/services/purchase_services.dart';
 import '../security/biometric_screen.dart';
 
 part 'shield_router.g.dart';
@@ -67,31 +70,34 @@ GoRouter shieldRouter(Ref ref) {
     //
     //   return null;
     // },
-    redirect: (context, state) {
+    redirect: (context, state) async {
       final session = Supabase.instance.client.auth.currentSession;
       final isLoggedIn = session != null;
 
       final isOnAuthPage =
           state.matchedLocation == '/' ||
-          state.matchedLocation == '/login' ||
-          state.matchedLocation == '/register';
+              state.matchedLocation == '/login' ||
+              state.matchedLocation == '/register';
 
       final isOnOtp = state.matchedLocation.startsWith('/otp');
+      final isOnPaywall = state.matchedLocation == '/paywall';
 
       if (isOnOtp) return null;
 
-      // If logged in, check biometric pref
-      if (isLoggedIn && isOnAuthPage) {
-        // Get pref synchronously from cached prefs
-        // BiometricNotifier handles the actual gate
-        return '/dashboard';
+      if (!isLoggedIn && !isOnAuthPage) return '/';
+      if (isLoggedIn && isOnAuthPage) return '/dashboard';
+
+      // Pro gate — check entitlement before allowing dashboard access
+      if (isLoggedIn && !isOnPaywall) {
+        final customerInfo = await Purchases.getCustomerInfo();
+        print("Info123 $customerInfo");
+        final isPro = customerInfo.entitlements.active
+            .containsKey('WellCheck Pro');
+        if (!isPro) return '/paywall';
       }
 
-      if (!isLoggedIn && !isOnAuthPage) return '/';
-
       return null;
-    },
-    routes: [
+    },    routes: [
       GoRoute(path: '/', builder: (context, state) => const WelcomeScreen()),
       GoRoute(
         path: '/register',
@@ -124,6 +130,10 @@ GoRouter shieldRouter(Ref ref) {
 
           return SafeZoneConfigScreen(fromLeader: isEdit);
         },
+      ),
+      GoRoute(
+        path: '/paywall',
+        builder: (context, state) => const WellCheckPaywallScreen(),
       ),
       GoRoute(
         path: '/sync-calendar',
@@ -211,8 +221,19 @@ class _AuthNotifier extends ChangeNotifier {
 
   _AuthNotifier() {
     _sub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      notifyListeners(); // ← triggers redirect re-evaluation
+      _handleAuthChange(data);
+      notifyListeners();
     });
+  }
+
+  Future<void> _handleAuthChange(AuthState data) async {
+    final user = data.session?.user;
+    if (data.event == AuthChangeEvent.signedIn && user != null) {
+      // Tie RC purchases to this Supabase user ID
+      await PurchasesService.instance.identifyUser(user.id);
+    } else if (data.event == AuthChangeEvent.signedOut) {
+      await PurchasesService.instance.logOut();
+    }
   }
 
   @override

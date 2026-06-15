@@ -3,12 +3,14 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:health/health.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
 
 import '../../core/data/health_repository.dart';
+import '../../core/data/subscription_provider.dart';
 import '../../core/notifications/push_notification_service.dart';
 
 class ProfileSettingsView extends ConsumerStatefulWidget {
@@ -302,8 +304,35 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
               );
             },
           ),
-
-          const Spacer(),
+// In your settings screen (ProfileSettingsView or wherever settings lives)
+          Consumer(
+            builder: (context, ref, _) {
+              final sub = ref.watch(subscriptionProvider);
+              return sub.when(
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+                data: (state) {
+                  if (!state.isWellCheckPro) return const SizedBox.shrink();
+                  return ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE1F5EE),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.workspace_premium,
+                          color: Color(0xFF007F80), size: 20),
+                    ),
+                    title: const Text('Manage Subscription'),
+                    subtitle: const Text('Cancel, restore or get help'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => RevenueCatUI.presentCustomerCenter(),
+                  );
+                },
+              );
+            },
+          ),
+         // const Spacer(),
           Text("Version:1.0.0"),
           SizedBox(height: 10),
           // Log Out Button

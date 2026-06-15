@@ -114,7 +114,7 @@ class PulseService {
       }
 
       int level =
-          100; // Safe default for simulators and aggressive background iOS policies
+      100; // Safe default for simulators and aggressive background iOS policies
       try {
         final battery = Battery();
         level = await battery.batteryLevel;
@@ -318,16 +318,16 @@ class PulseService {
       } catch (_) {}
 
       final response =
-          await Supabase.instance.client.from('live_locations').upsert({
-            'user_id': persistentUserId,
-            'family_id': familyId,
-            'user_name': persistentUserName,
-            'latitude': position.latitude,
-            'longitude': position.longitude,
-            'role': persistentUserRole,
-            'battery_level': level,
-            'updated_at': DateTime.now().toIso8601String(),
-          }, onConflict: 'user_id').select();
+      await Supabase.instance.client.from('live_locations').upsert({
+        'user_id': persistentUserId,
+        'family_id': familyId,
+        'user_name': persistentUserName,
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'role': persistentUserRole,
+        'battery_level': level,
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'user_id').select();
 
       debugPrint("UPSERT RESPONSE");
       debugPrint(response.toString());

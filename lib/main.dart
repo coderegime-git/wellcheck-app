@@ -5,6 +5,8 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart';
+import 'package:purchases_flutter/models/purchases_configuration.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/navigation/shield_router.dart';
 import 'package:flutter/foundation.dart';
@@ -73,12 +75,28 @@ Future<void> main() async {
   //     'Location permission not granted — service may lack location data',
   //   );
   // }
-
+await initializeRevenueCat();
   //await initializeBackgroundService();
   await FlutterBackgroundService().startService();
   runApp(const ProviderScope(child: WellCheckApp()));
 }
+Future<void> initializeRevenueCat() async {
+  // Platform-specific API keys
+  await Purchases.setLogLevel(
+    const bool.fromEnvironment('dart.vm.product') ? LogLevel.error : LogLevel.verbose,
+  );
 
+  String apiKey;
+  if (Platform.isIOS) {
+    apiKey = 'test_RkkbIScltWKRExGQlJRcyqVtfZg';
+  } else if (Platform.isAndroid) {
+    apiKey = 'test_RkkbIScltWKRExGQlJRcyqVtfZg';
+  } else {
+    throw UnsupportedError('Platform not supported');
+  }
+
+  await Purchases.configure(PurchasesConfiguration(apiKey));
+}
 class WellCheckApp extends ConsumerStatefulWidget {
   const WellCheckApp({super.key});
 
