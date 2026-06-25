@@ -27,7 +27,7 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
     setState(() => _isLoading = true);
     try {
       final authRepo = ref.read(authRepositoryProvider);
-      await authRepo.signInWithMagicLink(_emailController.text.trim(),'');
+      await authRepo.signInWithMagicLink(_emailController.text.trim(), '');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -40,14 +40,15 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
       }
     } catch (e) {
       if (mounted) {
-        String errorMessage = 'Unable to send verification code. Please try again.';        if (e.toString().contains('rate limit')) {
+        String errorMessage =
+            'Unable to send verification code. Please try again.';
+        if (e.toString().contains('rate limit')) {
           errorMessage =
-          'Too many attempts. Please wait a few minutes before trying again.';
+              'Too many attempts. Please wait a few minutes before trying again.';
         } else if (e.toString().contains('Invalid email')) {
           errorMessage = 'Please enter a valid email address.';
         } else if (e.toString().toLowerCase().contains('no address')) {
-          errorMessage =
-          'No internet connection. Please check your network.';
+          errorMessage = 'No internet connection. Please check your network.';
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -121,7 +122,8 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                   GestureDetector(
-                    onTap: () => _launchUrl('https://well-check.com/terms'),
+                    onTap: () =>
+                        _launchUrl('https://well-check.com/terms-conditions/'),
                     child: const Text(
                       'Terms of Service',
                       style: TextStyle(
@@ -136,7 +138,8 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                   GestureDetector(
-                    onTap: () => _launchUrl('https://well-check.com/privacy'),
+                    onTap: () =>
+                        _launchUrl('https://well-check.com/privacy-policy/'),
                     child: const Text(
                       'Privacy Policy',
                       style: TextStyle(

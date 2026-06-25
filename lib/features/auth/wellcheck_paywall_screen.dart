@@ -25,12 +25,32 @@ class _WellCheckPaywallScreenState extends State<WellCheckPaywallScreen> {
   }
 
   Future<void> _presentPaywall() async {
-    final result = await RevenueCatUI.presentPaywall();
-    if (!mounted) return;
-    if (result == PaywallResult.purchased || result == PaywallResult.restored) {
-      context.go('/dashboard');
+    final offerings = await Purchases.getOfferings();
+    print("RC availablePackages:");
+
+    print(offerings.current?.availablePackages);
+    final supabaseUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (supabaseUserId != null) {
+      await Purchases.logIn(supabaseUserId);
+      print("RC identified as: $supabaseUserId");
     }
-    else {
+
+    final result = await RevenueCatUI.presentPaywall(
+      offering: offerings.getOffering("premium_monthly"),
+    );
+
+    if (!mounted) return;
+    final customerInfo = await Purchases.getCustomerInfo();
+
+    final hasSubscription =
+        customerInfo.entitlements.active.containsKey('WellCheck Pro') ||
+        customerInfo.entitlements.active.containsKey('WellCheck Premium');
+
+    if (result == PaywallResult.purchased ||
+        result == PaywallResult.restored ||
+        hasSubscription) {
+      context.go('/dashboard');
+    } else {
       await Supabase.instance.client.auth.signOut();
       if (mounted) context.go('/');
     }
@@ -39,10 +59,9 @@ class _WellCheckPaywallScreenState extends State<WellCheckPaywallScreen> {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      backgroundColor: Color(0xFF007F80), // ← teal so the 1-second flash matches RC's sheet bg
-      body: Center(
-        child: CircularProgressIndicator(color: Colors.white),
-      ),
+      backgroundColor: Color(0xFF007F80),
+      // ← teal so the 1-second flash matches RC's sheet bg
+      body: Center(child: CircularProgressIndicator(color: Colors.white)),
     );
   }
 }

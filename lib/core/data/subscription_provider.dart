@@ -11,7 +11,10 @@ class SubscriptionState {
   const SubscriptionState({this.customerInfo, this.isLoading = true});
 
   bool get isWellCheckPro =>
-      customerInfo?.entitlements.active.containsKey('WellCheck Pro') ?? false;
+      (customerInfo?.entitlements.active.containsKey('WellCheck Pro') ??
+          false) ||
+      (customerInfo?.entitlements.active.containsKey('WellCheck Premium') ??
+          false);
 
   SubscriptionState copyWith({CustomerInfo? customerInfo, bool? isLoading}) {
     return SubscriptionState(
@@ -47,6 +50,6 @@ class SubscriptionNotifier extends AsyncNotifier<SubscriptionState> {
 }
 
 final subscriptionProvider =
-AsyncNotifierProvider<SubscriptionNotifier, SubscriptionState>(
-  SubscriptionNotifier.new,
-);
+    AsyncNotifierProvider<SubscriptionNotifier, SubscriptionState>(
+      SubscriptionNotifier.new,
+    );

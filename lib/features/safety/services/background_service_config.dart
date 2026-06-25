@@ -62,6 +62,10 @@ Future<void> initializeBackgroundService() async {
       initialNotificationTitle: 'Well-Check Active',
       initialNotificationContent: 'Monitoring family shield status',
       foregroundServiceNotificationId: 888,
+      foregroundServiceTypes: [
+        // ← add this if your plugin version supports it
+        AndroidForegroundType.location,
+      ],
     ),
     iosConfiguration: IosConfiguration(
       autoStart: true,

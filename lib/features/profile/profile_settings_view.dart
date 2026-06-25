@@ -12,6 +12,7 @@ import 'package:well_check_v3/core/data/user_profile_provider.dart';
 import '../../core/data/health_repository.dart';
 import '../../core/data/subscription_provider.dart';
 import '../../core/notifications/push_notification_service.dart';
+import 'health_kit_screen.dart';
 
 class ProfileSettingsView extends ConsumerStatefulWidget {
   const ProfileSettingsView({super.key});
@@ -23,6 +24,7 @@ class ProfileSettingsView extends ConsumerStatefulWidget {
 
 class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
   bool _isUploading = false;
+  bool isLoad = false;
   bool _isLoggingOut = false;
   String? _avatarUrl;
 
@@ -165,205 +167,316 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.85,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40,
-            height: 4,
-            margin: const EdgeInsets.only(bottom: 24),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade300,
-              borderRadius: BorderRadius.circular(2),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 24),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          ),
-          Text(
-            'Profile & Settings',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 24),
-
-          // Avatar
-          GestureDetector(
-            onTap: _isUploading ? null : _pickAndUploadAvatar,
-            child: Stack(
-              alignment: Alignment.bottomRight,
-              children: [
-                CircleAvatar(
-                  radius: 56,
-                  backgroundColor: ShieldColors.activeTeal.withValues(
-                    alpha: 0.1,
-                  ),
-                  backgroundImage: _avatarUrl != null
-                      ? NetworkImage(_avatarUrl!)
-                      : null,
-                  child: _isUploading
-                      ? const CircularProgressIndicator()
-                      : _avatarUrl == null
-                      ? const Icon(
-                          Icons.person,
-                          size: 48,
-                          color: ShieldColors.activeTeal,
-                        )
-                      : null,
-                ),
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: const BoxDecoration(
-                    color: ShieldColors.activeTeal,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.camera_alt,
-                    size: 16,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
+            Text(
+              'Profile & Settings',
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
             ),
-          ),
-          const SizedBox(height: 16),
+            const SizedBox(height: 24),
 
-          // Name & Role
-          profileAsync.when(
-            data: (profile) {
-              if (profile == null) return const SizedBox.shrink();
-              return Column(
+            // Avatar
+            GestureDetector(
+              onTap: _isUploading ? null : _pickAndUploadAvatar,
+              child: Stack(
+                alignment: Alignment.bottomRight,
                 children: [
-                  Text(
-                    profile.fullName ?? 'User',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
+                  CircleAvatar(
+                    radius: 48,
+                    backgroundColor: ShieldColors.activeTeal.withValues(
+                      alpha: 0.1,
                     ),
+                    backgroundImage: _avatarUrl != null
+                        ? NetworkImage(_avatarUrl!)
+                        : null,
+                    child: _isUploading
+                        ? const CircularProgressIndicator()
+                        : _avatarUrl == null
+                        ? const Icon(
+                            Icons.person,
+                            size: 48,
+                            color: ShieldColors.activeTeal,
+                          )
+                        : null,
                   ),
-                  const SizedBox(height: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
+                    padding: const EdgeInsets.all(6),
+                    decoration: const BoxDecoration(
+                      color: ShieldColors.activeTeal,
+                      shape: BoxShape.circle,
                     ),
-                    decoration: BoxDecoration(
-                      color: ShieldColors.activeTeal.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
+                    child: const Icon(
+                      Icons.camera_alt,
+                      size: 16,
+                      color: Colors.white,
                     ),
-                    child: Text(
-                      profile.role.toUpperCase(),
-                      style: const TextStyle(
-                        color: ShieldColors.activeTeal,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.5,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    Supabase.instance.client.auth.currentUser?.email ?? '',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
                   ),
                 ],
-              );
-            },
-            loading: () => const CircularProgressIndicator(),
-            error: (e, st) => Text('Error: $e'),
-          ),
-
-          const SizedBox(height: 32),
-          const Divider(),
-          const SizedBox(height: 16),
-
-          // Settings items
-          _settingsItem(
-            icon: Icons.camera_alt,
-            label: 'Change Profile Photo',
-            onTap: _pickAndUploadAvatar,
-          ),
-          _settingsItem(
-            icon: Icons.notifications_outlined,
-            label: 'Notification Preferences',
-            onTap: () {
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (_) => const _NotificationPrefsSheet(),
-              );
-            },
-          ),
-          _settingsItem(
-            icon: Icons.shield_outlined,
-            label: 'Privacy & Security',
-            onTap: () {
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (_) => const _PrivacySecuritySheet(),
-              );
-            },
-          ),
-// In your settings screen (ProfileSettingsView or wherever settings lives)
-          Consumer(
-            builder: (context, ref, _) {
-              final sub = ref.watch(subscriptionProvider);
-              return sub.when(
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-                data: (state) {
-                  if (!state.isWellCheckPro) return const SizedBox.shrink();
-                  return ListTile(
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE1F5EE),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(Icons.workspace_premium,
-                          color: Color(0xFF007F80), size: 20),
-                    ),
-                    title: const Text('Manage Subscription'),
-                    subtitle: const Text('Cancel, restore or get help'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => RevenueCatUI.presentCustomerCenter(),
-                  );
-                },
-              );
-            },
-          ),
-         // const Spacer(),
-          Text("Version:1.0.0"),
-          SizedBox(height: 10),
-          // Log Out Button
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              onPressed: _isLoggingOut ? null : _logout,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: ShieldColors.urgentRed,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: ShieldDesign.roundedTwelve,
-                ),
               ),
-              icon: _isLoggingOut
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : const Icon(Icons.logout),
-              label: Text(_isLoggingOut ? 'Logging out...' : 'Log Out'),
             ),
-          ),
-        ],
+            const SizedBox(height: 10),
+
+            // Name & Role
+            profileAsync.when(
+              data: (profile) {
+                if (profile == null) return const SizedBox.shrink();
+                return Column(
+                  children: [
+                    Text(
+                      profile.fullName ?? 'User',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: ShieldColors.activeTeal.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        profile.role.toUpperCase(),
+                        style: const TextStyle(
+                          color: ShieldColors.activeTeal,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      Supabase.instance.client.auth.currentUser?.email ?? '',
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                );
+              },
+              loading: () => const CircularProgressIndicator(),
+              error: (e, st) => Text('Error: $e'),
+            ),
+
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 16),
+
+            // Settings items
+            _settingsItem(
+              icon: Icons.camera_alt,
+              label: 'Change Profile Photo',
+              onTap: _pickAndUploadAvatar,
+            ),
+            _settingsItem(
+              icon: Icons.notifications_outlined,
+              label: 'Notification Preferences',
+              onTap: () {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (_) => const _NotificationPrefsSheet(),
+                );
+              },
+            ),
+            _settingsItem(
+              icon: Icons.shield_outlined,
+              label: 'Privacy & Security',
+              onTap: () {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (_) => const _PrivacySecuritySheet(),
+                );
+              },
+            ),
+            // In your settings screen (ProfileSettingsView or wherever settings lives)
+            Consumer(
+              builder: (context, ref, _) {
+                final sub = ref.watch(subscriptionProvider);
+                return sub.when(
+                  loading: () => const SizedBox.shrink(),
+                  error: (_, __) => const SizedBox.shrink(),
+                  data: (state) {
+                    if (!state.isWellCheckPro) return const SizedBox.shrink();
+                    return ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE1F5EE),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.workspace_premium,
+                          color: Color(0xFF007F80),
+                          size: 20,
+                        ),
+                      ),
+                      title: const Text('Manage Subscription'),
+                      subtitle: const Text('Cancel, restore or get help'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => RevenueCatUI.presentCustomerCenter(),
+                    );
+                  },
+                );
+              },
+            ),
+
+            // const Spacer(),
+            Text("Version:1.0.0"),
+            SizedBox(height: 10),
+            GestureDetector(
+              child: Container(
+                padding: EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.red),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: isLoad
+                    ? Center(
+                        child: SizedBox(
+                          height: 25,
+                          width: 25,
+                          child: CircularProgressIndicator(color: Colors.red),
+                        ),
+                      )
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.delete_forever, color: Colors.red),
+                          SizedBox(width: 10),
+                          const Text(
+                            'Delete Account',
+                            style: TextStyle(color: Colors.red),
+                          ),
+                        ],
+                      ),
+              ),
+              onTap: () async {
+                if (isLoad) return;
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Delete Account'),
+                    content: const Text(
+                      'Are you sure? This action cannot be undone.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Delete'),
+                      ),
+                    ],
+                  ),
+                );
+
+                if (confirm == true) {
+                  await deleteAccount();
+                }
+              },
+            ),
+            SizedBox(height: 10),
+
+            // Log Out Button
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton.icon(
+                onPressed: _isLoggingOut ? null : _logout,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: ShieldColors.urgentRed,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: ShieldDesign.roundedTwelve,
+                  ),
+                ),
+                icon: _isLoggingOut
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Icon(Icons.logout),
+                label: Text(_isLoggingOut ? 'Logging out...' : 'Log Out'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  Future<void> deleteAccount() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+
+      if (user == null) return;
+      setState(() {
+        isLoad = true;
+      });
+      await Future.delayed(Duration(seconds: 2));
+      await Supabase.instance.client
+          .from('profiles')
+          .delete()
+          .eq('id', user.id);
+
+      // Delete auth user via Edge Function
+      final response = await Supabase.instance.client.functions.invoke(
+        'delete-user',
+        body: {'user_id': user.id},
+      );
+      if (response.status == 200) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Account deleted successfully")));
+
+        await Supabase.instance.client.auth.signOut();
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Failed to delete account")));
+      }
+      await Supabase.instance.client.auth.signOut();
+      setState(() {
+        isLoad = false;
+      });
+      debugPrint('Account deleted');
+    } catch (e) {
+      setState(() {
+        isLoad = false;
+      });
+      debugPrint('Delete account error: $e');
+    }
   }
 
   Widget _settingsItem({
@@ -661,8 +774,20 @@ class _PrivacySecuritySheetState extends State<_PrivacySecuritySheet> {
             activeColor: ShieldColors.activeTeal,
             onChanged: (v) => setState(() => _encryptedVault = v),
           ),
-
+          ListTile(
+            //    leading: const Icon(Icons.favorite),
+            title: const Text('Health Monitoring'),
+            subtitle: const Text('Manage Apple Health integration'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const HealthKitInfoScreen()),
+              );
+            },
+          ),
           const SizedBox(height: 16),
+
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(

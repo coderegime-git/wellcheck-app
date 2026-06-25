@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:app_settings/app_settings.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
@@ -48,7 +50,7 @@ Future<void> main() async {
       ),
     );
   }
-
+  await Supabase.instance.client.auth.signOut();
   // Initialize Firebase (gracefully degrade if not configured)
   //if (Platform.isAndroid) {
   try {
@@ -56,6 +58,7 @@ Future<void> main() async {
     debugPrint('[Firebase] Initialized successfully.');
     // Initialize Push Notifications (only if Firebase succeeded)
     await PushNotificationService.initialize();
+    //await _checkNotificationPermission();
   } catch (e) {
     debugPrint('[Firebase] Not initialized: $e — push notifications disabled.');
   }
@@ -75,28 +78,34 @@ Future<void> main() async {
   //     'Location permission not granted — service may lack location data',
   //   );
   // }
-await initializeRevenueCat();
+  await initializeRevenueCat();
   //await initializeBackgroundService();
   await FlutterBackgroundService().startService();
   runApp(const ProviderScope(child: WellCheckApp()));
 }
+
 Future<void> initializeRevenueCat() async {
   // Platform-specific API keys
   await Purchases.setLogLevel(
-    const bool.fromEnvironment('dart.vm.product') ? LogLevel.error : LogLevel.verbose,
+    const bool.fromEnvironment('dart.vm.product')
+        ? LogLevel.error
+        : LogLevel.verbose,
   );
 
   String apiKey;
   if (Platform.isIOS) {
-    apiKey = 'test_RkkbIScltWKRExGQlJRcyqVtfZg';
+    //apiKey = 'test_RkkbIScltWKRExGQlJRcyqVtfZg';
+    apiKey = 'appl_RzALamoKBAqvXxsCqUgqzMTOsBO';
   } else if (Platform.isAndroid) {
-    apiKey = 'test_RkkbIScltWKRExGQlJRcyqVtfZg';
+    //  apiKey = 'test_RkkbIScltWKRExGQlJRcyqVtfZg';
+    apiKey = 'goog_NndwRPhezROHtiZUaBiJZeAwfrk';
   } else {
     throw UnsupportedError('Platform not supported');
   }
 
   await Purchases.configure(PurchasesConfiguration(apiKey));
 }
+
 class WellCheckApp extends ConsumerStatefulWidget {
   const WellCheckApp({super.key});
 
@@ -110,6 +119,9 @@ class _WellCheckAppState extends ConsumerState<WellCheckApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _checkNotificationPermission();
+    });
     try {
       _authSubscription = Supabase.instance.client.auth.onAuthStateChange
           .listen((data) {
@@ -157,6 +169,88 @@ class _WellCheckAppState extends ConsumerState<WellCheckApp> {
     } catch (e) {
       debugPrint('Deep link auth handling error: $e');
       ref.read(shieldRouterProvider).go('/role-selection');
+    }
+  }
+
+  Future<void> _checkNotificationPermission() async {
+    final messaging = FirebaseMessaging.instance;
+    final settings = await messaging.getNotificationSettings();
+
+    if (settings.authorizationStatus == AuthorizationStatus.denied) {
+      // Wait for app to fully load before showing dialog
+      await Future.delayed(const Duration(seconds: 2));
+
+      final context = rootNavigatorKey.currentContext;
+      print("contextcontext");
+      print(context);
+      if (context == null || !context.mounted) return;
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFEEEE),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.notifications_off_outlined,
+                  color: Colors.red,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Notifications Disabled',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          content: const Text(
+            'Without notifications, you won\'t receive alerts for:\n\n'
+            '• ⚠️  Missed check-ins\n'
+            '• 💊  Medication reminders\n'
+            '• 🆘  SOS emergency alerts\n'
+            '• 📍  Safe zone entry/exit\n\n'
+            'WellCheck works best with notifications enabled. '
+            'Please enable them in your device Settings to stay protected.',
+            style: TextStyle(fontSize: 14, height: 1.6),
+          ),
+          actions: [
+            // TextButton(
+            //   onPressed: () => Navigator.of(context).pop(),
+            //   child: Text(
+            //     'Maybe Later',
+            //     style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            //   ),
+            // ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                // Opens device notification settings
+                AppSettings.openAppSettings(type: AppSettingsType.notification);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF007F80),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text('Enable Notifications'),
+            ),
+          ],
+        ),
+      );
     }
   }
 

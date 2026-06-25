@@ -271,6 +271,14 @@ class PushNotificationService extends ConsumerStatefulWidget {
     if (notification == null) return;
     final action = message.data['action'];
     print("cccc");
+    print(action);
+    print(message.data);
+    if (message.notification != null) {
+      print("cccc111");
+      print("cccc111");
+
+      print(message.notification!.android!.channelId);
+    }
 
     // if (action == 'schedule_checkin') {
     //   print("aaaaaaa");
@@ -289,7 +297,9 @@ class PushNotificationService extends ConsumerStatefulWidget {
         (notification.title?.toLowerCase().contains('sos') ?? false) ||
         (notification.title?.toLowerCase().contains('emergency') ?? false);
     final sound = message.data['sound'];
-
+    print("soundsound");
+    print(sound);
+    print(isSos);
     //final isSos = sound == "sos_sound";
     if (notification.body != null) {
       showNotification(
@@ -328,14 +338,17 @@ class PushNotificationService extends ConsumerStatefulWidget {
           : _generalChannel.name,
       channelDescription: isSos
           ? _sosChannel.description
+          : title.toLowerCase().contains("missed")
+          ? _missedCheckinChannel.description
           : _generalChannel.description,
       importance: isSos ? Importance.max : Importance.high,
       priority: isSos ? Priority.max : Priority.high,
+      // ✅ Fixed — always matches the channel's declared sound
       sound: isSos
-          ? RawResourceAndroidNotificationSound(sound ?? "custom_sound")
+          ? const RawResourceAndroidNotificationSound('sos_sound')
           : title.toLowerCase().contains("missed")
-          ? RawResourceAndroidNotificationSound(sound ?? "missed_checkin")
-          : null,
+          ? const RawResourceAndroidNotificationSound('missed_checkin')
+          : const RawResourceAndroidNotificationSound('custom_sound'),
       // color: isSos ? const Color(0xFFFF3B30) : Colors.white,
       enableLights: true,
       enableVibration: true,

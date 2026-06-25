@@ -13,7 +13,7 @@ class GlobalNotificationService {
     if (_initialized) return;
 
     const androidSettings = AndroidInitializationSettings(
-      '@mipmap/ic_launcher',
+      '@mipmap/launcher_icon',
     );
     const iosSettings = DarwinInitializationSettings();
     const settings = InitializationSettings(
@@ -53,11 +53,12 @@ class GlobalNotificationService {
       channelDescription: 'Realtime updates from your family',
       importance: Importance.max,
       priority: Priority.max,
-      icon: '@mipmap/ic_launcher',
+      icon: '@mipmap/launcher_icon',
+      channelShowBadge: false,
     );
     const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
-      presentBadge: true,
+      presentBadge: false,
       presentSound: true,
     );
     const details = NotificationDetails(

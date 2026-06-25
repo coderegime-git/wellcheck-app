@@ -65,11 +65,11 @@ class LocationService {
     if (geoPermission == LocationPermission.whileInUse) {
       final shouldOpen = await _showSettingsDialog(
         context,
-        title: 'Enable "Always" Location',
+        title: 'Enable Location',
         steps: [
           'Tap "Open Settings" below',
           'Select "Location"',
-          'Choose "Always"',
+          'Choose option',
         ],
       );
       if (shouldOpen) {
@@ -88,7 +88,7 @@ class LocationService {
         steps: [
           'Tap "Open Settings" below',
           'Select "Location"',
-          'Choose "Always"',
+          'Choose option',
         ],
       );
       if (shouldOpen) {

@@ -11,14 +11,17 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Well Check V3</string>
+	<string>Well Check</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
-    
+    <key>UIDeviceFamily</key>
+            <array>
+                <integer>1</integer>
+            </array>
 	<key>CFBundleName</key>
 	<string>Well-Check</string>
 	<key>CFBundlePackageType</key>

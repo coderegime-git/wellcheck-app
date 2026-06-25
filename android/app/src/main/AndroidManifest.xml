@@ -1,12 +1,13 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Location -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">    <!-- Location -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <!-- Health & Vitals -->
-    <uses-permission android:name="android.permission.BODY_SENSORS" />
-    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <!--    <uses-permission android:name="android.permission.BODY_SENSORS" />-->
+    <!--    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />-->
 
     <!-- Resilient-Comms (Mesh) -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
@@ -39,6 +40,17 @@
         android:icon="@mipmap/launcher_icon"
         android:label="Well-Check"
         android:usesCleartextTraffic="true">
+        <service
+            android:name="id.flutter.flutter_background_service.BackgroundService"
+            android:exported="false"
+            android:foregroundServiceType="location|dataSync"
+            tools:replace="android:exported,android:foregroundServiceType" />
+
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="location|dataSync"
+            tools:replace="android:exported,android:foregroundServiceType" />
 
         <activity
             android:name=".MainActivity"

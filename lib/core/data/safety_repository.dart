@@ -2,6 +2,7 @@ import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:intl/intl.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 part 'safety_repository.g.dart';
@@ -21,45 +22,64 @@ class SafetyRepository {
   }) async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
+    final prefs = await SharedPreferences.getInstance();
     final profileRes = await Supabase.instance.client
         .from('profiles')
         .select('full_name')
         .eq('id', userId)
         .single();
     final fullName = profileRes['full_name'];
-    await _supabase.from('well_events').insert({
-      'user_id': userId,
-      'family_id': familyId,
-      'event_type': type,
-      "title": type == "check_in"
-          ? "Manual Check-in"
-          : type == "safe_zone_enter"
-          ? "Entered Safe Zone"
-          : type == "safe_zone_exit"
-          ? "Exited Safe Zone"
-          : type == "heartbeat"
-          ? "Heartbeat Alert"
-          : type == "driving"
-          ? "Driving Detected"
-          : "Activity Update",
+    final heartRateEnabled = prefs.getBool('priv_heartbeat') ?? true;
 
-      "description": type == "check_in"
-          ? "Check-in completed successfully"
-          : type == "safe_zone_enter"
-          ? "Has entered the safe zone"
-          : type == "safe_zone_exit"
-          ? "Has exited the safe zone"
-          : type == "heartbeat"
-          ? "Heartbeat event recorded"
-          : type == "driving"
-          ? "$fullName is currently driving"
-          : "Activity recorded",
-      'latitude': latitude,
-      'longitude': longitude,
-      'user_name': fullName,
-      'battery_level': batteryLevel,
-      'verification_source': 'app_foreground', // or 'background_service'
-    });
+    if (heartRateEnabled && type == "heartbeat") {
+      await _supabase.from('well_events').insert({
+        'user_id': userId,
+        'family_id': familyId,
+        'event_type': type,
+        "title": type == "check_in"
+            ? "Manual Check-in"
+            : type == "safe_zone_enter"
+            ? "Entered Safe Zone"
+            : type == "safe_zone_exit"
+            ? "Exited Safe Zone"
+            : type == "heartbeat"
+            ? "Heartbeat Alert"
+            : type == "driving"
+            ? "Driving Detected"
+            : "Activity Update",
+
+        "description": type == "check_in"
+            ? "Check-in completed successfully"
+            : type == "safe_zone_enter"
+            ? "Has entered the safe zone"
+            : type == "safe_zone_exit"
+            ? "Has exited the safe zone"
+            : type == "heartbeat"
+            ? "Heartbeat event recorded"
+            : type == "driving"
+            ? "$fullName is currently driving"
+            : "Activity recorded",
+        'latitude': latitude,
+        'longitude': longitude,
+        'user_name': fullName,
+        'battery_level': batteryLevel,
+        'verification_source': 'app_foreground', // or 'background_service'
+      });
+    } else {
+      await _supabase.from('well_events').insert({
+        'user_id': userId,
+        'family_id': familyId,
+        'event_type': "Activity",
+        "title": "Activity Update",
+
+        "description": "Activity recorded",
+        'latitude': latitude,
+        'longitude': longitude,
+        'user_name': fullName,
+        'battery_level': batteryLevel,
+        'verification_source': 'app_foreground', // or 'background_service'
+      });
+    }
     final members = await Supabase.instance.client
         .from('family_members')
         .select('user_id, role')

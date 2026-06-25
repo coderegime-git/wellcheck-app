@@ -44,7 +44,7 @@ class CheckinNotificationService {
 
     // Android setup
     const androidSettings = AndroidInitializationSettings(
-      '@mipmap/ic_launcher',
+      '@mipmap/launcher_icon',
     );
 
     // iOS setup — register action buttons as a category
@@ -217,7 +217,7 @@ class CheckinNotificationService {
       // phone rings / wakes screen
       enableVibration: true,
       playSound: true,
-      icon: '@mipmap/ic_launcher',
+      icon: '@mipmap/launcher_icon',
       actions: [
         AndroidNotificationAction(
           actionOkay,

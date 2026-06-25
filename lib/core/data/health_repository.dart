@@ -81,6 +81,7 @@ class HealthRepository {
   // ─────────────────────────────────────────────
   // 2. Fetch and Sync Vitals — returns SyncResult
   // ─────────────────────────────────────────────
+
   Future<SyncResult> syncVitals({
     required String userId,
     required String familyId,

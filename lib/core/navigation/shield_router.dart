@@ -76,8 +76,8 @@ GoRouter shieldRouter(Ref ref) {
 
       final isOnAuthPage =
           state.matchedLocation == '/' ||
-              state.matchedLocation == '/login' ||
-              state.matchedLocation == '/register';
+          state.matchedLocation == '/login' ||
+          state.matchedLocation == '/register';
 
       final isOnOtp = state.matchedLocation.startsWith('/otp');
       final isOnPaywall = state.matchedLocation == '/paywall';
@@ -88,16 +88,92 @@ GoRouter shieldRouter(Ref ref) {
       if (isLoggedIn && isOnAuthPage) return '/dashboard';
 
       // Pro gate — check entitlement before allowing dashboard access
+      // if (isLoggedIn && !isOnPaywall) {
+      //   final supabaseUserId = Supabase.instance.client.auth.currentUser?.id;
+      //   if (supabaseUserId != null) {
+      //     await Purchases.logIn(supabaseUserId);
+      //   }
+      //   final offerings = await Purchases.getOfferings();
+      //
+      //   print('Current Offering: ${offerings.current?.identifier}');
+      //
+      //   if (offerings.current != null) {
+      //     for (final package in offerings.current!.availablePackages) {
+      //       print('Package Identifier: ${package.identifier}');
+      //       print('Store Product ID: ${package.storeProduct.identifier}');
+      //       print('Title: ${package.storeProduct.title}');
+      //       print('Price: ${package.storeProduct.priceString}');
+      //       print('-------------------');
+      //     }
+      //   }
+      //   final customerInfo = await Purchases.getCustomerInfo();
+      //   print("Info123 $customerInfo");
+      //   print("Info123 $supabaseUserId");
+      //   final isPro = customerInfo.entitlements.active.containsKey(
+      //     'WellCheck Pro',
+      //   );
+      //   if (!isPro) return '/paywall';
+      // }
+      // Pro gate — only leaders require subscription
       if (isLoggedIn && !isOnPaywall) {
-        final customerInfo = await Purchases.getCustomerInfo();
-        print("Info123 $customerInfo");
-        final isPro = customerInfo.entitlements.active
-            .containsKey('WellCheck Pro');
-        if (!isPro) return '/paywall';
-      }
+        final userId = Supabase.instance.client.auth.currentUser?.id;
 
+        if (userId != null) {
+          try {
+            final member = await Supabase.instance.client
+                .from('family_members')
+                .select('role')
+                .eq('user_id', userId)
+                .maybeSingle();
+
+            // New user hasn't selected a role yet
+            if (member == null) {
+              return null;
+            }
+
+            final role = member['role'];
+
+            print('User role: $role');
+
+            // Only leaders must subscribe
+            if (role == 'leader') {
+              final profile = await Supabase.instance.client
+                  .from('profiles')
+                  .select('full_name')
+                  .eq('id', userId)
+                  .maybeSingle();
+
+              // Still in profile setup flow
+              if (profile == null || profile['full_name'] == null) {
+                return null;
+              }
+              await Purchases.logIn(userId);
+
+              final customerInfo = await Purchases.getCustomerInfo();
+
+              print('CustomerInfo: $customerInfo');
+
+              final hasSubscription =
+                  customerInfo.entitlements.active.containsKey(
+                    'WellCheck Pro',
+                  ) ||
+                  customerInfo.entitlements.active.containsKey(
+                    'WellCheck Premium',
+                  );
+
+              if (!hasSubscription) {
+                return '/paywall';
+              }
+            }
+          } catch (e) {
+            print('Subscription check error: $e');
+            return null;
+          }
+        }
+      }
       return null;
-    },    routes: [
+    },
+    routes: [
       GoRoute(path: '/', builder: (context, state) => const WelcomeScreen()),
       GoRoute(
         path: '/register',

@@ -45,6 +45,9 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
         _isLoading = false;
       });
     } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
       print(e);
     }
   }
