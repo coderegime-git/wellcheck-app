@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:battery_plus/battery_plus.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -30,6 +31,8 @@ import 'package:well_check_v3/features/tools/safe_zone_config_screen.dart';
 import '../../core/data/health_repository.dart';
 import '../../core/navigation/shield_router.dart';
 import '../../core/notifications/push_notification_service.dart';
+import '../command_center/check_in_sheet.dart';
+import '../command_center/medications_sheet.dart';
 import '../safety/services/location_service.dart';
 import '../safety/services/pulse_service.dart';
 
@@ -209,8 +212,8 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
         final prefs = await SharedPreferences.getInstance();
 
         final heartRateEnabled = prefs.getBool('priv_heartbeat') ?? true;
-
-        if (heartRateEnabled) {
+        final hasSeen = prefs.getBool('has_seen_leader_onboarding') ?? false;
+        if (heartRateEnabled && !hasSeen) {
           final shouldConnect = await showHealthPermissionDialog(context);
 
           if (!shouldConnect) {
@@ -252,27 +255,102 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
           await prefs.setBool('has_seen_leader_onboarding', true);
 
           if (mounted) {
-            await onBoardingDialog();
+            await _showGuidedSetupSheet(context, profile);
           }
         }
       } catch (e) {
         print('initializeFCM error: $e');
       }
     });
-    final granted = await LocationService.requestLocationPermissions(context);
+    final granted = await LocationService.checkLocationPermissions(context);
     if (!granted) {
-      // Optionally show a snackbar/dialog explaining why it's needed
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Location access is required for your safety. Please enable it in Settings.',
+          SnackBar(
+            content: const Text('Location access is required for your safety.'),
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'Enable',
+              onPressed: () async {
+                await LocationService.requestSettingsRedirect(
+                  context,
+                  title: 'Location Permission Required',
+                  steps: [
+                    'Tap "Open Settings" below',
+                    'Select "Location"',
+                    'Choose an option',
+                  ],
+                );
+              },
             ),
-            duration: Duration(seconds: 4),
           ),
         );
       }
     }
+  }
+
+  Future<void> _showGuidedSetupSheet(BuildContext context, profile) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      isDismissible: false,
+      builder: (_) => _GuidedSetupSheet(
+        onInviteMembers: () {
+          Navigator.pop(context);
+          showDialog(
+            context: context,
+            builder: (context) => const InviteMemberDialog(),
+          );
+        },
+        onAddMedication: () {
+          Navigator.pop(context);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            showModalBottomSheet(
+              context: context,
+              useSafeArea: true,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (context) => StatefulBuilder(
+                builder: (context, setState) {
+                  return MedicationsSheet(fromLeader: true);
+                },
+              ),
+            );
+
+            //  Navigator.push(context, MaterialPageRoute(builder: (context)=>sheet));
+          });
+        },
+        onScheduleCheckIn: () {
+          Navigator.pop(context);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            showModalBottomSheet(
+              context: context,
+              useSafeArea: true,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (context) => StatefulBuilder(
+                builder: (context, setState) {
+                  return ScheduleCheckInSheet();
+                },
+              ),
+            );
+
+            //  Navigator.push(context, MaterialPageRoute(builder: (context)=>sheet));
+          });
+        },
+        onOpenCommandCenter: () {
+          Navigator.pop(context);
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (context) => CommandCenterSheet(fromLeader: true),
+          );
+        },
+      ),
+    );
   }
 
   void _showSuccessSnackbar(BuildContext context, String message) {
@@ -418,7 +496,7 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
     }
 
     setState(() {
-      isLoad = true;
+      //  isLoad = true;
       _sosCountdownActive = true;
       _sosCountdown = 5;
     });
@@ -533,7 +611,6 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
     return isLoad
         ? Scaffold(
             backgroundColor: Colors.white,
-
             body: Center(child: CircularProgressIndicator()),
           )
         : Scaffold(
@@ -687,6 +764,8 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                           children: [
                             profileAsync.when(
                               data: (profile) {
+                                print(profile!.avatarUrl);
+                                print("avatarUrl");
                                 return profile != null &&
                                         profile!.avatarUrl != null
                                     ? CircleAvatar(
@@ -694,8 +773,8 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                         backgroundColor:
                                             ShieldColors.activeTeal,
 
-                                        backgroundImage: NetworkImage(
-                                          profile!.avatarUrl ?? "",
+                                        backgroundImage: CachedNetworkImageProvider(
+                                          '${profile!.avatarUrl}?t=${DateTime.now().millisecondsSinceEpoch}',
                                         ),
                                       )
                                     : CircleAvatar(
@@ -915,8 +994,6 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                         return const SizedBox();
                                       }
 
-                                      print("eventsevents");
-                                      print(events);
                                       return LiveMembersMap(events: events);
                                     },
                                   ),
@@ -1387,6 +1464,75 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                                                   ),
                                                                 ],
 
+                                                                if (med.doctor !=
+                                                                    null) ...[
+                                                                  SizedBox(
+                                                                    height: 5,
+                                                                  ),
+
+                                                                  RichText(
+                                                                    text: TextSpan(
+                                                                      style: TextStyle(
+                                                                        color: Colors
+                                                                            .blueGrey,
+                                                                        fontSize:
+                                                                            12,
+                                                                        fontWeight:
+                                                                            FontWeight.w500,
+                                                                      ),
+                                                                      children: [
+                                                                        TextSpan(
+                                                                          text:
+                                                                              'Prescribing doctor: ',
+                                                                        ),
+                                                                        TextSpan(
+                                                                          text:
+                                                                              med.doctor,
+                                                                          style: TextStyle(
+                                                                            fontWeight:
+                                                                                FontWeight.bold,
+                                                                          ),
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                                if (med.instructions !=
+                                                                    null) ...[
+                                                                  SizedBox(
+                                                                    height: 5,
+                                                                  ),
+                                                                  RichText(
+                                                                    text: TextSpan(
+                                                                      style: TextStyle(
+                                                                        color: Colors
+                                                                            .blueGrey,
+                                                                        fontSize:
+                                                                            12,
+                                                                        fontWeight:
+                                                                            FontWeight.w500,
+                                                                      ),
+                                                                      children: [
+                                                                        TextSpan(
+                                                                          text:
+                                                                              'Instruction: ',
+                                                                        ),
+                                                                        TextSpan(
+                                                                          text:
+                                                                              med.instructions,
+                                                                          style: TextStyle(
+                                                                            fontWeight:
+                                                                                FontWeight.bold,
+                                                                          ),
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                                SizedBox(
+                                                                  height: 5,
+                                                                ),
+
                                                                 // if (nextDose !=
                                                                 //     null) ...[
                                                                 //   const SizedBox(
@@ -1515,7 +1661,8 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                     ),
                                     builder: (context, memberSnapshot) {
                                       if (memberSnapshot.connectionState ==
-                                          ConnectionState.waiting) {
+                                              ConnectionState.waiting &&
+                                          !_sosCountdownActive) {
                                         return const Center(
                                           child: CircularPulseIndicator(),
                                         );
@@ -1701,6 +1848,8 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                                 builder: (context) =>
                                     CommandCenterSheet(fromLeader: true),
                               );
+                              //  profileAsync = ref.watch(currentUserProfileProvider);
+                              //  ref.invalidate(currentUserProfileProvider);
                               //   ref.invalidate(safetyRepositoryProvider);
                               //  ref.invalidate(userRoleProvider);
                               //  ref.invalidate(currentUserProfileProvider);
@@ -1845,7 +1994,8 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
           StreamBuilder<List<Map<String, dynamic>>>(
             stream: safetyRepo.streamFamilyEvents(familyId),
             builder: (context, eventSnapshot) {
-              if (eventSnapshot.connectionState == ConnectionState.waiting) {
+              if (eventSnapshot.connectionState == ConnectionState.waiting &&
+                  !_sosCountdownActive) {
                 return const Center(child: CircularProgressIndicator());
               }
 
@@ -1987,17 +2137,12 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
 
   /// Bug 3: Improved event tile with readable timestamps and icons
   Widget _buildEventTile(Map<String, dynamic> evt) {
-    print(evt);
-    print("evtevt");
     final type = (evt['event_type'] as String?) ?? 'unknown';
     final title =
         evt['title'] as String? ?? type.replaceAll('_', ' ').toUpperCase();
     final description = evt['description'] as String?;
-    print(description);
     final fullName = evt['user_name'] as String?;
     final battery = evt['battery_level'];
-    print(battery);
-    print("batterybattery12");
     final createdAt = evt['created_at'] as String?;
 
     IconData icon = Icons.favorite_border;
@@ -2159,12 +2304,12 @@ class _MemberStatusCard extends StatelessWidget {
               builder: (context, vitalsSnapshot) {
                 final lastEvent = eventSnapshot.data;
                 final vitals = vitalsSnapshot.data ?? [];
-                print(lastEvent);
-                print("lastEvent");
                 final role = member['role'] as String;
+                final avatar = member['avatar_url'] != null
+                    ? member['avatar_url']
+                    : null;
                 final realName = member['full_name'] ?? 'Family Member';
                 final isMe = userId == currentUserId;
-
                 String displayName = isMe ? '$realName (You)' : realName;
                 IconData statusIcon = Icons.info_outline;
                 String statusText = 'Awaiting first pulse...';
@@ -2178,11 +2323,9 @@ class _MemberStatusCard extends StatelessWidget {
                   final type = lastEvent['event_type'] as String;
                   title = lastEvent['title'] as String?;
                   description = lastEvent['description'] as String?;
-                  print(description);
-                  print("descriptiondescription");
+
                   final battery = lastEvent['battery_level'];
-                  print(battery);
-                  print("batteryyyy");
+
                   final createdAt = lastEvent['created_at'] as String?;
 
                   String lastSeen = '';
@@ -2315,7 +2458,7 @@ class _MemberStatusCard extends StatelessWidget {
                     subStatusIcon: statusIcon,
                     subStatusText: statusText,
                     isAlert: isAlert,
-                    avatarUrl: member['avatar_url'] as String?,
+                    avatarUrl: avatar,
                     batteryLevel: lastEvent?['battery_level'] as num?,
                     vitals: vitals,
                     title: title,
@@ -2400,14 +2543,16 @@ class _NotificationsSheet extends StatelessWidget {
                     final createdAt = evt['created_at'] as String?;
                     print(evt);
                     print("evtevt");
+                    String dateStr = '';
                     String timeStr = '';
+
                     if (createdAt != null) {
                       try {
                         final dt = DateTime.parse(createdAt).toLocal();
-                        timeStr = DateFormat.jm().format(dt);
+                        dateStr = DateFormat('dd MMM yyyy').format(dt);
+                        timeStr = DateFormat('h:mm a').format(dt);
                       } catch (_) {}
                     }
-
                     IconData icon = Icons.notifications;
                     if (type == 'sos') icon = Icons.warning;
                     if (type == 'check_in') icon = Icons.how_to_reg;
@@ -2443,17 +2588,28 @@ class _NotificationsSheet extends StatelessWidget {
                       subtitle: desc.isNotEmpty
                           ? Text(
                               desc,
-                              maxLines: 1,
+                              maxLines: 3,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontSize: 11),
                             )
                           : null,
-                      trailing: Text(
-                        timeStr,
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey,
-                        ),
+                      trailing: Column(
+                        children: [
+                          Text(
+                            dateStr,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          Text(
+                            timeStr,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -3051,6 +3207,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                       ),
                     ),
                     onPressed: () async {
+                      print("isLoad$isLoad");
                       if (isLoad) return;
                       if (widget.profile == null) return;
                       setState(() {
@@ -3182,13 +3339,14 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                           nowUtc.isBefore(
                             scheduledAtUtc.add(const Duration(minutes: 1)),
                           );
-
+                      print("away11");
                       final isRecurring =
                           isWithin5MinEarly &&
                           (recurrence == 'daily' ||
                               recurrence == 'every_other_day' ||
                               recurrence == 'weekly' ||
                               recurrence == 'monthly');
+                      print("away12");
 
                       // ── Insert check_in ──────────────────────────────────────────────
                       await Supabase.instance.client.from('check_ins').insert({
@@ -3200,6 +3358,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                             ? "Scheduled check-in completed"
                             : "Manual check-in",
                       });
+                      print("away13");
 
                       // ── Insert well_event ────────────────────────────────────────────
                       await Supabase.instance.client
@@ -3219,6 +3378,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                             'longitude': lng,
                             'battery_level': level,
                           });
+                      print("away14");
 
                       // ── Compute next date if recurring ───────────────────────────────
                       // ❌ DELETE the old `final schedule = ...` fetch here — REMOVE IT
@@ -3279,6 +3439,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                             break;
                         }
                       }
+                      print("away15");
 
                       await Supabase.instance.client
                           .from('checkin_schedules')
@@ -3307,21 +3468,24 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                           )
                           .eq('id', widget.scheduleId);
                       if (!mounted) return;
+                      print("away15");
 
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            !isWithin5MinEarly
-                                ? "Manual check-in completed"
-                                : "Scheduled check-in completed",
-                          ),
-                        ),
-                      );
+                      // ScaffoldMessenger.of(context).showSnackBar(
+                      //   SnackBar(
+                      //     content: Text(
+                      //       !isWithin5MinEarly
+                      //           ? "Manual check-in completed"
+                      //           : "Scheduled check-in completed",
+                      //     ),
+                      //   ),
+                      // );
                       final safety = ref.invalidate(safetyRepositoryProvider);
 
                       final profile = await ref.read(
                         currentUserProfileProvider.future,
                       );
+                      print("away17");
+
                       if (profile == null) throw Exception('No profile');
                       final response = await Supabase.instance.client
                           .from('live_locations')
@@ -3340,7 +3504,10 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                           .from('family_members')
                           .select('user_id, role')
                           .eq('family_id', profile.familyId);
-
+                      print("away18");
+                      setState(() {
+                        isLoad = false;
+                      });
                       for (final m in members) {
                         final targetUserId = m['user_id'];
 
@@ -3359,9 +3526,12 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                               "action": "check_in",
                             },
                           );
+                          print("push-router123");
+
                           setState(() {
                             isLoad = false;
                           });
+                          print("away19");
                         } catch (e) {
                           print("Push failed: $e");
                         }
@@ -3604,6 +3774,285 @@ class _StepTile extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _GuidedSetupSheet extends StatefulWidget {
+  final VoidCallback onInviteMembers;
+  final VoidCallback onAddMedication;
+  final VoidCallback onOpenCommandCenter;
+  final VoidCallback onScheduleCheckIn;
+
+  const _GuidedSetupSheet({
+    required this.onInviteMembers,
+    required this.onAddMedication,
+    required this.onOpenCommandCenter,
+    required this.onScheduleCheckIn,
+  });
+
+  @override
+  State<_GuidedSetupSheet> createState() => _GuidedSetupSheetState();
+}
+
+class _GuidedSetupSheetState extends State<_GuidedSetupSheet> {
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.8,
+      minChildSize: 0.4,
+      maxChildSize: 0.9,
+      expand: false,
+      builder: (_, controller) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SingleChildScrollView(
+            controller: controller,
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Handle bar
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Header
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: ShieldColors.activeTeal.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.rocket_launch_rounded,
+                        color: ShieldColors.activeTeal,
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Set up your Shield',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: ShieldColors.textBody,
+                                ),
+                          ),
+                          Text(
+                            'A few steps to protect your family',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: ShieldColors.textLabel),
+                          ),
+                        ],
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: const Icon(
+                        Icons.close,
+                        color: Colors.grey,
+                        size: 20,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+
+                // Step cards
+                _SetupStepCard(
+                  index: 1,
+                  icon: Icons.person_add_alt_1,
+                  iconColor: Colors.blue,
+                  title: 'Invite Family Members',
+                  subtitle:
+                      'Add your family so they can check in and share their location with you.',
+                  actionLabel: 'Send Invite',
+                  onTap: widget.onInviteMembers,
+                ),
+                const SizedBox(height: 12),
+
+                _SetupStepCard(
+                  index: 2,
+                  icon: Icons.medication_rounded,
+                  iconColor: Colors.purple,
+                  title: 'Add Medications',
+                  subtitle:
+                      'Track medications and get countdown reminders for each dose.',
+                  actionLabel: 'Add Medication',
+                  onTap: widget.onAddMedication,
+                ),
+                const SizedBox(height: 12),
+                _SetupStepCard(
+                  index: 3,
+                  icon: Icons.schedule_sharp,
+                  iconColor: Colors.pink,
+                  title: 'Schedule a Check-In',
+                  subtitle:
+                      'Set a time for family members to confirm they\'re safe. You\'ll be alerted if they miss it.',
+                  actionLabel: 'Set Schedule',
+                  onTap: widget.onScheduleCheckIn,
+                ),
+                const SizedBox(height: 12),
+
+                _SetupStepCard(
+                  index: 4,
+                  icon: Icons.grid_view_rounded,
+                  iconColor: ShieldColors.activeTeal,
+                  title: 'Explore the Command Center',
+                  subtitle:
+                      'Set safe zones, schedules, check-ins, and more from the MENU.',
+                  actionLabel: 'Open Menu',
+                  onTap: widget.onOpenCommandCenter,
+                ),
+                const SizedBox(height: 20),
+
+                // Skip / do it later
+                Center(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(
+                      'I\'ll explore on my own',
+                      style: TextStyle(
+                        color: ShieldColors.textLabel,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SetupStepCard extends StatelessWidget {
+  final int index;
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final String actionLabel;
+  final VoidCallback onTap;
+
+  const _SetupStepCard({
+    required this.index,
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.actionLabel,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Step number badge
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '$index',
+                style: TextStyle(
+                  color: iconColor,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, color: iconColor, size: 18),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: Colors.grey.shade600,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: onTap,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: iconColor,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      actionLabel,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

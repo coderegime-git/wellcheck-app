@@ -172,19 +172,20 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         },
         //_pushSheet(context, const FamilyChatScreen(), true),
       ),
-      _CmdItem(
-        Icons.person_add,
-        'Invite',
-        'Add loved ones',
-        ShieldColors.activeTeal,
-        () {
-          context.pop();
-          showDialog(
-            context: context,
-            builder: (context) => const InviteMemberDialog(),
-          );
-        },
-      ),
+      if (widget.fromLeader == true)
+        _CmdItem(
+          Icons.person_add,
+          'Invite',
+          'Add loved ones',
+          ShieldColors.activeTeal,
+          () {
+            context.pop();
+            showDialog(
+              context: context,
+              builder: (context) => const InviteMemberDialog(),
+            );
+          },
+        ),
       _CmdItem(
         Icons.settings,
         'Profile',

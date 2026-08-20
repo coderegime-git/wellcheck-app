@@ -1201,7 +1201,14 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
                         ),
                       ),
                       child: setCheckIn
-                          ? const CircularProgressIndicator(color: Colors.white)
+                          ? Container(
+                              height: 25,
+                              width: 25,
+
+                              child: const CircularProgressIndicator(
+                                color: Colors.white,
+                              ),
+                            )
                           : Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [

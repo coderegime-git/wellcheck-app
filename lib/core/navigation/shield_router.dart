@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
 import 'package:well_check_v3/features/auth/welcome_screen.dart';
@@ -25,12 +27,23 @@ import 'package:well_check_v3/features/tools/sync_calendar_screen.dart';
 import 'package:well_check_v3/features/tools/safe_zone_screen.dart';
 
 import '../../features/auth/wellcheck_paywall_screen.dart';
+import '../../features/safety/services/pulse_service.dart';
 import '../../features/safety/services/purchase_services.dart';
 import '../security/biometric_screen.dart';
 
 part 'shield_router.g.dart';
 
-enum ShieldRole { leader, monitor, senior, student, pet, none }
+enum ShieldRole {
+  leader,
+  monitor,
+  senior,
+  student,
+  pet,
+  child,
+  parent,
+  other,
+  none,
+}
 
 @Riverpod(keepAlive: true)
 class UserRole extends _$UserRole {
@@ -71,21 +84,22 @@ GoRouter shieldRouter(Ref ref) {
     //   return null;
     // },
     redirect: (context, state) async {
-      final session = Supabase.instance.client.auth.currentSession;
-      final isLoggedIn = session != null;
-
-      final isOnAuthPage =
-          state.matchedLocation == '/' ||
-          state.matchedLocation == '/login' ||
-          state.matchedLocation == '/register';
-
-      final isOnOtp = state.matchedLocation.startsWith('/otp');
-      final isOnPaywall = state.matchedLocation == '/paywall';
-
-      if (isOnOtp) return null;
-
-      if (!isLoggedIn && !isOnAuthPage) return '/';
-      if (isLoggedIn && isOnAuthPage) return '/dashboard';
+      // final session = Supabase.instance.client.auth.currentSession;
+      // //final isLoggedIn = session != null;
+      // final prefs = await SharedPreferences.getInstance();
+      // final isLoggedIn = prefs.getBool('is_logged_in') ?? false;
+      // final isOnAuthPage =
+      //     state.matchedLocation == '/' ||
+      //     state.matchedLocation == '/login' ||
+      //     state.matchedLocation == '/register';
+      //
+      // final isOnOtp = state.matchedLocation.startsWith('/otp');
+      // final isOnPaywall = state.matchedLocation == '/paywall';
+      //
+      // if (isOnOtp) return null;
+      //
+      // if (!isLoggedIn && !isOnAuthPage) return '/';
+      // if (isLoggedIn && isOnAuthPage) return '/dashboard';
 
       // Pro gate — check entitlement before allowing dashboard access
       // if (isLoggedIn && !isOnPaywall) {
@@ -115,23 +129,48 @@ GoRouter shieldRouter(Ref ref) {
       //   if (!isPro) return '/paywall';
       // }
       // Pro gate — only leaders require subscription
+      final prefs = await SharedPreferences.getInstance();
+      final isLoggedIn = prefs.getBool('is_logged_in') ?? false;
+
+      debugPrint(
+        'REDIRECT — path: ${state.matchedLocation} isLoggedIn: $isLoggedIn',
+      );
+
+      final isOnAuthPage =
+          state.matchedLocation == '/' ||
+          state.matchedLocation == '/login' ||
+          state.matchedLocation == '/register';
+
+      final isOnOtp = state.matchedLocation.startsWith('/otp');
+      final isOnPaywall = state.matchedLocation == '/paywall';
+
+      if (isOnOtp) return null;
+
+      if (!isLoggedIn && !isOnAuthPage) return '/';
+      if (isLoggedIn && isOnAuthPage) return '/dashboard';
+
       if (isLoggedIn && !isOnPaywall) {
         final userId = Supabase.instance.client.auth.currentUser?.id;
+        debugPrint('REDIRECT — userId: $userId');
 
         if (userId != null) {
           try {
-            final member = await Supabase.instance.client
+            final members = await Supabase.instance.client
                 .from('family_members')
                 .select('role')
                 .eq('user_id', userId)
-                .maybeSingle();
-
-            // New user hasn't selected a role yet
-            if (member == null) {
+                .limit(1);
+            if (members.isEmpty) {
               return null;
             }
+            // No rows — new user
 
-            final role = member['role'];
+            // New user hasn't selected a role yet
+            // if (member == null) {
+            //   return null;
+            // }
+
+            final role = members.first['role'];
 
             print('User role: $role');
 
@@ -166,7 +205,7 @@ GoRouter shieldRouter(Ref ref) {
               }
             }
           } catch (e) {
-            print('Subscription check error: $e');
+            print('Subscription check errorr: $e');
             return null;
           }
         }
@@ -228,44 +267,55 @@ GoRouter shieldRouter(Ref ref) {
               builder: (context, ref, child) {
                 final role = ref.watch(userRoleProvider);
 
-                // If role is unset (cold start with persisted session), resolve it
-                if (role == ShieldRole.none) {
-                  return FutureBuilder(
-                    future: ref.read(currentUserProfileProvider.future),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Scaffold(
-                          body: Center(child: CircularProgressIndicator()),
-                        );
-                      }
+                if (role != ShieldRole.none) {
+                  return _dashboardForRole(role);
+                }
 
-                      final profile = snapshot.data;
+                // Resolve role from profile
+                return FutureBuilder(
+                  future: ref.read(currentUserProfileProvider.future),
+                  builder: (context, snapshot) {
+                    print(snapshot.connectionState);
+                    print("ssddsdds");
+
+                    debugPrint(
+                      'auth user: ${Supabase.instance.client.auth.currentUser?.id}',
+                    );
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Scaffold(
+                        body: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+
+                    final profile = snapshot.data;
+
+                    // ✅ No waiting, no retry — decide immediately
+                    WidgetsBinding.instance.addPostFrameCallback((_) async {
+                      if (!context.mounted) return;
+
+                      final user = Supabase.instance.client.auth.currentUser;
+
                       if (profile != null) {
                         final matchedRole = ShieldRole.values.firstWhere(
                           (r) => r.name == profile.role,
                           orElse: () => ShieldRole.none,
                         );
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          ref
-                              .read(userRoleProvider.notifier)
-                              .setRole(matchedRole);
-                        });
-                        // Return the correct dashboard immediately
-                        return _dashboardForRole(matchedRole);
-                      }
-
-                      // No profile — send to role selection
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        ref
+                            .read(userRoleProvider.notifier)
+                            .setRole(matchedRole);
+                        await SafeZoneService.clearZoneStatusCache();
+                      } else if (user == null) {
+                        GoRouter.of(context).go('/');
+                      } else {
                         GoRouter.of(context).go('/role-selection');
-                      });
-                      return const Scaffold(
-                        body: Center(child: CircularProgressIndicator()),
-                      );
-                    },
-                  );
-                }
+                      }
+                    });
 
-                return _dashboardForRole(role);
+                    return const Scaffold(
+                      body: Center(child: CircularProgressIndicator()),
+                    );
+                  },
+                );
               },
             ),
           );
@@ -282,8 +332,11 @@ Widget _dashboardForRole(ShieldRole role) {
     case ShieldRole.monitor:
       return const MonitorDashboard();
     case ShieldRole.senior:
+    case ShieldRole.parent:
+    case ShieldRole.other:
       return const SeniorHUD();
     case ShieldRole.student:
+    case ShieldRole.child:
       return const StudentDashboard();
     case ShieldRole.pet:
       return const PetDashboard();
@@ -292,23 +345,183 @@ Widget _dashboardForRole(ShieldRole role) {
   }
 }
 
+// class _AuthNotifier extends ChangeNotifier {
+//   late final StreamSubscription<AuthState> _sub;
+//
+//   _AuthNotifier() {
+//     _sub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+//       _handleAuthChange(data);
+//       notifyListeners();
+//     });
+//   }
+//
+//   Future<void> _handleAuthChange(AuthState data) async {
+//     final user = data.session?.user;
+//     final sharedSecureStorage = const FlutterSecureStorage(
+//       aOptions: AndroidOptions(encryptedSharedPreferences: true),
+//       iOptions: IOSOptions(
+//         accessibility: KeychainAccessibility.first_unlock,
+//         // ✅ This ensures token persists after logout and is accessible on first unlock
+//       ),
+//     );
+//     if (data.event == AuthChangeEvent.signedIn && user != null) {
+//       await PurchasesService.instance.identifyUser(user.id);
+//
+//       // ✅ Sync latest tokens on every signIn/tokenRefresh
+//       final session = data.session;
+//       if (session != null) {
+//         await sharedSecureStorage.write(
+//           key: 'supabase_refresh_token',
+//           value: session.refreshToken ?? '',
+//         );
+//         await sharedSecureStorage.write(
+//           key: 'supabase_access_token',
+//           value: session.accessToken,
+//         );
+//         await sharedSecureStorage.write(
+//           key: 'biometric_login_enabled',
+//           value: 'true',
+//         );
+//       }
+//     } else if (data.event == AuthChangeEvent.tokenRefreshed) {
+//       // ✅ Always keep tokens in sync when rotated
+//       final session = data.session;
+//       if (session != null) {
+//         await sharedSecureStorage.write(
+//           key: 'supabase_refresh_token',
+//           value: session.refreshToken ?? '',
+//         );
+//         await sharedSecureStorage.write(
+//           key: 'supabase_access_token',
+//           value: session.accessToken,
+//         );
+//       }
+//     } else if (data.event == AuthChangeEvent.signedOut) {
+//       debugPrint('SIGNED OUT EVENT — stack trace:');
+//       debugPrint(StackTrace.current.toString());
+//
+//       if (LogoutState.isLoggingOut) {
+//         debugPrint('Intentional logout — skipping');
+//         return;
+//       }
+//       //  final router = ref.read(shieldRouterProvider);
+//       // router.go('/');
+//     }
+//   }
+//
+//   @override
+//   void dispose() {
+//     _sub.cancel();
+//     super.dispose();
+//   }
+// }
 class _AuthNotifier extends ChangeNotifier {
   late final StreamSubscription<AuthState> _sub;
+  bool _initialEventSkipped = false; // ✅ add this
 
+  // _AuthNotifier() {
+  //   _sub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+  //     // ✅ Skip the first replayed event from rxdart startWith
+  //     if (!_initialEventSkipped) {
+  //       _initialEventSkipped = true;
+  //       debugPrint('[Auth] Skipping replayed event: ${data.event}');
+  //       notifyListeners();
+  //       return;
+  //     }
+  //     _handleAuthChange(data);
+  //     notifyListeners();
+  //   });
+  // }
   _AuthNotifier() {
+    final sharedSecureStorage = const FlutterSecureStorage(
+      aOptions: AndroidOptions(encryptedSharedPreferences: true),
+      iOptions: IOSOptions(
+        accessibility: KeychainAccessibility.first_unlock,
+        // ✅ This ensures token persists after logout and is accessible on first unlock
+      ),
+    );
     _sub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      _handleAuthChange(data);
+      final event = data.event;
+      final session = data.session;
+      debugPrint('[Auth Event] $event');
+
+      // ✅ Only sync tokens on signIn/refresh — ignore signedOut completely
+      if (event == AuthChangeEvent.signedIn ||
+          event == AuthChangeEvent.tokenRefreshed) {
+        if (session != null) {
+          sharedSecureStorage.write(
+            key: 'supabase_refresh_token',
+            value: session.refreshToken ?? '',
+          );
+          sharedSecureStorage.write(
+            key: 'supabase_access_token',
+            value: session.accessToken,
+          );
+          sharedSecureStorage.write(
+            key: 'biometric_login_enabled',
+            value: 'true',
+          );
+          if (event == AuthChangeEvent.signedIn) {
+            PurchasesService.instance.identifyUser(session.user.id);
+          }
+        }
+      }
+      // ✅ No signedOut handling — logout is manual navigation only
       notifyListeners();
     });
   }
 
   Future<void> _handleAuthChange(AuthState data) async {
     final user = data.session?.user;
+    final session = data.session;
+    final sharedSecureStorage = const FlutterSecureStorage(
+      aOptions: AndroidOptions(encryptedSharedPreferences: true),
+      iOptions: IOSOptions(
+        accessibility: KeychainAccessibility.first_unlock,
+        // ✅ This ensures token persists after logout and is accessible on first unlock
+      ),
+    );
     if (data.event == AuthChangeEvent.signedIn && user != null) {
-      // Tie RC purchases to this Supabase user ID
       await PurchasesService.instance.identifyUser(user.id);
+
+      if (session != null) {
+        await sharedSecureStorage.write(
+          key: 'supabase_refresh_token',
+          value: session.refreshToken ?? '',
+        );
+        await sharedSecureStorage.write(
+          key: 'supabase_access_token',
+          value: session.accessToken,
+        );
+        await sharedSecureStorage.write(
+          key: 'biometric_login_enabled',
+          value: 'true',
+        );
+        debugPrint('TOKEN SYNCED on signedIn: ${session.refreshToken}');
+      }
+    } else if (data.event == AuthChangeEvent.tokenRefreshed) {
+      if (session != null) {
+        await sharedSecureStorage.write(
+          key: 'supabase_refresh_token',
+          value: session.refreshToken ?? '',
+        );
+        await sharedSecureStorage.write(
+          key: 'supabase_access_token',
+          value: session.accessToken,
+        );
+        debugPrint('TOKEN SYNCED on tokenRefreshed: ${session.refreshToken}');
+      }
     } else if (data.event == AuthChangeEvent.signedOut) {
-      await PurchasesService.instance.logOut();
+      if (LogoutState.isLoggingOut) {
+        debugPrint('[Auth] Intentional logout — skipping RC logout');
+        return;
+      }
+      // Real session expiry
+      try {
+        await PurchasesService.instance.logOut();
+      } catch (e) {
+        debugPrint('[RC] logOut skipped: $e');
+      }
     }
   }
 
@@ -317,4 +530,8 @@ class _AuthNotifier extends ChangeNotifier {
     _sub.cancel();
     super.dispose();
   }
+}
+
+class LogoutState {
+  static bool isLoggingOut = false;
 }

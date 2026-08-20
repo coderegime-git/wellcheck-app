@@ -22,7 +22,7 @@ class AuthRepository {
   }
 
   Future<void> signInWithPassword(String email, String password) async {
-    //
+    print("passwordpassword");
     await _supabase.auth.signInWithPassword(
       email: email,
       password: password,

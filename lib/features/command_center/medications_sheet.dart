@@ -167,14 +167,34 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
         );
       }
 
-      await Supabase.instance.client.from('dose_logs').insert({
-        'medication_id': med.id,
-        'user_id': med.assignedTo,
-        'family_id': profile.familyId,
-        'scheduled_at': now.toIso8601String(),
-        'taken_at': now.toIso8601String(),
-        'status': 'taken',
-      });
+      // Check if there is a missed dose for this medication
+      final missed = await Supabase.instance.client
+          .from('dose_logs')
+          .select()
+          .eq('medication_id', med.id)
+          .eq('user_id', med.assignedTo)
+          .eq('status', 'missed')
+          .order('scheduled_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (missed != null) {
+        // Update the missed log instead of creating a new one
+        await Supabase.instance.client
+            .from('dose_logs')
+            .update({'status': 'taken', 'taken_at': now.toIso8601String()})
+            .eq('id', missed['id']);
+      } else {
+        // Normal logging when there was no missed dose
+        await Supabase.instance.client.from('dose_logs').insert({
+          'medication_id': med.id,
+          'user_id': med.assignedTo,
+          'family_id': profile.familyId,
+          'scheduled_at': now.toIso8601String(),
+          'taken_at': now.toIso8601String(),
+          'status': 'taken',
+        });
+      }
       final medData = await Supabase.instance.client
           .from('medications')
           .select('scheduled_at, recurrence, days_of_week')
@@ -462,6 +482,8 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
           Expanded(
             child: medicationsAsync.when(
               data: (meds) {
+                print("medsmeds");
+                print(meds);
                 if (meds.isEmpty) {
                   return Center(
                     child: Column(
@@ -475,7 +497,7 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
                           ),
                         const SizedBox(height: 16),
 
-                          const Text(
+                        const Text(
                           'No medications scheduled yet.',
                           style: TextStyle(color: Colors.grey, fontSize: 16),
                         ),
@@ -504,14 +526,14 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
                                 m.assignedTo == profile.value?.userId,
                           )
                           .toList();
-if(active.isEmpty){
-  return  Center(
-    child: const Text(
-      'No medications scheduled yet.',
-      style: TextStyle(color: Colors.grey, fontSize: 16),
-    ),
-  );
-}
+                if (active.isEmpty) {
+                  return Center(
+                    child: const Text(
+                      'No medications scheduled yet.',
+                      style: TextStyle(color: Colors.grey, fontSize: 16),
+                    ),
+                  );
+                }
                 final inactive = isLeaderOrMonitor
                     ? meds.where((m) => !m.isActive).toList()
                     : meds
@@ -694,17 +716,15 @@ class MedicationCard extends ConsumerWidget {
     bool isTakenToday = false;
 
     final medicationLogs = logs.where(
-          (l) =>
-      l.medicationId == med.id &&
-          l.status == 'taken' &&
-          l.takenAt != null,
+      (l) =>
+          l.medicationId == med.id && l.status == 'taken' && l.takenAt != null,
     );
 
     switch (med.recurrence) {
       case 'daily':
         isTakenToday = medicationLogs.any(
-              (log) =>
-          log.takenAt!.year == now.year &&
+          (log) =>
+              log.takenAt!.year == now.year &&
               log.takenAt!.month == now.month &&
               log.takenAt!.day == now.day,
         );
@@ -713,68 +733,54 @@ class MedicationCard extends ConsumerWidget {
       case 'every_other_day':
         final start = med.startDate ?? now;
 
-        final diffDays =
-            now.difference(start).inDays;
+        final diffDays = now.difference(start).inDays;
 
-        final shouldTakeToday =
-            diffDays % 2 == 0;
+        final shouldTakeToday = diffDays % 2 == 0;
 
         isTakenToday =
             shouldTakeToday &&
-                medicationLogs.any(
-                      (log) =>
+            medicationLogs.any(
+              (log) =>
                   log.takenAt!.year == now.year &&
-                      log.takenAt!.month == now.month &&
-                      log.takenAt!.day == now.day,
-                );
+                  log.takenAt!.month == now.month &&
+                  log.takenAt!.day == now.day,
+            );
         break;
 
       case 'weekly':
         isTakenToday = medicationLogs.any((log) {
           final d = log.takenAt!;
-          return d.weekday == now.weekday &&
-              d.year == now.year;
+          return d.weekday == now.weekday && d.year == now.year;
         });
         break;
 
       case 'monthly':
         isTakenToday = medicationLogs.any((log) {
           final d = log.takenAt!;
-          return d.day == now.day &&
-              d.month == now.month &&
-              d.year == now.year;
+          return d.day == now.day && d.month == now.month && d.year == now.year;
         });
         break;
 
       default:
         isTakenToday = false;
-    }final nextDose = med.nextDoseToday;
+    }
+    final nextDose = med.nextDoseToday;
 
-    final statusColor =
-    isTakenToday
+    final statusColor = isTakenToday
         ? ShieldColors.safeZoneGreen
         : nextDose == null
         ? Colors.grey
-        : nextDose
-        .difference(DateTime.now())
-        .inMinutes <
-        0
+        : nextDose.difference(DateTime.now()).inMinutes < 0
         ? ShieldColors.urgentRed
         : Colors.amber.shade700;
 
-    final nextLabel =
-    isTakenToday
+    final nextLabel = isTakenToday
         ? 'Taken Today'
         : med.scheduleTimes.isEmpty
         ? med.frequency
         : nextDose == null
         ? 'Done for today'
-        : nextDose
-        .difference(
-      DateTime.now(),
-    )
-        .inMinutes <
-        0
+        : nextDose.difference(DateTime.now()).inMinutes < 0
         ? 'Overdue'
         : 'Next: ${DateFormat.jm().format(nextDose)}';
 
@@ -882,7 +888,32 @@ class MedicationCard extends ConsumerWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 5),
+              RichText(
+                text: TextSpan(
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: med.isActive ? ShieldColors.textBody : Colors.grey,
+                  ),
+                  children: [
+                    TextSpan(
+                      text: 'Assigned to: ',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.normal,
+                      ),
+                    ),
+                    TextSpan(
+                      text: med.assignedName,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 5),
 
               // Dosage + schedule
               Text(
@@ -949,35 +980,35 @@ class MedicationCard extends ConsumerWidget {
               //       ),
               //     ),
               //   ),
-              if (med.isActive && !isTakenToday )
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: isLogging ? null : onLogDose,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: ShieldColors.activeTeal,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: ShieldDesign.roundedTwelve,
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    icon: isLogging
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.check_circle, size: 20),
-                    label: Text(
-                      isLogging ? 'Logging...' : 'Log Dose Taken',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
+              // if (med.isActive && !isTakenToday)
+              //   SizedBox(
+              //     width: double.infinity,
+              //     child: ElevatedButton.icon(
+              //       onPressed: isLogging ? null : onLogDose,
+              //       style: ElevatedButton.styleFrom(
+              //         backgroundColor: ShieldColors.activeTeal,
+              //         foregroundColor: Colors.white,
+              //         shape: RoundedRectangleBorder(
+              //           borderRadius: ShieldDesign.roundedTwelve,
+              //         ),
+              //         padding: const EdgeInsets.symmetric(vertical: 12),
+              //       ),
+              //       icon: isLogging
+              //           ? const SizedBox(
+              //         width: 18,
+              //         height: 18,
+              //         child: CircularProgressIndicator(
+              //           strokeWidth: 2,
+              //           color: Colors.white,
+              //         ),
+              //       )
+              //           : const Icon(Icons.check_circle, size: 20),
+              //       label: Text(
+              //         isLogging ? 'Logging...' : 'Log Dose Taken',
+              //         style: const TextStyle(fontWeight: FontWeight.bold),
+              //       ),
+              //     ),
+              //   ),
             ],
           ),
         ),

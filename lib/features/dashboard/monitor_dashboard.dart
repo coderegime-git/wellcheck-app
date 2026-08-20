@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:battery_plus/battery_plus.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -456,9 +457,10 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                             backgroundColor:
                                                 ShieldColors.activeTeal,
 
-                                            backgroundImage: NetworkImage(
-                                              profile!.avatarUrl ?? "",
-                                            ),
+                                            backgroundImage:
+                                                CachedNetworkImageProvider(
+                                                  '${profile!.avatarUrl}?t=${DateTime.now().millisecondsSinceEpoch}',
+                                                ),
                                           )
                                         : CircleAvatar(
                                             backgroundColor:
@@ -611,9 +613,11 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                           )
                                           .toList();
 
-                                      if (recentSos.isEmpty)
+                                      if (recentSos.isEmpty) {
                                         return const SizedBox.shrink();
-
+                                      }
+                                      print(recentSos);
+                                      print("recentSos");
                                       return Container(
                                         margin: const EdgeInsets.only(
                                           bottom: 32,
@@ -629,28 +633,50 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                                 .withValues(alpha: 0.3),
                                           ),
                                         ),
-                                        child: Row(
+                                        child: Column(
                                           children: [
-                                            const Icon(
-                                              Icons
-                                                  .notifications_active_outlined,
-                                              color: ShieldColors.urgentRed,
-                                              size: 20,
+                                            Text(
+                                              'ACTIVE ALERT: Immediate Attention Required',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodyMedium
+                                                  ?.copyWith(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
                                             ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: Text(
-                                                'ACTIVE ALERT: Immediate Attention Required',
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .bodyMedium
-                                                    ?.copyWith(
-                                                      color: ShieldColors
-                                                          .urgentRed,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                    ),
-                                              ),
+                                            SizedBox(height: 5),
+                                            Row(
+                                              children: [
+                                                const Icon(
+                                                  Icons
+                                                      .notifications_active_outlined,
+                                                  color: ShieldColors.urgentRed,
+                                                  size: 20,
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: Text(
+                                                    (recentSos.first['user_name'] ??
+                                                                '')
+                                                            .toString()
+                                                            .trim()
+                                                            .isNotEmpty
+                                                        ? '${recentSos.first['user_name']} triggered an emergency alert'
+                                                        : 'Someone triggered an emergency alert',
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .bodyMedium
+                                                        ?.copyWith(
+                                                          fontSize: 14,
+                                                          color: ShieldColors
+                                                              .urgentRed,
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                        ),
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ],
                                         ),
@@ -1061,6 +1087,74 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                                                     ),
                                                                   ),
                                                                 ],
+                                                                if (med.doctor !=
+                                                                    null) ...[
+                                                                  SizedBox(
+                                                                    height: 5,
+                                                                  ),
+
+                                                                  RichText(
+                                                                    text: TextSpan(
+                                                                      style: TextStyle(
+                                                                        color: Colors
+                                                                            .blueGrey,
+                                                                        fontSize:
+                                                                            12,
+                                                                        fontWeight:
+                                                                            FontWeight.w500,
+                                                                      ),
+                                                                      children: [
+                                                                        TextSpan(
+                                                                          text:
+                                                                              'Prescribing doctor: ',
+                                                                        ),
+                                                                        TextSpan(
+                                                                          text:
+                                                                              med.doctor,
+                                                                          style: TextStyle(
+                                                                            fontWeight:
+                                                                                FontWeight.bold,
+                                                                          ),
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                                if (med.instructions !=
+                                                                    null) ...[
+                                                                  SizedBox(
+                                                                    height: 5,
+                                                                  ),
+                                                                  RichText(
+                                                                    text: TextSpan(
+                                                                      style: TextStyle(
+                                                                        color: Colors
+                                                                            .blueGrey,
+                                                                        fontSize:
+                                                                            12,
+                                                                        fontWeight:
+                                                                            FontWeight.w500,
+                                                                      ),
+                                                                      children: [
+                                                                        TextSpan(
+                                                                          text:
+                                                                              'Instruction: ',
+                                                                        ),
+                                                                        TextSpan(
+                                                                          text:
+                                                                              med.instructions,
+                                                                          style: TextStyle(
+                                                                            fontWeight:
+                                                                                FontWeight.bold,
+                                                                          ),
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                                SizedBox(
+                                                                  height: 5,
+                                                                ),
 
                                                                 // if (nextDose !=
                                                                 //     null) ...[
@@ -1826,11 +1920,14 @@ class _MonitorNotificationsSheet extends StatelessWidget {
                     final createdAt = evt['created_at'] as String?;
                     print(evt);
                     print("evtevt");
+                    String dateStr = '';
                     String timeStr = '';
+
                     if (createdAt != null) {
                       try {
                         final dt = DateTime.parse(createdAt).toLocal();
-                        timeStr = DateFormat.jm().format(dt);
+                        dateStr = DateFormat('dd MMM yyyy').format(dt);
+                        timeStr = DateFormat('h:mm a').format(dt);
                       } catch (_) {}
                     }
 
@@ -1874,7 +1971,7 @@ class _MonitorNotificationsSheet extends StatelessWidget {
                             )
                           : null,
                       trailing: Text(
-                        timeStr,
+                        '$dateStr - $timeStr',
                         style: const TextStyle(
                           fontSize: 10,
                           color: Colors.grey,
@@ -2886,7 +2983,8 @@ class _LiveMembersMapState extends State<LiveMembersMap> {
     }
 
     final first = filteredLocations.first;
-
+    print("filteredLocations");
+    print(filteredLocations);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 0),
       height: 280,

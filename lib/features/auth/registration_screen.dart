@@ -15,28 +15,37 @@ class RegistrationScreen extends ConsumerStatefulWidget {
 class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
   final _emailController = TextEditingController();
   bool _isLoading = false;
+  final _formKey = GlobalKey<FormState>();
 
   Future<void> _launchUrl(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    try {
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      print(e.toString());
     }
   }
 
   Future<void> _handleRegister() async {
     setState(() => _isLoading = true);
     try {
-      final authRepo = ref.read(authRepositoryProvider);
-      await authRepo.signInWithMagicLink(_emailController.text.trim(), '');
+      if (_formKey.currentState!.validate()) {
+        final authRepo = ref.read(authRepositoryProvider);
+        await authRepo.signInWithMagicLink(_emailController.text.trim(), '');
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registration PIN sent to your email.')),
-        );
-        // Force navigate to OTP verification view with the email payload
-        context.push(
-          '/otp?email=${Uri.encodeComponent(_emailController.text.trim())}',
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Registration PIN sent to your email.'),
+            ),
+          );
+          // Force navigate to OTP verification view with the email payload
+          context.push(
+            '/otp?email=${Uri.encodeComponent(_emailController.text.trim())}',
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -47,6 +56,9 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
               'Too many attempts. Please wait a few minutes before trying again.';
         } else if (e.toString().contains('Invalid email')) {
           errorMessage = 'Please enter a valid email address.';
+        } else if (e.toString().contains('over_email_send_rate_limit')) {
+          errorMessage =
+              'Too many attempts. Please wait a few minutes before trying again';
         } else if (e.toString().toLowerCase().contains('no address')) {
           errorMessage = 'No internet connection. Please check your network.';
         }
@@ -71,92 +83,111 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Secure Your Family',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: ShieldColors.activeTeal,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Secure Your Family',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: ShieldColors.activeTeal,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Initialize your family shield with an encrypted root account.',
-              style: TextStyle(color: ShieldColors.textLabel),
-            ),
-            const SizedBox(height: 32),
-            TextField(
-              controller: _emailController,
-              decoration: const InputDecoration(
-                labelText: 'EMAIL ADDRESS',
-                prefixIcon: Icon(Icons.email_outlined),
+              const SizedBox(height: 8),
+              const Text(
+                'Initialize your family shield with an encrypted root account.',
+                style: TextStyle(color: ShieldColors.textLabel),
               ),
-              keyboardType: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 32),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _handleRegister,
-                child: _isLoading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
+              const SizedBox(height: 32),
+              TextFormField(
+                controller: _emailController,
+                decoration: const InputDecoration(
+                  labelText: 'EMAIL ADDRESS',
+                  prefixIcon: Icon(Icons.email_outlined),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Please enter your email address';
+                  }
+
+                  final emailRegex = RegExp(
+                    r'^[\w\-.]+@([\w-]+\.)+[\w-]{2,4}$',
+                  );
+
+                  if (!emailRegex.hasMatch(value.trim())) {
+                    return 'Please enter a valid email address';
+                  }
+
+                  return null;
+                },
+                keyboardType: TextInputType.emailAddress,
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _handleRegister,
+                  child: _isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text('CREATE ACCOUNT VIA MAGIC LINK'),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Center(
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  children: [
+                    const Text(
+                      'By creating an account, you agree to our ',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    GestureDetector(
+                      onTap: () => _launchUrl(
+                        'https://well-check.com/terms-conditions/',
+                      ),
+                      child: const Text(
+                        'Terms of Service',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: ShieldColors.activeTeal,
+                          decoration: TextDecoration.underline,
                         ),
-                      )
-                    : const Text('CREATE ACCOUNT VIA MAGIC LINK'),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Center(
-              child: Wrap(
-                alignment: WrapAlignment.center,
-                children: [
-                  const Text(
-                    'By creating an account, you agree to our ',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  GestureDetector(
-                    onTap: () =>
-                        _launchUrl('https://well-check.com/terms-conditions/'),
-                    child: const Text(
-                      'Terms of Service',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: ShieldColors.activeTeal,
-                        decoration: TextDecoration.underline,
                       ),
                     ),
-                  ),
-                  const Text(
-                    ' and ',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  GestureDetector(
-                    onTap: () =>
-                        _launchUrl('https://well-check.com/privacy-policy/'),
-                    child: const Text(
-                      'Privacy Policy',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: ShieldColors.activeTeal,
-                        decoration: TextDecoration.underline,
+                    const Text(
+                      ' and ',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    GestureDetector(
+                      onTap: () =>
+                          _launchUrl('https://well-check.com/privacy-policy/'),
+                      child: const Text(
+                        'Privacy Policy',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: ShieldColors.activeTeal,
+                          decoration: TextDecoration.underline,
+                        ),
                       ),
                     ),
-                  ),
-                  const Text(
-                    '.',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
+                    const Text(
+                      '.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

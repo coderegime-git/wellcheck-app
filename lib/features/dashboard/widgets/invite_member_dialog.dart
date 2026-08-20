@@ -38,8 +38,7 @@ class _InviteMemberDialogState extends ConsumerState<InviteMemberDialog> {
       // 1. Check RevenueCat plan
       final customerInfo = await Purchases.getCustomerInfo();
       final active = customerInfo.entitlements.active;
-      print(active);
-      print("activeactive");
+
       _hasPremium = active.containsKey('WellCheck Premium');
       _hasBasic = active.containsKey('WellCheck Pro');
 
@@ -84,16 +83,23 @@ class _InviteMemberDialogState extends ConsumerState<InviteMemberDialog> {
   List<DropdownMenuItem<String>> get _allowedRoles {
     if (_hasBasic && !_hasPremium) {
       return const [
+        DropdownMenuItem(value: 'parent', child: Text('Parent')),
+
         DropdownMenuItem(value: 'senior', child: Text('Elder / Senior')),
         DropdownMenuItem(value: 'student', child: Text('Student')),
+        DropdownMenuItem(value: 'child', child: Text('Child')),
+        DropdownMenuItem(value: 'other', child: Text('Other')),
         // DropdownMenuItem(value: 'pet', child: Text('Pet Tracker')),
       ];
     }
     // Premium gets all roles
     return const [
+      DropdownMenuItem(value: 'parent', child: Text('Parent')),
       DropdownMenuItem(value: 'monitor', child: Text('Monitor (Co-Parent)')),
       DropdownMenuItem(value: 'senior', child: Text('Elder / Senior')),
       DropdownMenuItem(value: 'student', child: Text('Student')),
+      DropdownMenuItem(value: 'child', child: Text('Child')),
+      DropdownMenuItem(value: 'other', child: Text('Other')),
       //  DropdownMenuItem(value: 'pet', child: Text('Pet Tracker')),
     ];
   }

@@ -1,350 +1,64 @@
 PODS:
-  - app_links (7.0.0):
-    - Flutter
-  - app_settings (6.1.2):
-    - Flutter
-  - audioplayers_darwin (0.0.1):
-    - Flutter
-    - FlutterMacOS
-  - background_fetch (1.6.2):
-    - Flutter
-    - TSBackgroundFetch (~> 4.1.0)
-  - battery_plus (1.0.0):
-    - Flutter
-  - CwlCatchException (2.2.1):
-    - CwlCatchExceptionSupport (~> 2.2.1)
-  - CwlCatchExceptionSupport (2.2.1)
   - device_calendar (0.0.1):
     - Flutter
-  - device_info_plus (0.0.1):
-    - Flutter
-  - DKImagePickerController/Core (4.3.9):
-    - DKImagePickerController/ImageDataManager
-    - DKImagePickerController/Resource
-  - DKImagePickerController/ImageDataManager (4.3.9)
-  - DKImagePickerController/PhotoGallery (4.3.9):
-    - DKImagePickerController/Core
-    - DKPhotoGallery
-  - DKImagePickerController/Resource (4.3.9)
-  - DKPhotoGallery (0.0.19):
-    - DKPhotoGallery/Core (= 0.0.19)
-    - DKPhotoGallery/Model (= 0.0.19)
-    - DKPhotoGallery/Preview (= 0.0.19)
-    - DKPhotoGallery/Resource (= 0.0.19)
-    - SDWebImage
-    - SwiftyGif
-  - DKPhotoGallery/Core (0.0.19):
-    - DKPhotoGallery/Model
-    - DKPhotoGallery/Preview
-    - SDWebImage
-    - SwiftyGif
-  - DKPhotoGallery/Model (0.0.19):
-    - SDWebImage
-    - SwiftyGif
-  - DKPhotoGallery/Preview (0.0.19):
-    - DKPhotoGallery/Model
-    - DKPhotoGallery/Resource
-    - SDWebImage
-    - SwiftyGif
-  - DKPhotoGallery/Resource (0.0.19):
-    - SDWebImage
-    - SwiftyGif
-  - file_picker (0.0.1):
-    - DKImagePickerController/PhotoGallery
-    - Flutter
-  - Firebase/CoreOnly (11.15.0):
-    - FirebaseCore (~> 11.15.0)
-  - Firebase/Messaging (11.15.0):
-    - Firebase/CoreOnly
-    - FirebaseMessaging (~> 11.15.0)
-  - firebase_core (3.15.2):
-    - Firebase/CoreOnly (= 11.15.0)
-    - Flutter
-  - firebase_messaging (15.2.10):
-    - Firebase/Messaging (= 11.15.0)
-    - firebase_core
-    - Flutter
-  - FirebaseCore (11.15.0):
-    - FirebaseCoreInternal (~> 11.15.0)
-    - GoogleUtilities/Environment (~> 8.1)
-    - GoogleUtilities/Logger (~> 8.1)
-  - FirebaseCoreInternal (11.15.0):
-    - "GoogleUtilities/NSData+zlib (~> 8.1)"
-  - FirebaseInstallations (11.15.0):
-    - FirebaseCore (~> 11.15.0)
-    - GoogleUtilities/Environment (~> 8.1)
-    - GoogleUtilities/UserDefaults (~> 8.1)
-    - PromisesObjC (~> 2.4)
-  - FirebaseMessaging (11.15.0):
-    - FirebaseCore (~> 11.15.0)
-    - FirebaseInstallations (~> 11.0)
-    - GoogleDataTransport (~> 10.0)
-    - GoogleUtilities/AppDelegateSwizzler (~> 8.1)
-    - GoogleUtilities/Environment (~> 8.1)
-    - GoogleUtilities/Reachability (~> 8.1)
-    - GoogleUtilities/UserDefaults (~> 8.1)
-    - nanopb (~> 3.30910.0)
   - Flutter (1.0.0)
   - flutter_background_service_ios (0.0.3):
     - Flutter
   - flutter_local_notifications (0.0.1):
     - Flutter
-  - flutter_secure_storage_darwin (10.0.0):
-    - Flutter
-    - FlutterMacOS
-  - flutter_timezone (0.0.1):
-    - Flutter
   - flutter_tts (0.0.1):
     - Flutter
-  - geolocator_apple (1.2.0):
-    - Flutter
-    - FlutterMacOS
-  - GoogleDataTransport (10.1.0):
-    - nanopb (~> 3.30910.0)
-    - PromisesObjC (~> 2.4)
-  - GoogleUtilities/AppDelegateSwizzler (8.1.1):
-    - GoogleUtilities/Environment
-    - GoogleUtilities/Logger
-    - GoogleUtilities/Network
-    - GoogleUtilities/Privacy
-  - GoogleUtilities/Environment (8.1.1):
-    - GoogleUtilities/Privacy
-  - GoogleUtilities/Logger (8.1.1):
-    - GoogleUtilities/Environment
-    - GoogleUtilities/Privacy
-  - GoogleUtilities/Network (8.1.1):
-    - GoogleUtilities/Logger
-    - "GoogleUtilities/NSData+zlib"
-    - GoogleUtilities/Privacy
-    - GoogleUtilities/Reachability
-  - "GoogleUtilities/NSData+zlib (8.1.1)":
-    - GoogleUtilities/Privacy
-  - GoogleUtilities/Privacy (8.1.1)
-  - GoogleUtilities/Reachability (8.1.1):
-    - GoogleUtilities/Logger
-    - GoogleUtilities/Privacy
-  - GoogleUtilities/UserDefaults (8.1.1):
-    - GoogleUtilities/Logger
-    - GoogleUtilities/Privacy
   - health (13.3.1):
     - Flutter
-  - image_picker_ios (0.0.1):
-    - Flutter
-  - local_auth_darwin (0.0.1):
-    - Flutter
-    - FlutterMacOS
-  - nanopb (3.30910.0):
-    - nanopb/decode (= 3.30910.0)
-    - nanopb/encode (= 3.30910.0)
-  - nanopb/decode (3.30910.0)
-  - nanopb/encode (3.30910.0)
   - ObjectBox (4.4.1)
   - objectbox_flutter_libs (0.0.1):
     - Flutter
     - ObjectBox (= 4.4.1)
-  - package_info_plus (0.4.5):
-    - Flutter
   - permission_handler_apple (9.3.0):
-    - Flutter
-  - PromisesObjC (2.4.1)
-  - purchases_flutter (10.2.3):
-    - Flutter
-    - PurchasesHybridCommon (= 18.14.1)
-  - purchases_ui_flutter (10.2.3):
-    - Flutter
-    - PurchasesHybridCommonUI (= 18.14.1)
-  - PurchasesHybridCommon (18.14.1):
-    - RevenueCat (= 5.78.0)
-  - PurchasesHybridCommonUI (18.14.1):
-    - PurchasesHybridCommon (= 18.14.1)
-    - RevenueCatUI (= 5.78.0)
-  - RevenueCat (5.78.0)
-  - RevenueCatUI (5.78.0):
-    - RevenueCat (= 5.78.0)
-  - SDWebImage (5.21.7):
-    - SDWebImage/Core (= 5.21.7)
-  - SDWebImage/Core (5.21.7)
-  - shared_preferences_foundation (0.0.1):
-    - Flutter
-    - FlutterMacOS
-  - speech_to_text (7.2.0):
-    - CwlCatchException
-    - Flutter
-    - FlutterMacOS
-  - sqflite_darwin (0.0.4):
-    - Flutter
-    - FlutterMacOS
-  - SwiftyGif (5.4.5)
-  - TSBackgroundFetch (4.1.1)
-  - url_launcher_ios (0.0.1):
     - Flutter
 
 DEPENDENCIES:
-  - app_links (from `.symlinks/plugins/app_links/ios`)
-  - app_settings (from `.symlinks/plugins/app_settings/ios`)
-  - audioplayers_darwin (from `.symlinks/plugins/audioplayers_darwin/darwin`)
-  - background_fetch (from `.symlinks/plugins/background_fetch/ios`)
-  - battery_plus (from `.symlinks/plugins/battery_plus/ios`)
   - device_calendar (from `.symlinks/plugins/device_calendar/ios`)
-  - device_info_plus (from `.symlinks/plugins/device_info_plus/ios`)
-  - file_picker (from `.symlinks/plugins/file_picker/ios`)
-  - firebase_core (from `.symlinks/plugins/firebase_core/ios`)
-  - firebase_messaging (from `.symlinks/plugins/firebase_messaging/ios`)
   - Flutter (from `Flutter`)
   - flutter_background_service_ios (from `.symlinks/plugins/flutter_background_service_ios/ios`)
   - flutter_local_notifications (from `.symlinks/plugins/flutter_local_notifications/ios`)
-  - flutter_secure_storage_darwin (from `.symlinks/plugins/flutter_secure_storage_darwin/darwin`)
-  - flutter_timezone (from `.symlinks/plugins/flutter_timezone/ios`)
   - flutter_tts (from `.symlinks/plugins/flutter_tts/ios`)
-  - geolocator_apple (from `.symlinks/plugins/geolocator_apple/darwin`)
   - health (from `.symlinks/plugins/health/ios`)
-  - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
-  - local_auth_darwin (from `.symlinks/plugins/local_auth_darwin/darwin`)
   - objectbox_flutter_libs (from `.symlinks/plugins/objectbox_flutter_libs/ios`)
-  - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
   - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
-  - purchases_flutter (from `.symlinks/plugins/purchases_flutter/ios`)
-  - purchases_ui_flutter (from `.symlinks/plugins/purchases_ui_flutter/ios`)
-  - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
-  - speech_to_text (from `.symlinks/plugins/speech_to_text/darwin`)
-  - sqflite_darwin (from `.symlinks/plugins/sqflite_darwin/darwin`)
-  - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
 
 SPEC REPOS:
   trunk:
-    - CwlCatchException
-    - CwlCatchExceptionSupport
-    - DKImagePickerController
-    - DKPhotoGallery
-    - Firebase
-    - FirebaseCore
-    - FirebaseCoreInternal
-    - FirebaseInstallations
-    - FirebaseMessaging
-    - GoogleDataTransport
-    - GoogleUtilities
-    - nanopb
     - ObjectBox
-    - PromisesObjC
-    - PurchasesHybridCommon
-    - PurchasesHybridCommonUI
-    - RevenueCat
-    - RevenueCatUI
-    - SDWebImage
-    - SwiftyGif
-    - TSBackgroundFetch
 
 EXTERNAL SOURCES:
-  app_links:
-    :path: ".symlinks/plugins/app_links/ios"
-  app_settings:
-    :path: ".symlinks/plugins/app_settings/ios"
-  audioplayers_darwin:
-    :path: ".symlinks/plugins/audioplayers_darwin/darwin"
-  background_fetch:
-    :path: ".symlinks/plugins/background_fetch/ios"
-  battery_plus:
-    :path: ".symlinks/plugins/battery_plus/ios"
   device_calendar:
     :path: ".symlinks/plugins/device_calendar/ios"
-  device_info_plus:
-    :path: ".symlinks/plugins/device_info_plus/ios"
-  file_picker:
-    :path: ".symlinks/plugins/file_picker/ios"
-  firebase_core:
-    :path: ".symlinks/plugins/firebase_core/ios"
-  firebase_messaging:
-    :path: ".symlinks/plugins/firebase_messaging/ios"
   Flutter:
     :path: Flutter
   flutter_background_service_ios:
     :path: ".symlinks/plugins/flutter_background_service_ios/ios"
   flutter_local_notifications:
     :path: ".symlinks/plugins/flutter_local_notifications/ios"
-  flutter_secure_storage_darwin:
-    :path: ".symlinks/plugins/flutter_secure_storage_darwin/darwin"
-  flutter_timezone:
-    :path: ".symlinks/plugins/flutter_timezone/ios"
   flutter_tts:
     :path: ".symlinks/plugins/flutter_tts/ios"
-  geolocator_apple:
-    :path: ".symlinks/plugins/geolocator_apple/darwin"
   health:
     :path: ".symlinks/plugins/health/ios"
-  image_picker_ios:
-    :path: ".symlinks/plugins/image_picker_ios/ios"
-  local_auth_darwin:
-    :path: ".symlinks/plugins/local_auth_darwin/darwin"
   objectbox_flutter_libs:
     :path: ".symlinks/plugins/objectbox_flutter_libs/ios"
-  package_info_plus:
-    :path: ".symlinks/plugins/package_info_plus/ios"
   permission_handler_apple:
     :path: ".symlinks/plugins/permission_handler_apple/ios"
-  purchases_flutter:
-    :path: ".symlinks/plugins/purchases_flutter/ios"
-  purchases_ui_flutter:
-    :path: ".symlinks/plugins/purchases_ui_flutter/ios"
-  shared_preferences_foundation:
-    :path: ".symlinks/plugins/shared_preferences_foundation/darwin"
-  speech_to_text:
-    :path: ".symlinks/plugins/speech_to_text/darwin"
-  sqflite_darwin:
-    :path: ".symlinks/plugins/sqflite_darwin/darwin"
-  url_launcher_ios:
-    :path: ".symlinks/plugins/url_launcher_ios/ios"
 
 SPEC CHECKSUMS:
-  app_links: 6d01271b3907b0ee7325c5297c75d697c4226c4d
-  app_settings: 9217ccbe946aa9a3751b5459dcf50dabc87517b2
-  audioplayers_darwin: f15e209a3e856d1a7edcf98dc029f484fead2242
-  background_fetch: b5fe15743f348c3146e198dc933f0596f152d90f
-  battery_plus: 34f72fa2afeeea83bbae306c72a25828d3ec727a
-  CwlCatchException: 7acc161b299a6de7f0a46a6ed741eae2c8b4d75a
-  CwlCatchExceptionSupport: 54ccab8d8c78907b57f99717fb19d4cc3bce02dc
   device_calendar: 9cb33f88a02e19652ec7b8b122ca778f751b1f7b
-  device_info_plus: bf2e3232933866d73fe290f2942f2156cdd10342
-  DKImagePickerController: 946cec48c7873164274ecc4624d19e3da4c1ef3c
-  DKPhotoGallery: b3834fecb755ee09a593d7c9e389d8b5d6deed60
-  file_picker: b159e0c068aef54932bb15dc9fd1571818edaf49
-  Firebase: d99ac19b909cd2c548339c2241ecd0d1599ab02e
-  firebase_core: 99a37263b3c27536063a7b601d9e2a49400a433c
-  firebase_messaging: bf6697c61f31c7cc0f654131212ff04c0115c2c7
-  FirebaseCore: efb3893e5b94f32b86e331e3bd6dadf18b66568e
-  FirebaseCoreInternal: 9afa45b1159304c963da48addb78275ef701c6b4
-  FirebaseInstallations: 317270fec08a5d418fdbc8429282238cab3ac843
-  FirebaseMessaging: 3b26e2cee503815e01c3701236b020aa9b576f09
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_background_service_ios: e30e0d3ee69e4cee66272d0c78eacd48c2e94aac
   flutter_local_notifications: df98d66e515e1ca797af436137b4459b160ad8c9
-  flutter_secure_storage_darwin: 557817588b80e60213cbecb573c45c76b788018d
-  flutter_timezone: ac3da59ac941ff1c98a2e1f0293420e020120282
   flutter_tts: 91ad1884033cd95ef6e9338754adad54f01f090f
-  geolocator_apple: 66b711889fd333205763b83c9dcf0a57a28c7afd
-  GoogleDataTransport: aae35b7ea0c09004c3797d53c8c41f66f219d6a7
-  GoogleUtilities: 4f2618a4a1e762a1ee134a1e2323bba9843e06da
   health: c1dfe8bc28ccd5998a32bdd0963943bfe9ac8320
-  image_picker_ios: 4f2f91b01abdb52842a8e277617df877e40f905b
-  local_auth_darwin: 63c73d6d28cc3e239be2b6aa460ea6e317cd5100
-  nanopb: fad817b59e0457d11a5dfbde799381cd727c1275
   ObjectBox: 7da4aceb5013d041bfafdbc6d744a26918b09757
   objectbox_flutter_libs: 7a6ea1d74b43f5d970e6571d1b79e4b181b33d81
-  package_info_plus: c0502532a26c7662a62a356cebe2692ec5fe4ec4
   permission_handler_apple: 9878588469a2b0d0fc1e048d9f43605f92e6cec2
-  PromisesObjC: 752c3227f599e3467650e47ea36f433eeb10c273
-  purchases_flutter: 2a0d83f30b9edb29e1e1e43cddbb08b4e6579792
-  purchases_ui_flutter: c0167627627cf157e58c4a687bdda97cb615c714
-  PurchasesHybridCommon: 825e4e748b62c919bc4cb4032b0d1e452409bd74
-  PurchasesHybridCommonUI: 536abdfc64b82adcbb9ba352630722a4a1270571
-  RevenueCat: f3641992451c1426da8d8d1466cec3bbdb765962
-  RevenueCatUI: 32998f100fe73f1d0172df7eef4f0dd1bc781a05
-  SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
-  shared_preferences_foundation: 5086985c1d43c5ba4d5e69a4e8083a389e2909e6
-  speech_to_text: 87bf9298952e8d9073be1b6aade6d5758db5170c
-  sqflite_darwin: 5a7236e3b501866c1c9befc6771dfd73ffb8702d
-  SwiftyGif: 706c60cf65fa2bc5ee0313beece843c8eb8194d4
-  TSBackgroundFetch: 18918b6449a1e3f01eb0f5b44d6d79ce6160a5a5
-  url_launcher_ios: bb13df5870e8c4234ca12609d04010a21be43dfa
 
 PODFILE CHECKSUM: 96922bc4d6b27eddf21b2a35fea77b8de100cf9b
 

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:flutter/material.dart';
@@ -10,14 +13,20 @@ import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-class WellCheckPaywallScreen extends StatefulWidget {
+import '../../core/navigation/shield_router.dart';
+import '../../core/notifications/push_notification_service.dart';
+import '../safety/services/purchase_services.dart';
+
+class WellCheckPaywallScreen extends ConsumerStatefulWidget {
   const WellCheckPaywallScreen({super.key});
 
   @override
-  State<WellCheckPaywallScreen> createState() => _WellCheckPaywallScreenState();
+  ConsumerState<WellCheckPaywallScreen> createState() =>
+      _WellCheckPaywallScreenState();
 }
 
-class _WellCheckPaywallScreenState extends State<WellCheckPaywallScreen> {
+class _WellCheckPaywallScreenState
+    extends ConsumerState<WellCheckPaywallScreen> {
   @override
   void initState() {
     super.initState();
@@ -25,20 +34,31 @@ class _WellCheckPaywallScreenState extends State<WellCheckPaywallScreen> {
   }
 
   Future<void> _presentPaywall() async {
+    // final offerings = await Purchases.getOfferings();
+    // final supabaseUserId = Supabase.instance.client.auth.currentUser?.id;
+    // if (supabaseUserId != null) {
+    //   await Purchases.logIn(supabaseUserId);
+    // }
+    //
+    // final result = await RevenueCatUI.presentPaywall(
+    //   offering: offerings.getOffering("premium_monthly"),
+    // );
     final offerings = await Purchases.getOfferings();
-    print("RC availablePackages:");
+    print("Current offering: ${offerings.current?.identifier}");
+    print("Available packages: ${offerings.current?.availablePackages}");
 
-    print(offerings.current?.availablePackages);
     final supabaseUserId = Supabase.instance.client.auth.currentUser?.id;
     if (supabaseUserId != null) {
       await Purchases.logIn(supabaseUserId);
-      print("RC identified as: $supabaseUserId");
     }
 
     final result = await RevenueCatUI.presentPaywall(
-      offering: offerings.getOffering("premium_monthly"),
+      offering: offerings.current,
+      displayCloseButton: false,
+      presentationConfiguration: PaywallPresentationConfiguration(
+        ios: IOSPaywallPresentationStyle.fullScreen,
+      ),
     );
-
     if (!mounted) return;
     final customerInfo = await Purchases.getCustomerInfo();
 
@@ -49,10 +69,22 @@ class _WellCheckPaywallScreenState extends State<WellCheckPaywallScreen> {
     if (result == PaywallResult.purchased ||
         result == PaywallResult.restored ||
         hasSubscription) {
-      context.go('/dashboard');
+      if (mounted) context.go('/dashboard');
     } else {
-      await Supabase.instance.client.auth.signOut();
-      if (mounted) context.go('/');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('priv_biometric', false);
+      await prefs.setBool('is_logged_in', false);
+
+      PushNotificationService.saveTokenToProfile(null);
+      FlutterBackgroundService().invoke('stopService');
+
+      try {
+        await PurchasesService.instance.logOut();
+      } catch (e) {
+        debugPrint('[RC] logOut skipped: $e');
+      }
+
+      ref.read(shieldRouterProvider).go('/');
     }
   }
 

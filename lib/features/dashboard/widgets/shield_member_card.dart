@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
@@ -119,7 +120,9 @@ class ShieldMemberCard extends StatelessWidget {
                     shape: BoxShape.circle,
                     image: avatarUrl != null
                         ? DecorationImage(
-                            image: NetworkImage(avatarUrl!),
+                            image: CachedNetworkImageProvider(
+                              '$avatarUrl?t=${DateTime.now().minute}',
+                            ),
                             fit: BoxFit.cover,
                           )
                         : null,

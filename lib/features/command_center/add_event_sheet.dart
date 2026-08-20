@@ -31,6 +31,11 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
   List<Map<String, dynamic>> _familyMembers = [];
   String _eventType = 'Personal';
 
+  // Inline validation state
+  bool _memberError = false;
+  bool _dateError = false;
+  bool _timeError = false;
+
   @override
   void initState() {
     super.initState();
@@ -64,21 +69,38 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
         });
       }
     } catch (e) {
-      print("eeeee");
-      print(e.toString());
+      debugPrint('Failed to fetch family members: $e');
       if (mounted) setState(() => _isLoadingMembers = false);
     }
   }
 
+  /// Validates a given step. Sets the relevant error flags and returns
+  /// whether the step is allowed to proceed.
+  bool _validateStep(int step) {
+    switch (step) {
+      case 0:
+        final valid = _selectedUserId != null;
+        setState(() => _memberError = !valid);
+        return valid;
+
+      case 2:
+        final formValid = _formKey.currentState?.validate() ?? true;
+        final dateValid = _selectedDate != null;
+        final timeValid = _selectedTime != null;
+        setState(() {
+          _dateError = !dateValid;
+          _timeError = !timeValid;
+        });
+        return formValid && dateValid && timeValid;
+
+      default:
+        return true;
+    }
+  }
+
   Future<void> _saveEvent() async {
-    if (!_formKey.currentState!.validate() ||
-        _selectedDate == null ||
-        _selectedTime == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please complete all fields (Date & Time required)'),
-        ),
-      );
+    if (!_validateStep(2)) {
+      setState(() => _currentStep = 2);
       return;
     }
 
@@ -99,8 +121,7 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
       final title = _titleController.text.trim().isNotEmpty
           ? _titleController.text.trim()
           : _eventType;
-      print("profile.familyId");
-      print(profile.familyId);
+
       await Supabase.instance.client.from('calendar_events').insert({
         'family_id': profile.familyId,
         'created_by': profile.userId,
@@ -114,8 +135,9 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
             ? null
             : _notesController.text.trim(),
       });
+
       int level =
-      100; // Safe default for simulators and aggressive background iOS policies
+          100; // Safe default for simulators and aggressive background iOS policies
       try {
         final battery = Battery();
         level = await battery.batteryLevel;
@@ -124,6 +146,7 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
           'Battery info not available over isolate, using default: $e',
         );
       }
+
       // Emit to family network
       await Supabase.instance.client.from('well_events').insert({
         'family_id': profile.familyId,
@@ -131,7 +154,6 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
         'event_type': 'calendar',
         'title': 'New Event Scheduled',
         'battery_level': level,
-
         'description':
             '$title scheduled for ${DateFormat.jm().format(finalDateTime)} on ${DateFormat.yMd().format(finalDateTime)}',
       });
@@ -146,8 +168,7 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
         );
       }
     } catch (e) {
-      print("eeeeeeeee");
-      print(e.toString());
+      debugPrint('Failed to save event: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
@@ -166,7 +187,10 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
     if (picked != null && mounted) {
-      setState(() => _selectedDate = picked);
+      setState(() {
+        _selectedDate = picked;
+        _dateError = false;
+      });
     }
   }
 
@@ -176,7 +200,10 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
       initialTime: _selectedTime ?? TimeOfDay.now(),
     );
     if (picked != null && mounted) {
-      setState(() => _selectedTime = picked);
+      setState(() {
+        _selectedTime = picked;
+        _timeError = false;
+      });
     }
   }
 
@@ -275,6 +302,7 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                 );
               },
               onStepContinue: () {
+                if (!_validateStep(_currentStep)) return;
                 if (_currentStep < 3) {
                   setState(() => _currentStep += 1);
                 }
@@ -285,8 +313,12 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                 }
               },
               steps: [
+                // ---------------------------------------------------------
+                // Step 0 — Select Member
+                // ---------------------------------------------------------
                 Step(
                   title: const Text('Select Member'),
+                  isActive: _currentStep >= 0,
                   content: _isLoadingMembers
                       ? const CircularProgressIndicator()
                       : DropdownButtonFormField<String>(
@@ -296,6 +328,9 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                               borderRadius: ShieldDesign.roundedTwelve,
                             ),
                             prefixIcon: const Icon(Icons.person),
+                            errorText: _memberError
+                                ? 'Please select a member'
+                                : null,
                           ),
                           items: _familyMembers.map((member) {
                             final profileData =
@@ -311,13 +346,20 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                             );
                           }).toList(),
                           onChanged: (val) {
-                            setState(() => _selectedUserId = val);
+                            setState(() {
+                              _selectedUserId = val;
+                              _memberError = false;
+                            });
                           },
                         ),
-                  isActive: _currentStep >= 0,
                 ),
+
+                // ---------------------------------------------------------
+                // Step 1 — Event Type
+                // ---------------------------------------------------------
                 Step(
                   title: const Text('Event Type'),
+                  isActive: _currentStep >= 1,
                   content: DropdownButtonFormField<String>(
                     value: _eventType,
                     decoration: InputDecoration(
@@ -344,13 +386,19 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                       setState(() => _eventType = val ?? 'Personal');
                     },
                   ),
-                  isActive: _currentStep >= 1,
                 ),
+
+                // ---------------------------------------------------------
+                // Step 2 — Details
+                // ---------------------------------------------------------
                 Step(
                   title: const Text('Details'),
+                  isActive: _currentStep >= 2,
                   content: Form(
                     key: _formKey,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         TextFormField(
                           controller: _titleController,
@@ -360,8 +408,14 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                               borderRadius: ShieldDesign.roundedTwelve,
                             ),
                           ),
+                          validator: (value) {
+                            if (value != null && value.trim().length > 60) {
+                              return 'Title must be under 60 characters';
+                            }
+                            return null;
+                          },
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 12),
                         TextFormField(
                           controller: _locationController,
                           decoration: InputDecoration(
@@ -371,12 +425,20 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                             ),
                             prefixIcon: const Icon(Icons.place),
                           ),
+                          validator: (value) {
+                            if (value != null && value.trim().length > 100) {
+                              return 'Location must be under 100 characters';
+                            }
+                            return null;
+                          },
                         ),
                         const SizedBox(height: 12),
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Expanded(
                               child: InkWell(
+                                borderRadius: ShieldDesign.roundedTwelve,
                                 onTap: _pickDate,
                                 child: InputDecorator(
                                   decoration: InputDecoration(
@@ -387,6 +449,9 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                                     prefixIcon: const Icon(
                                       Icons.calendar_today,
                                     ),
+                                    errorText: _dateError
+                                        ? 'Date is required'
+                                        : null,
                                   ),
                                   child: Text(
                                     _selectedDate == null
@@ -401,6 +466,7 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: InkWell(
+                                borderRadius: ShieldDesign.roundedTwelve,
                                 onTap: _pickTime,
                                 child: InputDecorator(
                                   decoration: InputDecoration(
@@ -409,6 +475,9 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                                       borderRadius: ShieldDesign.roundedTwelve,
                                     ),
                                     prefixIcon: const Icon(Icons.access_time),
+                                    errorText: _timeError
+                                        ? 'Time is required'
+                                        : null,
                                   ),
                                   child: Text(
                                     _selectedTime == null
@@ -420,7 +489,7 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 12),
                         TextFormField(
                           controller: _notesController,
                           maxLines: 2,
@@ -431,18 +500,30 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
                               borderRadius: ShieldDesign.roundedTwelve,
                             ),
                           ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Notes field is required';
+                            }
+                            return null;
+                          },
                         ),
                       ],
                     ),
                   ),
-                  isActive: _currentStep >= 2,
                 ),
+
+                // ---------------------------------------------------------
+                // Step 3 — Confirm
+                // ---------------------------------------------------------
                 Step(
                   title: const Text('Confirm'),
-                  content: Text(
-                    'Will schedule $_eventType for ${_selectedDate != null ? DateFormat.yMd().format(_selectedDate!) : '...'} at ${_selectedTime != null ? _selectedTime!.format(context) : '...'}. Tap Schedule to save to Family Calendar and alert participants.',
-                  ),
                   isActive: _currentStep >= 3,
+                  content: Text(
+                    'Will schedule $_eventType for '
+                    '${_selectedDate != null ? DateFormat.yMd().format(_selectedDate!) : '...'} '
+                    'at ${_selectedTime != null ? _selectedTime!.format(context) : '...'}. '
+                    'Tap Schedule to save to Family Calendar and alert participants.',
+                  ),
                 ),
               ],
             ),

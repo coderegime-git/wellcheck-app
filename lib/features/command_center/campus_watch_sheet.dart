@@ -1,6 +1,7 @@
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
@@ -27,6 +28,9 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
   String? _expandedUserId;
   String? _selectedUserId;
   String? _selectedUserName;
+  bool _isFetchingLocation = false;
+  double? _latitude;
+  double? _longitude;
 
   @override
   void initState() {
@@ -184,6 +188,7 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
               ],
             ),
             content: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
                 _sectionLabel('Assign To'),
@@ -283,7 +288,61 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
     );
 
     if (result == true && _campusNameController.text.trim().isNotEmpty) {
+      await _fetchCurrentLocation();
       await _saveCampusZone();
+    }
+  }
+
+  Future<void> _fetchCurrentLocation() async {
+    setState(() => _isFetchingLocation = true);
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) throw Exception('Location services disabled');
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          await Geolocator.openLocationSettings();
+
+          throw Exception('Location permission denied');
+        }
+      }
+      if (permission == LocationPermission.deniedForever) {
+        await Geolocator.openLocationSettings();
+        throw Exception('Location permission permanently denied');
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      if (mounted) {
+        setState(() {
+          _latitude = position.latitude;
+          _longitude = position.longitude;
+        });
+
+        print("_latitude");
+        print(_latitude);
+      }
+    } catch (e) {
+      debugPrint('[SafeZone] Location error: $e');
+      if (mounted) {
+        setState(() {
+          _latitude = 37.7749;
+          _longitude = -122.4194;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not get location: $e. Using default.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isFetchingLocation = false);
     }
   }
 
@@ -301,8 +360,8 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
         'assigned_user_id': _selectedUserId,
 
         'assigned_user_name': _selectedUserName,
-        'latitude': 0.0,
-        'longitude': 0.0,
+        'latitude': _latitude ?? 0.0,
+        'longitude': _longitude ?? 0.0,
         'radius_meters': 300,
       });
       int level =

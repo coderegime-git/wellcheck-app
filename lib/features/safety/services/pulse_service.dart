@@ -61,6 +61,8 @@ class PulseService {
     });
   }
 
+  final Map<String, bool> _lastZoneInsideStatus = {};
+
   Future<void> broadcastPulse(String? fallbackUserId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -89,7 +91,8 @@ class PulseService {
         }
 
         if (permission == LocationPermission.deniedForever) {
-          await Geolocator.openAppSettings();
+          //await Geolocator.openAppSettings();
+          //  showLocationDialog(context);
 
           return;
         }
@@ -114,7 +117,7 @@ class PulseService {
       }
 
       int level =
-      100; // Safe default for simulators and aggressive background iOS policies
+          100; // Safe default for simulators and aggressive background iOS policies
       try {
         final battery = Battery();
         level = await battery.batteryLevel;
@@ -213,42 +216,106 @@ class PulseService {
       }
 
       // 3. Campus Watch (Geofencing)
-      if (lat != null && lng != null) {
-        final zones = await Supabase.instance.client
-            .from('locations_safe_zones')
-            .select()
-            .eq('family_id', familyId);
 
-        for (final zone in zones) {
-          final double zoneLat = zone['latitude'] != null
-              ? zone['latitude'].toDouble()
-              : 0;
-          final double zoneLng = zone['longitude'] != null
-              ? zone['longitude'].toDouble()
-              : 0;
-          final double radius = zone['radius_meters'] != null
-              ? zone['radius_meters'].toDouble()
-              : 100.0;
+      // if (lat != null && lng != null) {
+      //   final zones = await Supabase.instance.client
+      //       .from('locations_safe_zones')
+      //       .select()
+      //       .eq('family_id', familyId);
+      //
+      //   for (final zone in zones) {
+      //     print(zone);
+      //     print("zonezone");
+      //     final double zoneLat = zone['latitude'] != null
+      //         ? zone['latitude'].toDouble()
+      //         : 0;
+      //     final double zoneLng = zone['longitude'] != null
+      //         ? zone['longitude'].toDouble()
+      //         : 0;
+      //     final double radius = zone['radius_meters'] != null
+      //         ? zone['radius_meters'].toDouble()
+      //         : 100.0;
+      //
+      //     final distance = Geolocator.distanceBetween(
+      //       lat,
+      //       lng,
+      //       zoneLat,
+      //       zoneLng,
+      //     );
+      //     if (zone["assigned_user_id"] != effectiveUserId) continue;
+      //     if (distance <= radius) {
+      //       // User is inside this safe zone
+      //       await repo.submitPulse(
+      //         familyId: familyId,
+      //         latitude: lat,
+      //         longitude: lng,
+      //         batteryLevel: level,
+      //         type: 'safe_zone_enter',
+      //       );
+      //     } else {
+      //       await repo.submitPulse(
+      //         familyId: familyId,
+      //         latitude: lat,
+      //         longitude: lng,
+      //         batteryLevel: level,
+      //         type: 'safe_zone_exit',
+      //       );
+      //     }
+      //   }
+      // }
 
-          final distance = Geolocator.distanceBetween(
-            lat,
-            lng,
-            zoneLat,
-            zoneLng,
-          );
-          if (distance <= radius) {
-            // User is inside this safe zone
-            await repo.submitPulse(
-              familyId: familyId,
-              latitude: lat,
-              longitude: lng,
-              batteryLevel: level,
-              type: 'safe_zone_enter',
-            );
-          }
+      if (lat == null || lng == null) return;
+
+      final zones = await Supabase.instance.client
+          .from('locations_safe_zones')
+          .select()
+          .eq('family_id', familyId)
+          .eq('assigned_user_id', effectiveUserId);
+
+      for (final zone in zones) {
+        final zoneId = zone['id']?.toString();
+        if (zoneId == null) continue;
+
+        final latRaw = zone['latitude'];
+        final lngRaw = zone['longitude'];
+
+        // Skip zones with missing coordinates instead of defaulting to (0,0)
+        if (latRaw == null || lngRaw == null) continue;
+
+        final double zoneLat = latRaw.toDouble();
+        final double zoneLng = lngRaw.toDouble();
+        final double radius = zone['radius_meters'] != null
+            ? zone['radius_meters'].toDouble()
+            : 100.0;
+        print("zonezone");
+        print(zone);
+        final bool alertOnEntry = zone['alert_on_entry'] == true;
+        final bool alertOnExit = zone['alert_on_exit'] == true;
+        final distance = Geolocator.distanceBetween(lat, lng, zoneLat, zoneLng);
+        final bool isInside = distance <= radius;
+
+        //final bool? wasInside = _lastZoneInsideStatus[zoneId];
+        final bool? wasInside = await SafeZoneService.getLastZoneStatus(zoneId);
+
+        // Only log when the status actually changes (or on first check)
+        if (wasInside == isInside) {
+          continue; // no state change, skip logging
         }
-      }
 
+        _lastZoneInsideStatus[zoneId] = isInside;
+        await SafeZoneService.setLastZoneStatus(zoneId, isInside);
+
+        if (isInside && !alertOnEntry) continue;
+        if (!isInside && !alertOnExit) continue;
+        await repo.submitPulse(
+          familyId: familyId,
+          latitude: lat,
+          longitude: lng,
+          batteryLevel: level,
+          type: isInside ? 'safe_zone_enter' : 'safe_zone_exit',
+          safeZoneName: zone['name'],
+        );
+      }
       debugPrint('Pulse successfully transmitted for Family: $familyId');
     } catch (e) {
       debugPrint('Pulse failed entirely: $e');
@@ -259,6 +326,11 @@ class PulseService {
 
   Future<void> updateLocation(String? fallbackUserId) async {
     final prefs = await SharedPreferences.getInstance();
+    final isLoggedIn = prefs.getBool('is_logged_in') ?? false;
+    if (!isLoggedIn) {
+      debugPrint('[Location] Skipping update — user logged out');
+      return;
+    }
     final familyId = prefs.getString('last_family_id');
     final persistentUserId = prefs.getString('last_user_id');
     final persistentUserName = prefs.getString('last_user_name');
@@ -318,21 +390,45 @@ class PulseService {
       } catch (_) {}
 
       final response =
-      await Supabase.instance.client.from('live_locations').upsert({
-        'user_id': persistentUserId,
-        'family_id': familyId,
-        'user_name': persistentUserName,
-        'latitude': position.latitude,
-        'longitude': position.longitude,
-        'role': persistentUserRole,
-        'battery_level': level,
-        'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'user_id').select();
+          await Supabase.instance.client.from('live_locations').upsert({
+            'user_id': persistentUserId,
+            'family_id': familyId,
+            'user_name': persistentUserName,
+            'latitude': position.latitude,
+            'longitude': position.longitude,
+            'role': persistentUserRole,
+            'battery_level': level,
+            'updated_at': DateTime.now().toIso8601String(),
+          }, onConflict: 'user_id').select();
 
       debugPrint("UPSERT RESPONSE");
       debugPrint(response.toString());
     } catch (e) {
       debugPrint("updateLocation error: $e");
+    }
+  }
+}
+
+class SafeZoneService {
+  static const String _prefsKeyPrefix = 'zone_status_';
+
+  static Future<bool?> getLastZoneStatus(String zoneId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!prefs.containsKey('$_prefsKeyPrefix$zoneId')) return null;
+    return prefs.getBool('$_prefsKeyPrefix$zoneId');
+  }
+
+  static Future<void> setLastZoneStatus(String zoneId, bool isInside) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('$_prefsKeyPrefix$zoneId', isInside);
+  }
+
+  /// Call this when navigating to dashboard to reset all zone state
+  static Future<void> clearZoneStatusCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keys = prefs.getKeys().where((k) => k.startsWith(_prefsKeyPrefix));
+    for (final key in keys) {
+      await prefs.remove(key);
     }
   }
 }

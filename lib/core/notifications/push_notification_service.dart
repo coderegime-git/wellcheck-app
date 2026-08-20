@@ -91,8 +91,10 @@
 //   }
 // }
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:firebase_core/firebase_core.dart';
@@ -214,7 +216,8 @@ class PushNotificationService extends ConsumerStatefulWidget {
   static Future<void> _setupLocalNotifications() async {
     // Android initialization
     const androidSettings = AndroidInitializationSettings(
-      '@mipmap/launcher_icon',
+      //  '@mipmap/launcher_icon',
+      '@drawable/ic_stat_notification',
     );
 
     // iOS initialization
@@ -277,7 +280,7 @@ class PushNotificationService extends ConsumerStatefulWidget {
       print("cccc111");
       print("cccc111");
 
-      print(message.notification!.android!.channelId);
+      // print(message.notification!.android!.channelId);
     }
 
     // if (action == 'schedule_checkin') {
@@ -297,11 +300,28 @@ class PushNotificationService extends ConsumerStatefulWidget {
         (notification.title?.toLowerCase().contains('sos') ?? false) ||
         (notification.title?.toLowerCase().contains('emergency') ?? false);
     final sound = message.data['sound'];
-    print("soundsound");
-    print(sound);
-    print(isSos);
+
     //final isSos = sound == "sos_sound";
+    final prefs = await SharedPreferences.getInstance();
+    bool checkInAlerts = prefs.getBool('notif_checkin') ?? true;
+    bool medicationReminders = prefs.getBool('notif_med') ?? true;
+
     if (notification.body != null) {
+      final isCheckInNotification =
+          notification.title?.toLowerCase().contains("check") ?? false;
+      final isMedicationNotification =
+          notification.title?.toLowerCase().contains("medication") ?? false;
+
+      // Skip if it's a check-in notification and check-in alerts are off
+      if (isCheckInNotification && !checkInAlerts) {
+        return;
+      }
+
+      // Skip if it's a medication notification and medication reminders are off
+      if (isMedicationNotification && !medicationReminders) {
+        return;
+      }
+      //if (!Platform.isIOS) {
       showNotification(
         title: notification.title ?? 'Well-Check',
         body: notification.body ?? '',
@@ -309,6 +329,7 @@ class PushNotificationService extends ConsumerStatefulWidget {
         isSos: isSos,
         sound: sound,
       );
+      // }
     }
   }
 
@@ -350,9 +371,14 @@ class PushNotificationService extends ConsumerStatefulWidget {
           ? const RawResourceAndroidNotificationSound('missed_checkin')
           : const RawResourceAndroidNotificationSound('custom_sound'),
       // color: isSos ? const Color(0xFFFF3B30) : Colors.white,
+      color: isSos ? const Color(0xFFFF3B30) : const Color(0xFF00A896),
+
+      // your teal
       enableLights: true,
       enableVibration: true,
-      icon: '@mipmap/launcher_icon',
+      // icon: '@mipmap/launcher_icon',
+      icon: '@drawable/ic_stat_notification',
+
       largeIcon: const DrawableResourceAndroidBitmap('@mipmap/launcher_icon'),
       styleInformation: BigTextStyleInformation(body),
       // Full screen intent for SOS
@@ -384,6 +410,14 @@ class PushNotificationService extends ConsumerStatefulWidget {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) return;
+
+      // ✅ Don't save FCM token if user is logged out
+      final prefs = await SharedPreferences.getInstance();
+      final isLoggedIn = prefs.getBool('is_logged_in') ?? false;
+      if (!isLoggedIn) {
+        debugPrint('[FCM] Skipping token save — user logged out');
+        return;
+      }
 
       await Supabase.instance.client
           .from('profiles')

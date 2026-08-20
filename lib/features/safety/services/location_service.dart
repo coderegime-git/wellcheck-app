@@ -6,100 +6,80 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 
 class LocationService {
-  /// Call this in initState or on app start.
-  /// Returns true if all required permissions are granted.
-  static Future<bool> requestLocationPermissions(BuildContext context) async {
-    // Step 1: Device GPS off
+  /// Call this on app start / initState.
+  /// Does NOT open Settings or show any "go enable it" dialog.
+  /// Just checks status and asks the system prompt if it hasn't been shown yet.
+  /// Returns true only if permission is already usable.
+  static Future<bool> checkLocationPermissions(BuildContext context) async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      await Geolocator.openLocationSettings();
+      // Don't auto-open Settings. Let the caller decide whether to prompt
+      // the user (e.g. via a snackbar) and call requestSettingsRedirect() later.
       return false;
     }
 
-    // Step 2: Check current status
     LocationPermission geoPermission = await Geolocator.checkPermission();
     debugPrint('Initial permission status: $geoPermission');
 
-    // ✅ Already "Always" — nothing to do
-    if (geoPermission == LocationPermission.always) {
-      debugPrint('Location already Always ✅');
+    if (geoPermission == LocationPermission.whileInUse ||
+        geoPermission == LocationPermission.always) {
       return true;
     }
 
-    // ✅ First time or soft denied — show system prompt first
     if (geoPermission == LocationPermission.denied) {
+      // First-time system prompt — this is allowed, it's Apple's own dialog.
       geoPermission = await Geolocator.requestPermission();
       debugPrint('After system prompt: $geoPermission');
 
-      // User granted Always on first ask (rare but possible on Android)
-      if (geoPermission == LocationPermission.always) return true;
-
-      // User picked "While Using" — show our dialog to upgrade to Always
-      if (geoPermission == LocationPermission.whileInUse) {
-        final shouldOpen = await _showSettingsDialog(
-          context,
-          title: 'Enable "Always" Location',
-          steps: [
-            'Tap "Open Settings" below',
-            'Select "Location"',
-            'Choose "Always"',
-          ],
-        );
-        if (shouldOpen) {
-          await Geolocator.openAppSettings();
-          // After returning from settings, re-check
-          geoPermission = await Geolocator.checkPermission();
-          return geoPermission == LocationPermission.always;
-        }
-        return false; // user tapped Not Now
-      }
-
-      // User denied entirely from system prompt — don't show dialog yet
-      // They'll see it next app open via deniedForever or whileInUse check
-      if (geoPermission == LocationPermission.denied) {
-        return false;
-      }
+      // Whatever the result, do NOT show our own dialog here.
+      // If denied or deniedForever, just return false quietly.
+      return geoPermission == LocationPermission.whileInUse ||
+          geoPermission == LocationPermission.always;
     }
 
-    // ✅ Already "While Using" (set in a previous session) — ask to upgrade
-    if (geoPermission == LocationPermission.whileInUse) {
-      final shouldOpen = await _showSettingsDialog(
-        context,
-        title: 'Enable Location',
-        steps: [
-          'Tap "Open Settings" below',
-          'Select "Location"',
-          'Choose option',
-        ],
-      );
-      if (shouldOpen) {
-        await Geolocator.openAppSettings();
-        geoPermission = await Geolocator.checkPermission();
-        return geoPermission == LocationPermission.always;
-      }
-      return false;
-    }
-
-    // ✅ Permanently denied — must go to settings
-    if (geoPermission == LocationPermission.deniedForever) {
-      final shouldOpen = await _showSettingsDialog(
-        context,
-        title: 'Location Permission Required',
-        steps: [
-          'Tap "Open Settings" below',
-          'Select "Location"',
-          'Choose option',
-        ],
-      );
-      if (shouldOpen) {
-        await Geolocator.openAppSettings();
-        geoPermission = await Geolocator.checkPermission();
-        return geoPermission == LocationPermission.always;
-      }
-      return false;
-    }
-
+    // deniedForever or restricted — return false, no auto dialog.
     return false;
+  }
+
+  /// Call this ONLY when the user actively tries to use a feature that
+  /// requires location and it's currently unavailable (deniedForever or
+  /// service disabled). This is the one place it's okay to offer Settings,
+  /// per Apple's guidance: "if a feature won't function without access,
+  /// you may include a notification and a link to Settings."
+  static Future<bool> requestSettingsRedirect(
+    BuildContext context, {
+    required String title,
+    required List<String> steps,
+  }) async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    final geoPermission = await Geolocator.checkPermission();
+
+    final needsSettings =
+        !serviceEnabled || geoPermission == LocationPermission.deniedForever;
+
+    if (!needsSettings) {
+      // Nothing to redirect for — don't show the dialog needlessly.
+      return geoPermission == LocationPermission.whileInUse ||
+          geoPermission == LocationPermission.always;
+    }
+
+    final shouldOpen = await _showSettingsDialog(
+      context,
+      title: title,
+      steps: steps,
+    );
+
+    if (!shouldOpen) return false;
+
+    if (!serviceEnabled) {
+      await Geolocator.openLocationSettings();
+    } else {
+      await Geolocator.openAppSettings();
+    }
+
+    final updatedPermission = await Geolocator.checkPermission();
+    return updatedPermission == LocationPermission.whileInUse ||
+        updatedPermission == LocationPermission.always;
   }
 
   static Future<bool> _showSettingsDialog(
@@ -119,7 +99,6 @@ class LocationService {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Icon
                   Container(
                     width: 64,
                     height: 64,
@@ -134,8 +113,6 @@ class LocationService {
                     ),
                   ),
                   const SizedBox(height: 16),
-
-                  // Title
                   Text(
                     title,
                     style: const TextStyle(
@@ -145,16 +122,12 @@ class LocationService {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
-
-                  // Subtitle
                   Text(
-                    'To keep you safe, we need to track your location in the background.',
+                    'To keep you safe, we need location access.',
                     style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 20),
-
-                  // Steps
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -199,8 +172,6 @@ class LocationService {
                     ),
                   ),
                   const SizedBox(height: 24),
-
-                  // Buttons
                   Row(
                     children: [
                       Expanded(
@@ -242,7 +213,6 @@ class LocationService {
         false;
   }
 
-  /// Get current position (use after permissions confirmed)
   static Future<Position?> getCurrentPosition() async {
     try {
       return await Geolocator.getCurrentPosition(
@@ -255,15 +225,12 @@ class LocationService {
     }
   }
 
-  /// Stream position updates (foreground + background)
   static Stream<Position> getPositionStream() {
     if (Platform.isIOS) {
       return Geolocator.getPositionStream(
         locationSettings: AppleSettings(
           accuracy: LocationAccuracy.best,
           distanceFilter: 10,
-
-          //timeLimit: Duration(seconds: 15),
           pauseLocationUpdatesAutomatically: false,
           showBackgroundLocationIndicator: true,
         ),
@@ -274,11 +241,14 @@ class LocationService {
       locationSettings: AndroidSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 10,
-        intervalDuration: Duration(seconds: 20),
-        //  timeLimit: Duration(seconds: 15),
-        foregroundNotificationConfig: ForegroundNotificationConfig(
+        intervalDuration: const Duration(seconds: 20),
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
           notificationTitle: 'Well Check Active',
           notificationText: 'Tracking location in background',
+          notificationIcon: const AndroidResource(
+            name: 'ic_stat_notify',
+            defType: 'drawable',
+          ),
           enableWakeLock: true,
         ),
       ),

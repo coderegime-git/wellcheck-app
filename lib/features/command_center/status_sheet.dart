@@ -193,8 +193,12 @@ class _StatusSheetState extends ConsumerState<StatusSheet> {
 
                       IconData icon = Icons.person;
                       if (role == 'leader') icon = Icons.admin_panel_settings;
-                      if (role == 'elder' || role == 'senior')
+                      if (role == 'elder' ||
+                          role == 'senior' ||
+                          role == 'parent')
                         icon = Icons.elderly;
+                      if (role == 'other' || role == 'child')
+                        icon = Icons.person;
                       if (role == 'student') icon = Icons.school;
                       if (role == 'pet') icon = Icons.pets;
 

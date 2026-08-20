@@ -16,7 +16,8 @@ class JoinWithCodeScreen extends ConsumerStatefulWidget {
 class _JoinWithCodeScreenState extends ConsumerState<JoinWithCodeScreen> {
   final _codeController = TextEditingController();
   bool _isLoading = false;
-final focusNode = FocusNode();
+  final focusNode = FocusNode();
+
   Future<void> _handleJoin() async {
     final code = _codeController.text.trim();
     if (code.length != 6) {
@@ -57,6 +58,15 @@ final focusNode = FocusNode();
           case 'senior':
             assignedRole = ShieldRole.senior;
             break;
+          case 'parent':
+            assignedRole = ShieldRole.senior;
+            break;
+          case 'other':
+            assignedRole = ShieldRole.other;
+            break;
+          case 'child':
+            assignedRole = ShieldRole.child;
+            break;
           case 'student':
             assignedRole = ShieldRole.student;
             break;
@@ -75,7 +85,7 @@ final focusNode = FocusNode();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Invalid or expired code. \n$e'),
+            content: Text('Invalid or expired code.'),
             backgroundColor: ShieldColors.urgentRed,
           ),
         );
@@ -102,7 +112,10 @@ final focusNode = FocusNode();
         child: SafeArea(
           child: SingleChildScrollView(
             padding: EdgeInsets.fromLTRB(
-              24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24,
+              24,
+              24,
+              24,
+              MediaQuery.of(context).viewInsets.bottom + 24,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,

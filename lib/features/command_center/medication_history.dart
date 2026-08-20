@@ -82,6 +82,14 @@ class _MedicationHistoryScreenState
     }
   }
 
+  DateTime parseAsUtc(String raw) {
+    // if there's no Z or offset already, treat it as UTC explicitly
+    final hasOffset =
+        raw.endsWith('Z') || RegExp(r'[+-]\d{2}:\d{2}$').hasMatch(raw);
+    final iso = hasOffset ? raw : '${raw}Z';
+    return DateTime.parse(iso).toLocal();
+  }
+
   @override
   Widget build(BuildContext context) {
     final historyData = ref.invalidate(allMedicationHistoryProvider);
@@ -137,10 +145,14 @@ class _MedicationHistoryScreenState
               final medication = item['medications'];
               final profileData = item['profiles'];
               final status = item['status'] ?? '';
-
-              final date = item['taken_at'] != null
-                  ? DateTime.parse(item['taken_at']).toLocal()
-                  : DateTime.parse(medication['scheduled_at']).toLocal();
+              print(item['scheduled_at']);
+              print('RAW scheduled_at: ${item['scheduled_at']}');
+              print(
+                'RAW scheduled_at TYPE: ${item['scheduled_at'].runtimeType}',
+              );
+              final date = DateTime.parse(item['scheduled_at']).toLocal();
+              print('PARSED: $date');
+              //final date = DateTime.parse(item['scheduled_at']).toLocal();
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
 

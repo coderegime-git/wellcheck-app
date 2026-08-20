@@ -352,7 +352,9 @@ class _ChatBubble extends StatelessWidget {
     String timeStr = '';
     if (createdAt != null) {
       try {
-        final dt = DateTime.parse(createdAt!);
+        final dt = DateTime.parse(createdAt!).toLocal();
+
+        final dateStr = DateFormat.yMMMd().format(dt);
         timeStr = DateFormat.jm().format(dt);
       } catch (_) {}
     }

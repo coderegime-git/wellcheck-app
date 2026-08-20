@@ -19,6 +19,7 @@ class SafetyRepository {
     required double longitude,
     required int batteryLevel,
     String type = 'heartbeat',
+    String? safeZoneName,
   }) async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
@@ -30,61 +31,76 @@ class SafetyRepository {
         .single();
     final fullName = profileRes['full_name'];
     final heartRateEnabled = prefs.getBool('priv_heartbeat') ?? true;
+    print(type);
+    print("typetype");
+    if (type == "heartbeat" && !heartRateEnabled) return;
+    print(safeZoneName);
+    await _supabase.from('well_events').insert({
+      'user_id': userId,
+      'family_id': familyId,
+      'event_type': type,
+      "title": type == "safe_zone_enter"
+          ? "Entered Safe Zone"
+          : type == "safe_zone_exit"
+          ? "Exited Safe Zone"
+          : type == "heartbeat"
+          ? "Heartbeat Alert"
+          : type == "driving"
+          ? "Driving Detected"
+          : "Activity Update",
+      "description": type == "safe_zone_enter"
+          ? (safeZoneName != null && safeZoneName.isNotEmpty
+                ? "Has entered the safe zone\nSafe Area: $safeZoneName"
+                : "Has entered the safe zone")
+          : type == "safe_zone_exit"
+          ? (safeZoneName != null && safeZoneName.isNotEmpty
+                ? "Has exited the safe zone\nSafe Area: $safeZoneName"
+                : "Has exited the safe zone")
+          : type == "heartbeat"
+          ? "Heartbeat event recorded"
+          : type == "driving"
+          ? "$fullName is currently driving"
+          : "Activity recorded",
+      'latitude': latitude,
+      'longitude': longitude,
+      'user_name': fullName,
+      'battery_level': batteryLevel,
+      'verification_source': 'app_foreground', // or 'background_service'
+    });
 
-    if (heartRateEnabled && type == "heartbeat") {
-      await _supabase.from('well_events').insert({
-        'user_id': userId,
-        'family_id': familyId,
-        'event_type': type,
-        "title": type == "check_in"
-            ? "Manual Check-in"
-            : type == "safe_zone_enter"
-            ? "Entered Safe Zone"
-            : type == "safe_zone_exit"
-            ? "Exited Safe Zone"
-            : type == "heartbeat"
-            ? "Heartbeat Alert"
-            : type == "driving"
-            ? "Driving Detected"
-            : "Activity Update",
+    // if (type != 'check_in') {
+    //   await _supabase.from('well_events').insert({
+    //     'user_id': userId,
+    //     'family_id': familyId,
+    //     'event_type': "Activity",
+    //     "title": "Activity Update",
+    //
+    //     "description": "Activity recorded",
+    //     'latitude': latitude,
+    //     'longitude': longitude,
+    //     'user_name': fullName,
+    //     'battery_level': batteryLevel,
+    //     'verification_source': 'app_foreground', // or 'background_service'
+    //   });
+    // }
 
-        "description": type == "check_in"
-            ? "Check-in completed successfully"
-            : type == "safe_zone_enter"
-            ? "Has entered the safe zone"
-            : type == "safe_zone_exit"
-            ? "Has exited the safe zone"
-            : type == "heartbeat"
-            ? "Heartbeat event recorded"
-            : type == "driving"
-            ? "$fullName is currently driving"
-            : "Activity recorded",
-        'latitude': latitude,
-        'longitude': longitude,
-        'user_name': fullName,
-        'battery_level': batteryLevel,
-        'verification_source': 'app_foreground', // or 'background_service'
-      });
-    } else {
-      await _supabase.from('well_events').insert({
-        'user_id': userId,
-        'family_id': familyId,
-        'event_type': "Activity",
-        "title": "Activity Update",
-
-        "description": "Activity recorded",
-        'latitude': latitude,
-        'longitude': longitude,
-        'user_name': fullName,
-        'battery_level': batteryLevel,
-        'verification_source': 'app_foreground', // or 'background_service'
-      });
-    }
     final members = await Supabase.instance.client
         .from('family_members')
         .select('user_id, role')
         .eq('family_id', familyId);
     if (type == 'check_in') {
+      await Supabase.instance.client.from('well_events').insert({
+        'family_id': familyId,
+        'user_id': userId,
+        'user_name': fullName,
+        'event_type': 'check_in',
+        'title': 'Status Check-In',
+        'description': 'checked in.',
+        'latitude': latitude,
+        'longitude': latitude,
+        'battery_level': batteryLevel, // Platform battery TBD
+        // 'created_by': profile.userId,
+      });
       for (final m in members) {
         final targetUserId = m['user_id'];
 
@@ -371,8 +387,6 @@ class SafetyRepository {
 
   // Stream latest vitals for a specific member
   Stream<List<Map<String, dynamic>>> streamMemberVitals(String userId) {
-    print("datadata");
-
     return _supabase
         .from('health_vitals')
         .stream(primaryKey: ['user_id', 'vital_type', 'timestamp'])

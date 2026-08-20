@@ -222,21 +222,21 @@ final allMedicationHistoryProvider =
       final data = await Supabase.instance.client
           .from('dose_logs')
           .select('''
-            taken_at,
-            status,
-            medications!inner(
-              medication_name,
-              dosage,
-              family_id,
-              scheduled_at
-            ),
-            profiles!dose_logs_user_id_fkey(
-              full_name,
-              id
-            )
-          ''')
+      scheduled_at,
+      taken_at,
+      status,
+      medications!inner(
+        medication_name,
+        dosage,
+        family_id
+      ),
+      profiles!dose_logs_user_id_fkey(
+        full_name,
+        id
+      )
+    ''')
           .eq('medications.family_id', familyId)
-          .order('taken_at', ascending: false);
+          .order('scheduled_at', ascending: false);
 
       return List<Map<String, dynamic>>.from(data);
     }); //

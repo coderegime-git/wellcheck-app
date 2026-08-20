@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:battery_plus/battery_plus.dart';
@@ -375,6 +376,15 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
 
   List<dynamic> _addressSuggestions = [];
   bool _isSearchingAddress = false;
+  Timer? _debounce;
+
+  void onMapMoved(double lat, double lng) {
+    _debounce?.cancel();
+
+    _debounce = Timer(const Duration(seconds: 1), () {
+      _reverseGeocode(lat, lng);
+    });
+  }
 
   @override
   void initState() {
@@ -385,6 +395,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
   @override
   void dispose() {
     _zoneNameController.dispose();
+    _debounce?.cancel();
     super.dispose();
   }
 
@@ -421,6 +432,8 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
         if (_latitude != null && _longitude != null) {
           await _reverseGeocode(_latitude ?? 0, _longitude ?? 0);
         }
+        print("_latitude");
+        print(_latitude);
       }
     } catch (e) {
       debugPrint('[SafeZone] Location error: $e');
@@ -669,6 +682,13 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
 
       final res = await http.get(url, headers: {'User-Agent': 'wellcheck-app'});
 
+      print("Status: ${res.statusCode}");
+      print("Body: ${res.body}");
+
+      if (res.statusCode != 200) {
+        return;
+      }
+
       final data = jsonDecode(res.body);
 
       if (mounted) {
@@ -676,8 +696,9 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
           _addressController.text = data["display_name"] ?? "";
         });
       }
-    } catch (e) {
-      debugPrint(e.toString());
+    } catch (e, s) {
+      print(e);
+      print(s);
     }
   }
 
@@ -798,23 +819,30 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                               );
                             },
 
-                            onPositionChanged: (position, hasGesture) async {
-                              if (hasGesture) {
-                                final center = position.center;
+                            onPositionChanged: (position, hasGesture) {
+                              if (!hasGesture) return;
 
-                                if (center != null) {
-                                  setState(() {
-                                    _latitude = center.latitude;
+                              final center = position.center;
+                              if (center == null) return;
 
-                                    _longitude = center.longitude;
-                                  });
+                              setState(() {
+                                _latitude = center.latitude;
+                                _longitude = center.longitude;
+                              });
 
+                              // Cancel previous timer
+                              _debounce?.cancel();
+
+                              // Wait 1 second after user stops moving
+                              _debounce = Timer(
+                                const Duration(seconds: 1),
+                                () async {
                                   await _reverseGeocode(
                                     center.latitude,
                                     center.longitude,
                                   );
-                                }
-                              }
+                                },
+                              );
                             },
                           ),
                           children: [

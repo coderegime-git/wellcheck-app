@@ -1,8 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import 'package:local_auth/local_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/data/auth_repository.dart';
@@ -27,14 +32,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   // Toggle between OTP and Password login
   bool _usePasswordLogin = false;
+  final _formKey = GlobalKey<FormState>();
 
-  final LocalAuthentication _localAuth = LocalAuthentication();
-
-  @override
-  void initState() {
-    super.initState();
-    _checkBiometrics();
-  }
+  final _localAuth = LocalAuthentication();
+  final sharedSecureStorage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+      // ✅ This ensures token persists after logout and is accessible on first unlock
+    ),
+  );
+  bool _biometricLoginAvailable = false;
 
   @override
   void dispose() {
@@ -43,84 +51,159 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _checkBiometrics() async {
-    try {
-      final canCheck = await _localAuth.canCheckBiometrics;
-      final isDeviceSupported = await _localAuth.isDeviceSupported();
-      if (mounted) {
-        setState(() {
-          _isBiometricAvailable = canCheck && isDeviceSupported;
-        });
-      }
-    } catch (e) {
-      print(e.toString());
+  @override
+  void initState() {
+    super.initState();
+    _checkBiometricLoginAvailable();
+  }
+
+  Future<void> _checkBiometricLoginAvailable() async {
+    // ✅ Check if user has logged in before
+    final enabled = await sharedSecureStorage.read(
+      key: 'biometric_login_enabled',
+    );
+    if (enabled != 'true') {
+      debugPrint(
+        'Biometric login not enabled — first install or never logged in',
+      );
+      return; // ✅ Don't show biometric button
+    }
+
+    final canCheck = await _localAuth.canCheckBiometrics;
+    final isSupported = await _localAuth.isDeviceSupported();
+
+    if (mounted) {
+      setState(() => _biometricLoginAvailable = canCheck && isSupported);
     }
   }
 
-  Future<void> _handleBiometricLogin() async {
-    setState(() => _isLoading = true);
+  // Future<void> _loginWithBiometrics() async {
+  //   final refreshToken = await _secureStorage.read(
+  //     key: 'supabase_refresh_token',
+  //   );
+  //   final accessToken = await _secureStorage.read(key: 'supabase_access_token');
+  //
+  //   debugPrint('=== BIOMETRIC LOGIN ===');
+  //   debugPrint('refreshToken: $refreshToken');
+  //   debugPrint('accessToken: $accessToken');
+  //   try {
+  //     final authenticated = await _localAuth.authenticate(
+  //       localizedReason: 'Sign in to Well-Check',
+  //       options: const AuthenticationOptions(
+  //         stickyAuth: true,
+  //         biometricOnly: false,
+  //       ),
+  //     );
+  //
+  //     if (!authenticated) return;
+  //
+  //     final accessToken = await _secureStorage.read(
+  //       key: 'supabase_access_token',
+  //     );
+  //     final refreshToken = await _secureStorage.read(
+  //       key: 'supabase_refresh_token',
+  //     );
+  //
+  //     if (accessToken == null || refreshToken == null) {
+  //       _showTokenExpiredError();
+  //       return;
+  //     }
+  //
+  //     setState(() => _isLoading = true);
+  //
+  //     final response = await Supabase.instance.client.auth.setSession(
+  //       accessToken,
+  //     ); // Supabase auto-uses refresh token internally
+  //
+  //     if (response.session != null) {
+  //       // Refresh stored tokens
+  //       await _secureStorage.write(
+  //         key: 'supabase_access_token',
+  //         value: response.session!.accessToken,
+  //       );
+  //       await _secureStorage.write(
+  //         key: 'supabase_refresh_token',
+  //         value: response.session!.refreshToken ?? '',
+  //       );
+  //       debugPrint('BIOMETRIC LOGIN — refreshToken: $refreshToken');
+  //       debugPrint('BIOMETRIC LOGIN — accessToken: $accessToken');
+  //       if (mounted) context.go('/dashboard');
+  //     } else {
+  //       _showTokenExpiredError();
+  //     }
+  //   } catch (e) {
+  //     debugPrint('Biometric login error: $e');
+  //     if (mounted) setState(() => _isLoading = false);
+  //   }
+  // }
+  Future<void> _loginWithBiometrics() async {
     try {
       final authenticated = await _localAuth.authenticate(
-        localizedReason: 'Authenticate to access your Family Shield',
+        localizedReason: 'Sign in to Well-Check',
         options: const AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: false,
         ),
       );
 
-      if (!authenticated) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Authentication cancelled.')),
-          );
+      if (!authenticated) return;
+
+      // ✅ Check if SharedPreferences is fresh (reinstall)
+      final prefs = await SharedPreferences.getInstance();
+      final wasLoggedIn = prefs.getBool('is_logged_in') ?? false;
+
+      // SharedPreferences clears on reinstall but Keychain doesn't
+      // If is_logged_in was never set, this is a reinstall
+      final biometricEnabled = await sharedSecureStorage.read(
+        key: 'biometric_login_enabled',
+      );
+
+      if (biometricEnabled == 'true' && !wasLoggedIn) {
+        // Could be reinstall — check if Supabase session exists
+        final session = Supabase.instance.client.auth.currentSession;
+        if (session == null) {
+          // Reinstall detected — clear keychain and ask to login
+          await sharedSecureStorage.delete(key: 'biometric_login_enabled');
+          await sharedSecureStorage.delete(key: 'supabase_refresh_token');
+          await sharedSecureStorage.delete(key: 'supabase_access_token');
+          setState(() => _biometricLoginAvailable = false);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Please sign in again after reinstall.'),
+              ),
+            );
+          }
+          return;
         }
-        return;
       }
 
-      // Try current session first
-      Session? session = Supabase.instance.client.auth.currentSession;
-
-      // If no session, try refreshing from stored refresh token
-      if (session == null) {
-        try {
-          final response = await Supabase.instance.client.auth.refreshSession();
-          session = response.session;
-        } catch (_) {
-          session = null;
-        }
-      }
-
-      if (session != null && mounted) {
-        ref.invalidate(currentUserProfileProvider);
-        final profile = await ref.read(currentUserProfileProvider.future);
-        if (profile != null && mounted) {
-          final matchedRole = ShieldRole.values.firstWhere(
-            (r) => r.name == profile.role,
-            orElse: () => ShieldRole.none,
-          );
-          ref.read(userRoleProvider.notifier).setRole(matchedRole);
-          context.go('/dashboard');
-        } else if (mounted) {
-          context.go('/role-selection');
-        }
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Session expired. Please sign in with email first.'),
-          ),
-        );
-      }
+      await prefs.setBool('is_logged_in', true);
+      if (mounted) context.go('/dashboard');
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Biometric auth error: ${e.toReadableMessage()}'),
-            backgroundColor: ShieldColors.urgentRed,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      debugPrint('Biometric error: $e');
+    }
+  }
+
+  void _showTokenExpiredError() async {
+    // Clear stale tokens
+    await sharedSecureStorage.delete(key: 'biometric_login_enabled');
+    await sharedSecureStorage.delete(key: 'supabase_access_token');
+    await sharedSecureStorage.delete(key: 'supabase_refresh_token');
+
+    setState(() {
+      _biometricLoginAvailable = false;
+      _isLoading = false;
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Session expired. Please sign in again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -134,26 +217,41 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
     setState(() => _isLoading = true);
     try {
-      if (_emailController.text != "reviewer@wellcheck.com") {
-        final authRepo = ref.read(authRepositoryProvider);
-        await authRepo.signInWithMagicLink(_emailController.text.trim(), '');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Verification PIN sent to your email.'),
-            ),
-          );
+      if (_formKey.currentState!.validate()) {
+        if (_emailController.text != "reviewer@wellcheck.com") {
+          final authRepo = ref.read(authRepositoryProvider);
+          await authRepo.signInWithMagicLink(_emailController.text.trim(), '');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Verification PIN sent to your email.'),
+              ),
+            );
+          }
         }
+        context.push(
+          '/otp?email=${Uri.encodeComponent(_emailController.text.trim())}',
+        );
       }
-      context.push(
-        '/otp?email=${Uri.encodeComponent(_emailController.text.trim())}',
-      );
     } catch (e) {
       print(e.toString());
       if (mounted) {
+        String errorMessage =
+            'Unable to send verification code. Please try again.';
+        if (e.toString().contains('rate limit')) {
+          errorMessage =
+              'Too many attempts. Please wait a few minutes before trying again.';
+        } else if (e.toString().contains('Invalid email')) {
+          errorMessage = 'Please enter a valid email address.';
+        } else if (e.toString().contains('over_email_send_rate_limit')) {
+          errorMessage =
+              'Too many attempts. Please wait a few minutes before trying again';
+        } else if (e.toString().toLowerCase().contains('no address')) {
+          errorMessage = 'No internet connection. Please check your network.';
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Login failed: $e'),
+            content: Text(errorMessage),
             backgroundColor: ShieldColors.urgentRed,
           ),
         );
@@ -179,7 +277,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
+      final prefs = await SharedPreferences.getInstance();
 
+      await prefs.setBool('is_logged_in', true);
+      // final storage = const FlutterSecureStorage();
+      final storage = const FlutterSecureStorage(
+        aOptions: AndroidOptions(encryptedSharedPreferences: true),
+        iOptions: IOSOptions(
+          accessibility: KeychainAccessibility.first_unlock,
+          // ✅ This ensures token persists after logout and is accessible on first unlock
+        ),
+      );
+      await storage.write(key: 'biometric_login_enabled', value: 'true');
       if (mounted) {
         // Session is now set — load profile and navigate
         ref.invalidate(currentUserProfileProvider);
@@ -367,7 +476,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     //         ),
     //
     //         // Biometric
-    //         if (_isBiometricAvailable) ...[
+    //         if (_biometricLoginAvailable) ...[
     //           const SizedBox(height: 24),
     //           Row(
     //             children: const [
@@ -381,7 +490,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     //           ),
     //           const SizedBox(height: 24),
     //           IconButton(
-    //             onPressed: _isLoading ? null : _handleBiometricLogin,
+    //             onPressed: () {
+    //               debugPrint('BIOMETRIC BUTTON TAPPED'); // ← add this
+    //               _loginWithBiometrics();
+    //             },
     //             icon: const Icon(
     //               Icons.fingerprint,
     //               size: 48,
@@ -400,253 +512,273 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     // );
     return Scaffold(
       backgroundColor: Colors.grey.shade50, // o
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              ShieldColors.activeTeal, // teal top
-              ShieldColors.activeTeal.withOpacity(0.5), // teal top
-              Colors.grey.shade100, // off-white bottom
-              Colors.grey.shade50, // o// off-white bottom
-            ],
+      body: Form(
+        key: _formKey,
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                ShieldColors.activeTeal, // teal top
+                ShieldColors.activeTeal.withOpacity(0.5), // teal top
+                Colors.grey.shade100, // off-white bottom
+                Colors.grey.shade50, // o// off-white bottom
+              ],
+            ),
           ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              children: [
-                const SizedBox(height: 64),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                children: [
+                  const SizedBox(height: 64),
 
-                // App Icon
-                Container(
-                  width: 150,
-                  height: 140,
-                  decoration: BoxDecoration(
-                    //   color: Colors.white.withOpacity(0.25),
-                    borderRadius: BorderRadius.circular(24),
+                  // App Icon
+                  Container(
+                    width: 150,
+                    height: 140,
+                    decoration: BoxDecoration(
+                      //   color: Colors.white.withOpacity(0.25),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Image.asset("assets/logo.png"),
                   ),
-                  child: Image.asset("assets/logo.png"),
-                ),
 
-                const SizedBox(height: 18),
+                  const SizedBox(height: 18),
 
-                // Title
-                const Text(
-                  'Welcome Back',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1A1A1A),
+                  // Title
+                  const Text(
+                    'Welcome Back',
+                    style: TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A1A1A),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Sign in to continue',
-                  style: TextStyle(fontSize: 14, color: Colors.black),
-                ),
-
-                const SizedBox(height: 30),
-
-                // White card area
-                Container(
-                  //padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    //   color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.06),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Sign in to continue',
+                    style: TextStyle(fontSize: 14, color: Colors.black),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // OTP Login label
-                      // Container(
-                      //   padding: const EdgeInsets.symmetric(vertical: 10),
-                      //   decoration: BoxDecoration(
-                      //     color: const Color(0xFF00796B),
-                      //     borderRadius: BorderRadius.circular(10),
-                      //   ),
-                      //   alignment: Alignment.center,
-                      //   child: const Text(
-                      //     'OTP Login',
-                      //     style: TextStyle(
-                      //       color: Colors.white,
-                      //       fontWeight: FontWeight.w600,
-                      //       fontSize: 15,
-                      //     ),
-                      //   ),
-                      // ),
-                      const SizedBox(height: 20),
 
-                      // Email field
-                      TextFormField(
-                        controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: InputDecoration(
-                          hintText: 'EMAIL ADDRESS',
-                          hintStyle: const TextStyle(
-                            fontSize: 13,
-                            color: Color(0xFFAAAAAA),
-                            letterSpacing: 0.5,
-                          ),
-                          prefixIcon: Icon(
-                            Icons.email_outlined,
-                            color: Colors.grey.shade600,
-                            size: 25,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            vertical: 14,
-                            horizontal: 12,
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(
-                              color: Color(0xFFDDDDDD),
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(
-                              color: Color(0xFF00796B),
-                              width: 1.5,
-                            ),
-                          ),
+                  const SizedBox(height: 30),
+
+                  // White card area
+                  Container(
+                    //padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      //   color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.06),
+                          blurRadius: 16,
+                          offset: const Offset(0, 4),
                         ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Send OTP button
-                      SizedBox(
-                        height: 50,
-                        child: ElevatedButton(
-                          onPressed: _isLoading ? null : _handleOtpLogin,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: ShieldColors.activeTeal,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            elevation: 0,
-                          ),
-                          child: _isLoading
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Text(
-                                  'SEND VERIFICATION PIN',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 0.8,
-                                  ),
-                                ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // const SizedBox(height: 24),
-                //
-                // // OR divider
-                // Row(
-                //   children: [
-                //     Expanded(
-                //       child: Divider(
-                //         color: Colors.grey.shade400,
-                //         thickness: 0.5,
-                //       ),
-                //     ),
-                //     Padding(
-                //       padding: const EdgeInsets.symmetric(horizontal: 12),
-                //       child: Text(
-                //         'OR',
-                //         style: TextStyle(
-                //           color: Colors.grey.shade500,
-                //           fontSize: 13,
-                //         ),
-                //       ),
-                //     ),
-                //     Expanded(
-                //       child: Divider(
-                //         color: Colors.grey.shade400,
-                //         thickness: 0.5,
-                //       ),
-                //     ),
-                //   ],
-                // ),
-                //
-                // const SizedBox(height: 20),
-                //
-                // // Biometrics
-                // GestureDetector(
-                //   onTap: () {
-                //     // trigger biometric auth
-                //   },
-                //   child: Column(
-                //     children: [
-                //       Icon(
-                //         Icons.fingerprint,
-                //         size: 48,
-                //         color: const Color(0xFF00796B),
-                //       ),
-                //       const SizedBox(height: 6),
-                //       const Text(
-                //         'Use Biometrics',
-                //         style: TextStyle(
-                //           color: Color(0xFF00796B),
-                //           fontSize: 14,
-                //           fontWeight: FontWeight.w500,
-                //         ),
-                //       ),
-                //     ],
-                //   ),
-                // ),
-                const SizedBox(height: 32),
-
-                // Sign up link
-                GestureDetector(
-                  onTap: () => context.push('/register'),
-
-                  child: RichText(
-                    text: const TextSpan(
-                      style: TextStyle(fontSize: 13, color: Color(0xFF777777)),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        TextSpan(
-                          text: "Don't have an account? ",
-                          style: TextStyle(
-                            color: Colors.black,
-                            fontWeight: FontWeight.bold,
+                        // OTP Login label
+                        // Container(
+                        //   padding: const EdgeInsets.symmetric(vertical: 10),
+                        //   decoration: BoxDecoration(
+                        //     color: const Color(0xFF00796B),
+                        //     borderRadius: BorderRadius.circular(10),
+                        //   ),
+                        //   alignment: Alignment.center,
+                        //   child: const Text(
+                        //     'OTP Login',
+                        //     style: TextStyle(
+                        //       color: Colors.white,
+                        //       fontWeight: FontWeight.w600,
+                        //       fontSize: 15,
+                        //     ),
+                        //   ),
+                        // ),
+                        const SizedBox(height: 20),
+
+                        // Email field
+                        TextFormField(
+                          controller: _emailController,
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'Please enter your email address';
+                            }
+
+                            final emailRegex = RegExp(
+                              r'^[\w\-.]+@([\w-]+\.)+[\w-]{2,4}$',
+                            );
+
+                            if (!emailRegex.hasMatch(value.trim())) {
+                              return 'Please enter a valid email address';
+                            }
+
+                            return null;
+                          },
+                          keyboardType: TextInputType.emailAddress,
+                          decoration: InputDecoration(
+                            hintText: 'EMAIL ADDRESS',
+                            hintStyle: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFFAAAAAA),
+                              letterSpacing: 0.5,
+                            ),
+                            prefixIcon: Icon(
+                              Icons.email_outlined,
+                              color: Colors.grey.shade600,
+                              size: 25,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 14,
+                              horizontal: 12,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: const BorderSide(
+                                color: Color(0xFFDDDDDD),
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: const BorderSide(
+                                color: Color(0xFF00796B),
+                                width: 1.5,
+                              ),
+                            ),
                           ),
                         ),
-                        TextSpan(
-                          text: 'Sign Up',
-                          style: TextStyle(
-                            color: Color(0xFF00796B),
-                            fontWeight: FontWeight.bold,
+
+                        const SizedBox(height: 16),
+
+                        // Send OTP button
+                        SizedBox(
+                          height: 50,
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _handleOtpLogin,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: ShieldColors.activeTeal,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              elevation: 0,
+                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text(
+                                    'SEND VERIFICATION PIN',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 0.8,
+                                    ),
+                                  ),
                           ),
                         ),
                       ],
                     ),
                   ),
-                ),
 
-                const SizedBox(height: 32),
-              ],
+                  const SizedBox(height: 24),
+                  if (_biometricLoginAvailable) ...[
+                    // OR divider
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Divider(
+                            color: Colors.grey.shade400,
+                            thickness: 0.5,
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Text(
+                            'OR',
+                            style: TextStyle(
+                              color: Colors.grey.shade500,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Divider(
+                            color: Colors.grey.shade400,
+                            thickness: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Biometrics
+                    GestureDetector(
+                      onTap: _loginWithBiometrics,
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.fingerprint,
+                            size: 48,
+                            color: const Color(0xFF00796B),
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Use Biometrics',
+                            style: TextStyle(
+                              color: Color(0xFF00796B),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 32),
+
+                  // Sign up link
+                  GestureDetector(
+                    onTap: () => context.push('/register'),
+
+                    child: RichText(
+                      text: const TextSpan(
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF777777),
+                        ),
+                        children: [
+                          TextSpan(
+                            text: "Don't have an account? ",
+                            style: TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          TextSpan(
+                            text: 'Sign Up',
+                            style: TextStyle(
+                              color: Color(0xFF00796B),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
+                ],
+              ),
             ),
           ),
         ),

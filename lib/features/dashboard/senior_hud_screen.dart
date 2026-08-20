@@ -22,6 +22,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/data/medication_provider.dart';
 import '../../core/data/tools_repository.dart';
+import '../../core/navigation/shield_router.dart';
 import '../../core/notifications/push_notification_service.dart';
 import '../safety/services/location_service.dart';
 import '../safety/services/pulse_service.dart';
@@ -60,6 +61,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
   final notesController = TextEditingController();
   final notesFocus = FocusNode();
   late Stream<List<Map<String, dynamic>>> _missedStream;
+  String? _avatarUrl;
 
   @override
   void initState() {
@@ -73,16 +75,29 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final granted = await LocationService.requestLocationPermissions(context);
+      final granted = await LocationService.checkLocationPermissions(context);
       if (!granted) {
-        // Optionally show a snackbar/dialog explaining why it's needed
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Location access is required for your safety. Please enable it in Settings.',
+            SnackBar(
+              content: const Text(
+                'Location access is required for your safety.',
               ),
-              duration: Duration(seconds: 4),
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(
+                label: 'Enable',
+                onPressed: () async {
+                  await LocationService.requestSettingsRedirect(
+                    context,
+                    title: 'Location Permission Required',
+                    steps: [
+                      'Tap "Open Settings" below',
+                      'Select "Location"',
+                      'Choose an option',
+                    ],
+                  );
+                },
+              ),
             ),
           );
         }
@@ -92,6 +107,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
       print("asas");
 
       await PulseService().broadcastPulse(profile.userId);
+      _loadAvatar();
     });
   }
 
@@ -452,6 +468,89 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
     super.dispose();
   }
 
+  Future<void> _resolveDueSchedules(String userId) async {
+    final nowUtc = DateTime.now().toUtc();
+
+    final dueSchedules = await Supabase.instance.client
+        .from('checkin_schedules')
+        .select()
+        .eq('assigned_user_id', userId)
+        .eq('is_active', true)
+        .eq('is_completed', false)
+        .lte('scheduled_at', nowUtc.toIso8601String());
+
+    for (final schedule in dueSchedules) {
+      final recurrence = schedule['recurrence'] as String?;
+      final isRecurring =
+          recurrence == 'daily' ||
+          recurrence == 'every_other_day' ||
+          recurrence == 'weekly' ||
+          recurrence == 'monthly';
+
+      if (isRecurring) {
+        DateTime nextDate = DateTime.parse(schedule['scheduled_at']).toUtc();
+        switch (recurrence) {
+          case 'daily':
+            nextDate = nextDate.add(const Duration(days: 1));
+            break;
+          case 'every_other_day':
+            nextDate = nextDate.add(const Duration(days: 2));
+            break;
+          case 'weekly':
+            final days = List<int>.from(schedule['days_of_week'] ?? []);
+            if (days.isEmpty) {
+              nextDate = nextDate.add(const Duration(days: 7));
+            } else {
+              final currentDay = nextDate.weekday % 7;
+              int? found;
+              for (final d in days) {
+                if (d > currentDay) {
+                  found = d;
+                  break;
+                }
+              }
+              found ??= days.first + 7;
+              nextDate = nextDate.add(Duration(days: found - currentDay));
+            }
+            break;
+          case 'monthly':
+            nextDate = DateTime(
+              nextDate.year,
+              nextDate.month + 1,
+              nextDate.day,
+              nextDate.hour,
+              nextDate.minute,
+            );
+            break;
+        }
+
+        await Supabase.instance.client
+            .from('checkin_schedules')
+            .update({
+              'status': 'pending',
+              'completed_at': DateTime.now().toIso8601String(),
+              'scheduled_at': nextDate.toIso8601String(),
+              'reminder_sent': false,
+              'reminder_sent_at': null,
+              'missed_alert_sent': false,
+              'missed_alert_sent_at': null,
+              'last_emergency_alert_at': null, // 🔑 stops the repeat loop
+            })
+            .eq('id', schedule['id']);
+      } else {
+        await Supabase.instance.client
+            .from('checkin_schedules')
+            .update({
+              'is_completed': true,
+              'completed_at': DateTime.now().toIso8601String(),
+              'status': 'completed',
+              'last_emergency_alert_at': null, // 🔑 stops the repeat loop
+            })
+            .eq('id', schedule['id']);
+      }
+    }
+  }
+
   // ── Check Status: update profile last_seen + GPS ──
   Future<void> _performCheckIn() async {
     setState(() => _isCheckingIn = true);
@@ -521,7 +620,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
         'battery_level': level, // Platform battery TBD
         // 'created_by': profile.userId,
       });
-
+      await _resolveDueSchedules(profile.userId);
       // Also insert into check_ins table
       await Supabase.instance.client.from('check_ins').insert({
         'family_id': profile.familyId,
@@ -649,7 +748,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
               .triggerSiren(
                 profile.familyId,
                 notesController.text.isEmpty
-                    ? 'Senior pressed Emergency Help'
+                    ? '${profile.fullName} pressed Emergency Help'
                     : notesController.text.trim(),
               );
 
@@ -819,20 +918,37 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
             // builder: (_) => const ContactsSheet(),
             // );
             //         }),
-            _elderMenuItem(ctx, Icons.person_outline, 'My Profile', () {
+            _elderMenuItem(ctx, Icons.person_outline, 'My Profile', () async {
               Navigator.pop(ctx);
-              showModalBottomSheet(
+              await showModalBottomSheet(
                 context: context,
                 isScrollControlled: true,
                 backgroundColor: Colors.transparent,
                 builder: (_) => const ProfileSettingsView(),
               );
+              _loadAvatar();
             }),
+
             const SizedBox(height: 16),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _loadAvatar() async {
+    try {
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId == null) return;
+      final result = await Supabase.instance.client
+          .from('profiles')
+          .select('avatar_url')
+          .eq('id', userId)
+          .maybeSingle();
+      if (result != null && result['avatar_url'] != null && mounted) {
+        setState(() => _avatarUrl = result['avatar_url'] as String);
+      }
+    } catch (_) {}
   }
 
   Widget _elderMenuItem(
@@ -866,7 +982,84 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
 
       if (missedCheckIn == null) return;
       if (profile == null) return;
+      double lat = 0.0;
+      double lng = 0.0;
+      bool gpsSuccess = false;
 
+      try {
+        bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        if (serviceEnabled) {
+          LocationPermission permission = await Geolocator.checkPermission();
+          if (permission == LocationPermission.denied) {
+            permission = await Geolocator.requestPermission();
+          }
+          if (permission == LocationPermission.deniedForever) {
+            setState(() {
+              imOkayLoad = false;
+            });
+            throw Exception(
+              'Location permissions are permanently denied, we cannot request permissions. Please enable in Settings.',
+            );
+          }
+
+          if (permission == LocationPermission.whileInUse ||
+              permission == LocationPermission.always) {
+            // First attempt: High accuracy, short timeout
+            try {
+              final position = await Geolocator.getCurrentPosition(
+                locationSettings: const LocationSettings(
+                  accuracy: LocationAccuracy.high,
+                ),
+                timeLimit: const Duration(seconds: 5),
+              );
+              lat = position.latitude;
+              lng = position.longitude;
+              gpsSuccess = true;
+            } catch (_) {
+              setState(() {
+                imOkayLoad = false;
+              });
+              // Fallback 1: Low accuracy (Cell tower/Wi-Fi), very fast
+              try {
+                final position = await Geolocator.getCurrentPosition(
+                  locationSettings: const LocationSettings(
+                    accuracy: LocationAccuracy.low,
+                  ),
+                  timeLimit: const Duration(seconds: 4),
+                );
+                lat = position.latitude;
+                lng = position.longitude;
+                gpsSuccess = true;
+              } catch (_) {
+                setState(() {
+                  imOkayLoad = false;
+                });
+                // Fallback 2: Last known position
+                final lastPos = await Geolocator.getLastKnownPosition();
+                if (lastPos != null) {
+                  lat = lastPos.latitude;
+                  lng = lastPos.longitude;
+                  gpsSuccess = true;
+                }
+              }
+            }
+          }
+        } else {
+          setState(() {
+            imOkayLoad = false;
+          });
+          await Geolocator.openLocationSettings();
+          throw Exception('GPS Location Services are disabled on this device.');
+        }
+      } catch (e) {
+        setState(() {
+          imOkayLoad = false;
+        });
+        if (e is Exception && e.toString().contains('permanently denied') ||
+            e.toString().contains('disabled')) {
+          rethrow;
+        }
+      }
       await Supabase.instance.client.from('well_events').insert({
         'family_id': missedCheckIn!['family_id'],
         'user_id': profile.userId,
@@ -877,13 +1070,20 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
             ? 'User confirmed they are OK after missing a scheduled check-in.'
             : notesController.text.trim(),
       });
-
+      await _resolveDueSchedules(profile.userId);
       await Supabase.instance.client
           .from('check_ins')
           .update({'acknowledged': true})
           .eq('user_id', profile.userId)
           .eq('status_message', 'Missed check-in')
           .eq('acknowledged', false);
+      await Supabase.instance.client.from('check_ins').insert({
+        'family_id': profile.familyId,
+        'user_id': profile.userId,
+        'latitude': lat,
+        'longitude': lng,
+        'status_message': "Manual check-in",
+      });
 
       if (!mounted) return;
 
@@ -1146,13 +1346,13 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                         width: 2,
                                       ),
                                     ),
-                                    child: profileAsync.value!.avatarUrl != null
+                                    child: _avatarUrl != null
                                         ? ClipRRect(
                                             borderRadius: BorderRadius.circular(
                                               26,
                                             ),
                                             child: Image.network(
-                                              profileAsync.value!.avatarUrl ??
+                                              '${_avatarUrl}?t=${DateTime.now().millisecondsSinceEpoch}' ??
                                                   "",
                                               fit: BoxFit.cover,
                                             ),
@@ -2459,8 +2659,69 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                                       ),
                                                                     ),
 
-                                                                    const SizedBox(
-                                                                      height: 6,
+                                                                    if (med.doctor !=
+                                                                        null) ...[
+                                                                      SizedBox(
+                                                                        height:
+                                                                            5,
+                                                                      ),
+
+                                                                      RichText(
+                                                                        text: TextSpan(
+                                                                          style: TextStyle(
+                                                                            color:
+                                                                                Colors.blueGrey,
+                                                                            fontSize:
+                                                                                12,
+                                                                            fontWeight:
+                                                                                FontWeight.w500,
+                                                                          ),
+                                                                          children: [
+                                                                            TextSpan(
+                                                                              text: 'Prescribing doctor: ',
+                                                                            ),
+                                                                            TextSpan(
+                                                                              text: med.doctor,
+                                                                              style: TextStyle(
+                                                                                fontWeight: FontWeight.bold,
+                                                                              ),
+                                                                            ),
+                                                                          ],
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                    if (med.instructions !=
+                                                                        null) ...[
+                                                                      SizedBox(
+                                                                        height:
+                                                                            5,
+                                                                      ),
+                                                                      RichText(
+                                                                        text: TextSpan(
+                                                                          style: TextStyle(
+                                                                            color:
+                                                                                Colors.blueGrey,
+                                                                            fontSize:
+                                                                                12,
+                                                                            fontWeight:
+                                                                                FontWeight.w500,
+                                                                          ),
+                                                                          children: [
+                                                                            TextSpan(
+                                                                              text: 'Instruction: ',
+                                                                            ),
+                                                                            TextSpan(
+                                                                              text: med.instructions,
+                                                                              style: TextStyle(
+                                                                                fontWeight: FontWeight.bold,
+                                                                              ),
+                                                                            ),
+                                                                          ],
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                    SizedBox(
+                                                                      height: 5,
                                                                     ),
 
                                                                     // if (nextDose !=
@@ -3183,6 +3444,89 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
     });
   }
 
+  Future<void> _resolveDueSchedules(String userId) async {
+    final nowUtc = DateTime.now().toUtc();
+
+    final dueSchedules = await Supabase.instance.client
+        .from('checkin_schedules')
+        .select()
+        .eq('assigned_user_id', userId)
+        .eq('is_active', true)
+        .eq('is_completed', false)
+        .lte('scheduled_at', nowUtc.toIso8601String());
+
+    for (final schedule in dueSchedules) {
+      final recurrence = schedule['recurrence'] as String?;
+      final isRecurring =
+          recurrence == 'daily' ||
+          recurrence == 'every_other_day' ||
+          recurrence == 'weekly' ||
+          recurrence == 'monthly';
+
+      if (isRecurring) {
+        DateTime nextDate = DateTime.parse(schedule['scheduled_at']).toUtc();
+        switch (recurrence) {
+          case 'daily':
+            nextDate = nextDate.add(const Duration(days: 1));
+            break;
+          case 'every_other_day':
+            nextDate = nextDate.add(const Duration(days: 2));
+            break;
+          case 'weekly':
+            final days = List<int>.from(schedule['days_of_week'] ?? []);
+            if (days.isEmpty) {
+              nextDate = nextDate.add(const Duration(days: 7));
+            } else {
+              final currentDay = nextDate.weekday % 7;
+              int? found;
+              for (final d in days) {
+                if (d > currentDay) {
+                  found = d;
+                  break;
+                }
+              }
+              found ??= days.first + 7;
+              nextDate = nextDate.add(Duration(days: found - currentDay));
+            }
+            break;
+          case 'monthly':
+            nextDate = DateTime(
+              nextDate.year,
+              nextDate.month + 1,
+              nextDate.day,
+              nextDate.hour,
+              nextDate.minute,
+            );
+            break;
+        }
+
+        await Supabase.instance.client
+            .from('checkin_schedules')
+            .update({
+              'status': 'pending',
+              'completed_at': DateTime.now().toIso8601String(),
+              'scheduled_at': nextDate.toIso8601String(),
+              'reminder_sent': false,
+              'reminder_sent_at': null,
+              'missed_alert_sent': false,
+              'missed_alert_sent_at': null,
+              'last_emergency_alert_at': null, // 🔑 stops the repeat loop
+            })
+            .eq('id', schedule['id']);
+      } else {
+        await Supabase.instance.client
+            .from('checkin_schedules')
+            .update({
+              'is_completed': true,
+              'completed_at': DateTime.now().toIso8601String(),
+              'status': 'completed',
+              'last_emergency_alert_at': null, // 🔑 stops the repeat loop
+            })
+            .eq('id', schedule['id']);
+      }
+    }
+  }
+
   void _checkScheduleTime(DateTime nextCheckin) {
     final now = DateTime.now();
 
@@ -3462,37 +3806,6 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
       //   }
       // });
     }
-  }
-
-  Future<bool?> _showCheckinDialog() async {
-    final result = await showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (_) {
-        return AlertDialog(
-          title: const Text("Time To Check In"),
-          content: const Text("Please confirm your status"),
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-              onPressed: () {
-                Navigator.of(context).pop(true);
-              },
-              child: const Text("I'M OK"),
-            ),
-
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              onPressed: () {
-                Navigator.of(context).pop(false);
-              },
-              child: const Text("I NEED HELP"),
-            ),
-          ],
-        );
-      },
-    );
-    return result;
   }
 
   @override
@@ -3792,7 +4105,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                     // ❌ DELETE the second `fullSchedule` fetch inside if(isRecurring) — REMOVE IT
 
                     DateTime? nextDate;
-
+                    await _resolveDueSchedules(widget.profile.userId);
                     if (isRecurring) {
                       nextDate =
                           scheduledAtUtc; // ✅ reuse already fetched value

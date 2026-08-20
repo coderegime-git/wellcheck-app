@@ -112,7 +112,8 @@ class CheckInHistoryScreen extends ConsumerWidget {
 
               Color statusColor;
 
-              if (status.toLowerCase().contains('missed')) {
+              if (status.toLowerCase().contains('missed') ||
+                  status.toLowerCase().contains('esc')) {
                 statusColor = Colors.red;
               } else if (status.toLowerCase().contains('manual')) {
                 statusColor = Colors.orange;
@@ -155,6 +156,8 @@ class CheckInHistoryScreen extends ConsumerWidget {
                     child: Text(
                       status.toLowerCase().contains('missed')
                           ? 'Missed'
+                          : status.toLowerCase().contains('esc')
+                          ? "Missed"
                           : 'Completed',
                       style: TextStyle(
                         color: statusColor,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -208,6 +209,9 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                 TextField(
                   focusNode: profileNode,
                   controller: _nameController,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z\s'-]")),
+                  ],
                   decoration: InputDecoration(
                     labelText: 'Full Name',
                     border: OutlineInputBorder(
@@ -220,6 +224,10 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                   focusNode: phoneNumberNode,
                   controller: phoneNumber,
                   keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(15),
+                  ],
                   decoration: InputDecoration(
                     labelText: 'Phone Number',
                     border: OutlineInputBorder(

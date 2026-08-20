@@ -33,21 +33,31 @@ class _PetDashboardState extends ConsumerState<PetDashboard> {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final granted = await LocationService.requestLocationPermissions(context);
-      if (!mounted) return;
-
+      final granted = await LocationService.checkLocationPermissions(context);
       if (!granted) {
-        // Optionally show a snackbar/dialog explaining why it's needed
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Location access is required for your safety. Please enable it in Settings.',
+            SnackBar(
+              content: const Text(
+                'Location access is required for your safety.',
               ),
-              duration: Duration(seconds: 4),
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(
+                label: 'Enable',
+                onPressed: () async {
+                  await LocationService.requestSettingsRedirect(
+                    context,
+                    title: 'Location Permission Required',
+                    steps: [
+                      'Tap "Open Settings" below',
+                      'Select "Location"',
+                      'Choose an option',
+                    ],
+                  );
+                },
+              ),
             ),
           );
-          await PulseService().broadcastPulse(null);
         }
       }
     });
@@ -974,7 +984,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
               .read(safetyRepositoryProvider)
               .triggerSiren(
                 profile.familyId,
-                'Senior initiated an emergency state',
+                '${profile.fullName} initiated an emergency state',
               );
 
           if (mounted) {

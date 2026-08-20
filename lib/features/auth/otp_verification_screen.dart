@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/data/auth_repository.dart';
@@ -57,6 +59,31 @@ class _OTPVerificationScreenState extends ConsumerState<OTPVerificationScreen> {
           return;
         }
       }
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('is_logged_in', true);
+        // final storage = const FlutterSecureStorage();
+        final storage = const FlutterSecureStorage(
+          aOptions: AndroidOptions(encryptedSharedPreferences: true),
+          iOptions: IOSOptions(
+            accessibility: KeychainAccessibility.first_unlock,
+            // ✅ This ensures token persists after logout and is accessible on first unlock
+          ),
+        );
+        await storage.write(key: 'biometric_login_enabled', value: 'true');
+
+        await storage.write(
+          key: 'supabase_access_token',
+          value: session.accessToken,
+        );
+        await storage.write(
+          key: 'supabase_refresh_token',
+          value: session.refreshToken ?? '',
+        );
+        await storage.write(key: 'biometric_login_enabled', value: 'true');
+      }
+
       if (mounted) {
         // Force a re-fetch of the profile just in case it was cached as null
         ref.invalidate(currentUserProfileProvider);

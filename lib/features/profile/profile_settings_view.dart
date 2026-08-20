@@ -1,8 +1,14 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:go_router/go_router.dart';
 import 'package:health/health.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,7 +17,9 @@ import 'package:well_check_v3/core/data/user_profile_provider.dart';
 
 import '../../core/data/health_repository.dart';
 import '../../core/data/subscription_provider.dart';
+import '../../core/navigation/shield_router.dart';
 import '../../core/notifications/push_notification_service.dart';
+import '../safety/services/purchase_services.dart';
 import 'health_kit_screen.dart';
 
 class ProfileSettingsView extends ConsumerStatefulWidget {
@@ -87,7 +95,13 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
           .from('profiles')
           .update({'avatar_url': publicUrl})
           .eq('id', userId);
+      final result = await Supabase.instance.client
+          .from('profiles')
+          .update({'avatar_url': publicUrl})
+          .eq('id', userId)
+          .select();
 
+      print(result);
       if (mounted) {
         setState(() => _avatarUrl = publicUrl);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -99,6 +113,7 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
       }
     } catch (e) {
       print(e.toString());
+      print("Storagee");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -108,50 +123,200 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
         );
       }
     } finally {
+      final profileAsync = ref.watch(currentUserProfileProvider);
+
+      if (profileAsync.value!.role != "senior") {
+        ref.invalidate(currentUserProfileProvider);
+
+        ref.invalidate(userRoleProvider);
+      }
       if (mounted) setState(() => _isUploading = false);
     }
   }
 
-  Future<void> _logout() async {
+  final sharedSecureStorage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+      // ✅ This ensures token persists after logout and is accessible on first unlock
+    ),
+  );
+
+  Future<void> _logoutData() async {
+    try {
+      // ✅ STEP 1 — Refresh session first to get valid access token
+      Session? session;
+      try {
+        final refreshed = await Supabase.instance.client.auth.refreshSession();
+        session = refreshed.session;
+        debugPrint('REFRESHED SESSION: ${session?.refreshToken}');
+      } catch (e) {
+        // Use current session if refresh fails
+        session = Supabase.instance.client.auth.currentSession;
+        debugPrint('USING CURRENT SESSION: ${session?.refreshToken}');
+      }
+
+      final accessToken = session?.accessToken;
+      debugPrint('ACCESS TOKEN FOR LOGOUT: $accessToken');
+
+      // ✅ STEP 2 — Save tokens before logout
+      if (session != null) {
+        await sharedSecureStorage.write(
+          key: 'supabase_refresh_token',
+          value: session.refreshToken ?? '',
+        );
+        await sharedSecureStorage.write(
+          key: 'supabase_access_token',
+          value: session.accessToken,
+        );
+        await sharedSecureStorage.write(
+          key: 'biometric_login_enabled',
+          value: 'true',
+        );
+        debugPrint('LOGOUT — token saved: ${session.refreshToken}');
+      }
+
+      // ✅ STEP 3 — Stop services
+      PushNotificationService.saveTokenToProfile(null);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('priv_biometric', false);
+      FlutterBackgroundService().invoke('stopService');
+
+      await dotenv.load(fileName: ".env");
+
+      final supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
+      final supabaseKey = dotenv.env['SUPABASE_ANON_KEY'] ?? '';
+      final res = await http.post(
+        Uri.parse('$supabaseUrl/auth/v1/logout?scope=local'),
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': 'Bearer $accessToken',
+        },
+      );
+      debugPrint('LOGOUT RESPONSE: ${res.statusCode} ${res.body}');
+
+      // ✅ STEP 5 — Clear local state and navigate
+      if (res.statusCode == 204) {
+        await Supabase.instance.client.auth.signOut(scope: SignOutScope.local);
+      } else {
+        // Fallback — just navigate manually
+        final router = ref.read(shieldRouterProvider);
+        router.go('/');
+      }
+
+      // ✅ STEP 6 — RC logout
+      try {
+        await PurchasesService.instance.logOut();
+      } catch (e) {
+        debugPrint('[RC] logOut skipped: $e');
+      }
+    } catch (e) {
+      debugPrint('Logout error: $e');
+      // Always navigate to login even on error
+      final router = ref.read(shieldRouterProvider);
+      router.go('/');
+    }
+  }
+
+  // Future<void> _logout() async {
+  //   final confirmed = await showDialog<bool>(
+  //     context: context,
+  //     builder: (ctx) => AlertDialog(
+  //       title: const Text('Log Out?'),
+  //       content: const Text('You will be signed out of the Shield network.'),
+  //       actions: [
+  //         TextButton(
+  //           onPressed: () => Navigator.pop(ctx, false),
+  //           child: const Text('Cancel'),
+  //         ),
+  //         ElevatedButton(
+  //           style: ElevatedButton.styleFrom(
+  //             backgroundColor: ShieldColors.urgentRed,
+  //           ),
+  //           onPressed: () => Navigator.pop(ctx, true),
+  //           child: const Text('Log Out', style: TextStyle(color: Colors.white)),
+  //         ),
+  //       ],
+  //     ),
+  //   );
+  //   if (confirmed != true) return;
+  //
+  //   setState(() => _isLoggingOut = true);
+  //
+  //   _logoutData();
+  // }
+  Future<void> _showLogoutConfirmation() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Log Out?'),
-        content: const Text('You will be signed out of the Shield network.'),
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Log Out',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: const Text('Are you sure you want to log out?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: ShieldColors.urgentRed,
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey.shade800),
             ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Log Out', style: TextStyle(color: Colors.white)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              'Log Out',
+              style: TextStyle(
+                color: ShieldColors.urgentRed,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
     );
-    if (confirmed != true) return;
 
-    setState(() => _isLoggingOut = true);
-    try {
-      PushNotificationService.saveTokenToProfile(null);
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('priv_biometric', false);
-      FlutterBackgroundService().invoke('stopService');
-      await Supabase.instance.client.auth.signOut();
-      // Router will handle navigation to login via auth state listener
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoggingOut = false);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Logout failed: $e')));
-      }
+    if (confirmed == true) {
+      await _logout();
     }
+  }
+
+  Future<void> _logout() async {
+    setState(() {
+      _isLoggingOut = true;
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('priv_biometric', false);
+    await prefs.setBool('is_logged_in', false);
+
+    await PushNotificationService.saveTokenToProfile(null);
+    FlutterBackgroundService().invoke('stopService');
+
+    try {
+      await PurchasesService.instance.logOut();
+    } catch (e) {
+      debugPrint('[RC] logOut skipped: $e');
+    }
+
+    ref.read(shieldRouterProvider).go('/');
+  }
+
+  Future<CustomerInfo> waitForEntitlementUpdate(
+    String expectedProductId, {
+    int retries = 5,
+  }) async {
+    for (var i = 0; i < retries; i++) {
+      await Purchases.invalidateCustomerInfoCache();
+      final info = await Purchases.getCustomerInfo();
+      final active = info.entitlements.active.values;
+      if (active.any((e) => e.productIdentifier == expectedProductId)) {
+        return info;
+      }
+      await Future.delayed(const Duration(seconds: 2));
+    }
+    return Purchases.getCustomerInfo();
   }
 
   @override
@@ -200,7 +365,9 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
                       alpha: 0.1,
                     ),
                     backgroundImage: _avatarUrl != null
-                        ? NetworkImage(_avatarUrl!)
+                        ? CachedNetworkImageProvider(
+                            '$_avatarUrl?t=${DateTime.now().millisecondsSinceEpoch}',
+                          )
                         : null,
                     child: _isUploading
                         ? const CircularProgressIndicator()
@@ -335,7 +502,24 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
                       title: const Text('Manage Subscription'),
                       subtitle: const Text('Cancel, restore or get help'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => RevenueCatUI.presentCustomerCenter(),
+                      onTap: () async {
+                        await Purchases.invalidateCustomerInfoCache();
+                        await Purchases.getCustomerInfo();
+
+                        await RevenueCatUI.presentCustomerCenter(
+                          onManagementOptionSelected:
+                              (productId, action) async {
+                                await Purchases.invalidateCustomerInfoCache();
+                                final customerInfo =
+                                    await Purchases.getCustomerInfo();
+                                print(customerInfo.entitlements.active);
+                              },
+                        );
+
+                        await Purchases.invalidateCustomerInfoCache();
+                        final customerInfo = await Purchases.getCustomerInfo();
+                        print(customerInfo.entitlements.active);
+                      },
                     );
                   },
                 );
@@ -343,7 +527,7 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
             ),
 
             // const Spacer(),
-            Text("Version:1.0.0"),
+            Text("Version:1.0.2"),
             SizedBox(height: 10),
             GestureDetector(
               child: Container(
@@ -409,7 +593,7 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
               width: double.infinity,
               height: 52,
               child: ElevatedButton.icon(
-                onPressed: _isLoggingOut ? null : _logout,
+                onPressed: _isLoggingOut ? null : _showLogoutConfirmation,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ShieldColors.urgentRed,
                   foregroundColor: Colors.white,
@@ -455,21 +639,43 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
         'delete-user',
         body: {'user_id': user.id},
       );
+
       if (response.status == 200) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text("Account deleted successfully")));
-
-        await Supabase.instance.client.auth.signOut();
       } else {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text("Failed to delete account")));
       }
-      await Supabase.instance.client.auth.signOut();
+
+      // ✅ Wipe ALL biometric/session data — regardless of success/failure of edge function
+      await sharedSecureStorage.delete(key: 'supabase_access_token');
+      await sharedSecureStorage.delete(key: 'supabase_refresh_token');
+      await sharedSecureStorage.delete(key: 'biometric_login_enabled');
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('priv_biometric', false);
+      await prefs.setBool('is_logged_in', false);
+      await prefs.setBool('has_seen_leader_onboarding', false);
+
+      // RC cleanup
+      try {
+        await PurchasesService.instance.logOut();
+      } catch (e) {
+        debugPrint('[RC] logOut skipped: $e');
+      }
+
+      await Supabase.instance.client.auth
+          .signOut(); // full global signout, account is gone
+
       setState(() {
         isLoad = false;
       });
+
+      if (mounted) context.go('/');
+
       debugPrint('Account deleted');
     } catch (e) {
       setState(() {
@@ -584,13 +790,13 @@ class _NotificationPrefsSheetState extends State<_NotificationPrefsSheet> {
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 24),
-          SwitchListTile(
-            title: const Text('Emergency SOS Alerts'),
-            subtitle: const Text('Always recommended'),
-            value: _sosAlerts,
-            activeColor: ShieldColors.urgentRed,
-            onChanged: (v) => setState(() => _sosAlerts = v),
-          ),
+          // SwitchListTile(
+          //   title: const Text('Emergency SOS Alerts'),
+          //   subtitle: const Text('Always recommended'),
+          //   value: _sosAlerts,
+          //   activeColor: ShieldColors.urgentRed,
+          //   onChanged: (v) => setState(() => _sosAlerts = v),
+          // ),
           SwitchListTile(
             title: const Text('Sync Heart Rate'),
             //    subtitle: const Text('AES-256 encryption for all vault files'),
@@ -641,19 +847,19 @@ class _NotificationPrefsSheetState extends State<_NotificationPrefsSheet> {
             activeColor: ShieldColors.activeTeal,
             onChanged: (v) => setState(() => _medicationReminders = v),
           ),
-          SwitchListTile(
-            title: const Text('Calendar Reminders'),
-            value: _calendarReminders,
-            activeColor: ShieldColors.activeTeal,
-            onChanged: (v) => setState(() => _calendarReminders = v),
-          ),
-
-          SwitchListTile(
-            title: const Text('Safe Zone Entry/Exit'),
-            value: _safeZoneAlerts,
-            activeColor: ShieldColors.activeTeal,
-            onChanged: (v) => setState(() => _safeZoneAlerts = v),
-          ),
+          // SwitchListTile(
+          //   title: const Text('Calendar Reminders'),
+          //   value: _calendarReminders,
+          //   activeColor: ShieldColors.activeTeal,
+          //   onChanged: (v) => setState(() => _calendarReminders = v),
+          // ),
+          //
+          // SwitchListTile(
+          //   title: const Text('Safe Zone Entry/Exit'),
+          //   value: _safeZoneAlerts,
+          //   activeColor: ShieldColors.activeTeal,
+          //   onChanged: (v) => setState(() => _safeZoneAlerts = v),
+          // ),
           SwitchListTile(
             title: const Text('Driving Alerts'),
             value: _drivingAlerts,

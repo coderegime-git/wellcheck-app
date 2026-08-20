@@ -244,14 +244,15 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
                 ),
               ),
               Spacer(),
-              IconButton(
-                icon: const Icon(
-                  Icons.person_add,
-                  color: ShieldColors.activeTeal,
+              if (currentUserRole == "leader")
+                IconButton(
+                  icon: const Icon(
+                    Icons.person_add,
+                    color: ShieldColors.activeTeal,
+                  ),
+                  onPressed: _showAddContactInfo,
+                  tooltip: 'Add Contact',
                 ),
-                onPressed: _showAddContactInfo,
-                tooltip: 'Add Contact',
-              ),
               SizedBox(width: 10),
               GestureDetector(
                 onTap: () async {

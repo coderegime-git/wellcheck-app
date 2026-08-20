@@ -4,8 +4,10 @@ import 'package:app_settings/app_settings.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart';
 import 'package:purchases_flutter/models/purchases_configuration.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
@@ -50,7 +52,7 @@ Future<void> main() async {
       ),
     );
   }
-  await Supabase.instance.client.auth.signOut();
+  //  await Supabase.instance.client.auth.signOut();
   // Initialize Firebase (gracefully degrade if not configured)
   //if (Platform.isAndroid) {
   try {
@@ -72,6 +74,9 @@ Future<void> main() async {
   if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
     await initializeBackgroundService();
   }
+  if (Platform.isIOS) {
+    await clearBadge();
+  }
   // final locationGranted = await LocationService.requestLocationPermissions(context);
   // if (!locationGranted) {
   //   debugPrint(
@@ -82,6 +87,19 @@ Future<void> main() async {
   //await initializeBackgroundService();
   await FlutterBackgroundService().startService();
   runApp(const ProviderScope(child: WellCheckApp()));
+}
+
+Future<void> clearBadge() async {
+  final plugin = FlutterLocalNotificationsPlugin();
+
+  const iosDetails = DarwinNotificationDetails(
+    presentAlert: false,
+    presentBadge: true,
+    presentSound: false,
+    badgeNumber: 0,
+  );
+
+  await plugin.show(0, null, null, const NotificationDetails(iOS: iosDetails));
 }
 
 Future<void> initializeRevenueCat() async {
@@ -123,21 +141,47 @@ class _WellCheckAppState extends ConsumerState<WellCheckApp> {
       await _checkNotificationPermission();
     });
     try {
-      _authSubscription = Supabase.instance.client.auth.onAuthStateChange
-          .listen((data) {
-            final event = data.event;
-            debugPrint('[Auth Event] $event');
+      final sharedSecureStorage = const FlutterSecureStorage(
+        aOptions: AndroidOptions(encryptedSharedPreferences: true),
+        iOptions: IOSOptions(
+          accessibility: KeychainAccessibility.first_unlock,
+          // ✅ This ensures token persists after logout and is accessible on first unlock
+        ),
+      );
+      _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((
+        data,
+      ) {
+        final event = data.event;
+        final session = data.session;
+        debugPrint('[Auth Event] $event');
 
-            if (event == AuthChangeEvent.signedIn) {
-              // User signed in via magic link deep link or OTP
-              ref.invalidate(currentUserProfileProvider);
-              _handleSignedIn();
-            } else if (event == AuthChangeEvent.signedOut) {
-              // Session expired or user signed out
-              final router = ref.read(shieldRouterProvider);
-              router.go('/');
-            }
-          });
+        // ✅ Always keep tokens in sync
+        if (event == AuthChangeEvent.signedIn ||
+            event == AuthChangeEvent.tokenRefreshed) {
+          if (session != null) {
+            sharedSecureStorage.write(
+              key: 'supabase_refresh_token',
+              value: session.refreshToken ?? '',
+            );
+            sharedSecureStorage.write(
+              key: 'supabase_access_token',
+              value: session.accessToken,
+            );
+            sharedSecureStorage.write(
+              key: 'biometric_login_enabled',
+              value: 'true',
+            );
+            debugPrint('TOKEN SYNCED: ${session.refreshToken}');
+          }
+        }
+
+        if (event == AuthChangeEvent.signedIn) {
+          ref.invalidate(currentUserProfileProvider);
+          _handleSignedIn();
+        }
+
+        // ✅ REMOVED signedOut handler — navigation handled in _logout() directly
+      });
     } catch (e) {
       debugPrint('[Auth] Supabase not initialized: $e');
     }
