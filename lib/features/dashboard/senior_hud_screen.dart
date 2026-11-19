@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -15,6 +17,7 @@ import 'package:well_check_v3/core/ai/wellness_ai_provider.dart';
 import 'package:well_check_v3/features/command_center/contacts_sheet.dart';
 import 'package:well_check_v3/features/command_center/medications_sheet.dart';
 import 'package:well_check_v3/features/command_center/calendar_sheet.dart';
+import 'package:well_check_v3/features/driving_detection/life360_screen.dart';
 import 'package:well_check_v3/features/messaging/family_chat_screen.dart';
 import 'package:well_check_v3/features/profile/profile_settings_view.dart';
 import 'package:well_check_v3/features/dashboard/widgets/pending_actions_card.dart';
@@ -24,8 +27,15 @@ import '../../core/data/medication_provider.dart';
 import '../../core/data/tools_repository.dart';
 import '../../core/navigation/shield_router.dart';
 import '../../core/notifications/push_notification_service.dart';
+import '../../main.dart';
+import '../../services/dose_live_activity_service.dart';
+import '../../services/dose_notification_service.dart';
+import '../../services/driving_detection_motion.dart';
+import '../../services/life360_location_service.dart';
+import '../driving_detection/activity_recognition_service.dart';
 import '../safety/services/location_service.dart';
 import '../safety/services/pulse_service.dart';
+import 'leader_dashboard.dart';
 
 class SeniorHUD extends ConsumerStatefulWidget {
   const SeniorHUD({super.key});
@@ -63,10 +73,13 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
   late Stream<List<Map<String, dynamic>>> _missedStream;
   String? _avatarUrl;
 
+  //late final Life360LocationService locationService;
+
   @override
   void initState() {
     super.initState();
     _initVoice();
+
     _pulseController = AnimationController(
       duration: const Duration(milliseconds: 1500),
       vsync: this,
@@ -104,11 +117,26 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
       }
       final profile = await ref.read(currentUserProfileProvider.future);
       if (profile == null) return;
-      print("asas");
+      await stopWellCheckService();
 
+      await initializeBackgroundService();
+      await startWellCheckService();
+      // locationService = Life360LocationService(Supabase.instance.client);
+      // locationService.startSharingMyLocation(name: "Abinesh");
       await PulseService().broadcastPulse(profile.userId);
       _loadAvatar();
+      //await PulseService.initializeBackgroundService();
     });
+  }
+
+  @override
+  void dispose() {
+    // locationService.dispose();
+    _sosTimer?.cancel();
+    _pulseController.dispose();
+    _speech.stop();
+    _tts.stop();
+    super.dispose();
   }
 
   Future<List<Map<String, dynamic>>> getMissedCheckIns(String userId) async {
@@ -123,28 +151,124 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
     return List<Map<String, dynamic>>.from(missed);
   }
 
+  // Stream<List<Map<String, dynamic>>> streamMissedCheckIns(String userId) {
+  //   print("userId $userId");
+  //   return Supabase.instance.client
+  //       .from('check_ins')
+  //       .stream(primaryKey: ['id'])
+  //       .map((rows) {
+  //     final missed = rows
+  //         .where(
+  //           (row) =>
+  //       row['user_id'] == userId &&
+  //           (row['status_message'] == 'Missed check-in' ||
+  //               row['status_message'] ==
+  //                   'Emergency escalation - repeated no-check-in alert'),
+  //     )
+  //         .toList();
+  //     //
+  //     missed.sort(
+  //           (a, b) =>
+  //           DateTime.parse(
+  //             b['created_at'],
+  //           ).compareTo(DateTime.parse(a['created_at'])),
+  //     );
+  //
+  //     return missed.take(1).toList();
+  //   });
+  // }
   Stream<List<Map<String, dynamic>>> streamMissedCheckIns(String userId) {
+    const missedStatuses = {
+      'Missed check-in',
+      'Emergency escalation - repeated no-check-in alert',
+    };
+
     return Supabase.instance.client
         .from('check_ins')
         .stream(primaryKey: ['id'])
+        .eq('user_id', userId) // filter on the server
+        .order('created_at', ascending: false) // newest first
+        .limit(10)
         .map((rows) {
-          final missed = rows
-              .where(
-                (row) =>
-                    row['user_id'] == userId &&
-                    row['status_message'] == 'Missed check-in' &&
-                    (row['acknowledged'] ?? false) == false,
-              )
-              .toList();
+          if (rows.isEmpty) {
+            print("eptyyy");
+            print("eptyyy");
+            return <Map<String, dynamic>>[];
+          }
 
-          missed.sort(
-            (a, b) => DateTime.parse(
-              b['created_at'],
-            ).compareTo(DateTime.parse(a['created_at'])),
-          );
-
-          return missed.take(1).toList();
+          // rows are already newest first
+          final latest = rows.first;
+          print(latest['status_message']);
+          print("latestlay");
+          // If the latest row is a real check-in, the missed state is resolved
+          return missedStatuses.contains(latest['status_message'])
+              ? [latest]
+              : <Map<String, dynamic>>[];
         });
+  }
+
+  Future<void> _logAsNeededDose(
+    Medication med,
+    dynamic profile,
+    DateTime now,
+    int batteryLevel,
+  ) async {
+    final supabase = Supabase.instance.client;
+
+    await supabase.from('dose_logs').insert({
+      'medication_id': med.id,
+      'user_id': med.assignedTo,
+      'family_id': profile.familyId,
+      'scheduled_at': now.toIso8601String(), // no schedule; use log time
+      'taken_at': now.toIso8601String(),
+      'status': 'taken',
+    });
+
+    await logWellEvent(supabase, {
+      'family_id': profile.familyId,
+      'user_id': profile.userId,
+      'event_type': 'medication_logged',
+      'title': 'Medication Taken',
+      'description':
+          '${profile.fullName ?? 'Someone'} logged ${med.medicationName} (${med.dosage})',
+      'battery_level': batteryLevel,
+    });
+
+    ref.invalidate(allDoseLogsProvider);
+    ref.invalidate(familyMedicationsProvider);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✓ ${med.medicationName} dose logged!'),
+          backgroundColor: ShieldColors.safeZoneGreen,
+        ),
+      );
+    }
+
+    final members = await supabase
+        .from('family_members')
+        .select('user_id')
+        .eq('family_id', profile.familyId);
+
+    for (final m in members) {
+      final targetUserId = m['user_id'];
+      if (targetUserId == profile.userId) continue;
+      try {
+        await supabase.functions.invoke(
+          'push-router',
+          body: {
+            "target_user_id": targetUserId,
+            "title": "Medications",
+            "body":
+                "${profile.fullName ?? 'Someone'}: ${med.medicationName} dose logged",
+            "action": "log_dose",
+          },
+        );
+      } catch (e) {
+        debugPrint("Push failed: $e");
+      }
+    }
   }
 
   Future<void> _logDose(Medication med) async {
@@ -169,7 +293,99 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
           'Battery info not available over isolate, using default: $e',
         );
       }
+      // final now = DateTime.now().toUtc();
+      final supabase = Supabase.instance.client;
 
+      final medData = await supabase
+          .from('medications')
+          .select('scheduled_at, recurrence, days_of_week, reminder_sent')
+          .eq('id', med.id)
+          .single();
+
+      final isAsNeeded =
+          medData['recurrence'] == 'as_needed' ||
+          medData['scheduled_at'] == null;
+
+      if (isAsNeeded) {
+        await DoseNotificationService.instance.cancelMedication(med.id);
+        //await DoseLiveActivityService.instance.end(med.id);
+        await DoseLiveActivityService.instance.reschedule(
+          med,
+          takenToday: true,
+        );
+        await _logAsNeededDose(med, profile, now, batteryLevel);
+        return;
+      }
+
+      final scheduledAt = DateTime.parse(
+        medData['scheduled_at'].toString(),
+      ).toUtc();
+
+      final openMissed = await supabase
+          .from('dose_logs')
+          .select('id')
+          .eq('medication_id', med.id)
+          .eq('status', 'missed')
+          .eq('nag_active', true)
+          .isFilter('taken_at', null);
+
+      // Window checks apply only to a normal dose, not a catch-up of a missed one
+      if (openMissed.isEmpty) {
+        final loggingWindowStart = scheduledAt.subtract(
+          const Duration(hours: 1),
+        );
+        final loggingWindowEnd = scheduledAt.add(const Duration(hours: 1));
+
+        if (now.isBefore(loggingWindowStart)) {
+          final difference = loggingWindowStart.difference(now);
+          final hours = difference.inHours;
+          final minutes = difference.inMinutes % 60;
+          final seconds = difference.inSeconds % 60;
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  hours > 0
+                      ? 'Medication can be logged in ${hours}h ${minutes}m ${seconds}s.'
+                      : minutes > 0
+                      ? 'Medication can be logged in ${minutes}m ${seconds}s.'
+                      : 'Medication can be logged in ${seconds}s.',
+                ),
+              ),
+            );
+          }
+          return;
+        }
+
+        if (now.isAfter(loggingWindowEnd)) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('The medication logging window has expired.'),
+              ),
+            );
+          }
+          return;
+        }
+
+        final existingLog = await supabase
+            .from('dose_logs')
+            .select('id, status')
+            .eq('medication_id', med.id)
+            .eq('scheduled_at', scheduledAt.toIso8601String())
+            .eq('status', 'taken')
+            .maybeSingle();
+
+        if (existingLog != null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Medication already recorded.')),
+            );
+          }
+          return;
+        }
+      }
       await Supabase.instance.client.from('dose_logs').insert({
         'medication_id': med.id,
         'user_id': med.assignedTo,
@@ -178,70 +394,74 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
         'taken_at': now.toIso8601String(),
         'status': 'taken',
       });
-      final medData = await Supabase.instance.client
-          .from('medications')
-          .select('scheduled_at, recurrence, days_of_week')
-          .eq('id', med.id)
-          .single();
+      if (openMissed.isNotEmpty) {
+        // Cron already moved scheduled_at. Only stop the nagging.
+        await supabase
+            .from('dose_logs')
+            .update({'nag_active': false})
+            .eq('medication_id', med.id)
+            .eq('status', 'missed')
+            .eq('nag_active', true);
+      } else {
+        DateTime nextDate = DateTime.parse(medData['scheduled_at']);
 
-      DateTime nextDate = DateTime.parse(medData['scheduled_at']);
+        switch (medData['recurrence']) {
+          case 'daily':
+            nextDate = nextDate.add(const Duration(days: 1));
+            break;
 
-      switch (medData['recurrence']) {
-        case 'daily':
-          nextDate = nextDate.add(const Duration(days: 1));
-          break;
+          case 'every_other_day':
+            nextDate = nextDate.add(const Duration(days: 2));
+            break;
 
-        case 'every_other_day':
-          nextDate = nextDate.add(const Duration(days: 2));
-          break;
+          case 'weekly':
+            final days = List<int>.from(medData['days_of_week'] ?? [])..sort();
 
-        case 'weekly':
-          final days = List<int>.from(medData['days_of_week'] ?? [])..sort();
+            if (days.isEmpty) {
+              nextDate = nextDate.add(const Duration(days: 7));
+            } else {
+              final currentDay = nextDate.weekday % 7;
 
-          if (days.isEmpty) {
-            nextDate = nextDate.add(const Duration(days: 7));
-          } else {
-            final currentDay = nextDate.weekday % 7;
+              int? found;
 
-            int? found;
-
-            for (final d in days) {
-              if (d > currentDay) {
-                found = d;
-                break;
+              for (final d in days) {
+                if (d > currentDay) {
+                  found = d;
+                  break;
+                }
               }
+
+              found ??= days.first + 7;
+
+              nextDate = nextDate.add(Duration(days: found - currentDay));
             }
 
-            found ??= days.first + 7;
+            break;
 
-            nextDate = nextDate.add(Duration(days: found - currentDay));
-          }
+          case 'monthly':
+            nextDate = DateTime(
+              nextDate.year,
+              nextDate.month + 1,
+              nextDate.day,
+              nextDate.hour,
+              nextDate.minute,
+            );
+            break;
 
-          break;
+          default:
+            break;
+        }
+        await Supabase.instance.client
+            .from('medications')
+            .update({
+              'scheduled_at': nextDate.toUtc().toIso8601String(),
 
-        case 'monthly':
-          nextDate = DateTime(
-            nextDate.year,
-            nextDate.month + 1,
-            nextDate.day,
-            nextDate.hour,
-            nextDate.minute,
-          );
-          break;
-
-        default:
-          break;
+              'reminder_sent': false,
+              'reminder_sent_at': null,
+            })
+            .eq('id', med.id);
       }
-      await Supabase.instance.client
-          .from('medications')
-          .update({
-            'scheduled_at': nextDate.toUtc().toIso8601String(),
-
-            'reminder_sent': false,
-            'reminder_sent_at': null,
-          })
-          .eq('id', med.id);
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'event_type': 'medication_logged',
@@ -254,7 +474,15 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
       // IMPORTANT
       ref.invalidate(allDoseLogsProvider);
       ref.invalidate(familyMedicationsProvider);
-
+      await DoseNotificationService.instance.cancelMedication(med.id);
+      //await DoseLiveActivityService.instance.end(med.id);
+      await DoseLiveActivityService.instance.reschedule(med, takenToday: true);
+      try {
+        final meds = await ref.read(familyMedicationsProvider.future);
+        await _syncDoseReminders(meds, profile.userId);
+      } catch (e) {
+        debugPrint('[DoseSync] resync after log failed: $e');
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -310,59 +538,104 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
     }
   }
 
+  final activityService = ActivityRecognitionService();
+  final drivingDetector = DrivingDetector(Supabase.instance.client);
+
   Future<void> _initVoice() async {
+    print("nnnnnhggh");
     try {
-      await _speech.initialize(
-        onStatus: (status) {
-          if (status == 'done' || status == 'notListening') {
-            if (_isListening && _lastQuestion.isNotEmpty) {
-              _processWithAi(_lastQuestion);
-            }
-            if (mounted) {
-              setState(() => _isListening = false);
-              _pulseController.stop();
-            }
-          }
-        },
-        onError: (error) {
-          if (mounted) {
-            setState(() {
-              _isListening = false;
-              _statusText = 'Could not hear you. Tap to try again.';
-            });
-            _pulseController.stop();
-          }
+      final started = await activityService.initialize(
+        onActivityChanged: (activity, confidence) {
+          debugPrint('🔥🔥 CALLBACK hjhjhjhjjhjj');
+          debugPrint('🔥 Activity = $activity');
+          debugPrint('🔥 Confidence = $confidence');
+          drivingDetector.updateActivity(
+            activity: activity,
+            confidence: confidence,
+          );
         },
       );
-      await PulseService().broadcastPulse(null);
+      debugPrint('🔥 Activity service started = $started');
+      // await _speech.initialize(
+      //   onStatus: (status) {
+      //     if (status == 'done' || status == 'notListening') {
+      //       if (_isListening && _lastQuestion.isNotEmpty) {
+      //         _processWithAi(_lastQuestion);
+      //       }
+      //       if (mounted) {
+      //         setState(() => _isListening = false);
+      //         _pulseController.stop();
+      //       }
+      //     }
+      //   },
+      //   onError: (error) {
+      //     if (mounted) {
+      //       setState(() {
+      //         _isListening = false;
+      //         _statusText = 'Could not hear you. Tap to try again.';
+      //       });
+      //       _pulseController.stop();
+      //     }
+      //   },
+      // );
+      // await PulseService().broadcastPulse(null);
       if (!mounted) return;
       await PushNotificationService.initialize();
     } catch (e) {
+      print("nnnnnhggh123");
+
       debugPrint('[Voice] Speech init failed: $e');
     }
 
-    try {
-      await _tts.setLanguage('en-US');
-      await _tts.setSpeechRate(0.45);
-      await _tts.setVolume(1.0);
-      await _tts.setPitch(1.0);
-      _tts.setCompletionHandler(() {
-        if (mounted) setState(() => _statusText = 'Tap to speak');
-      });
-    } catch (e) {
-      debugPrint('[Voice] TTS init failed: $e');
-    }
+    // try {
+    //   await _tts.setLanguage('en-US');
+    //   await _tts.setSpeechRate(0.45);
+    //   await _tts.setVolume(1.0);
+    //   await _tts.setPitch(1.0);
+    //   _tts.setCompletionHandler(() {
+    //     if (mounted) setState(() => _statusText = 'Tap to speak');
+    //   });
+    // } catch (e) {
+    //   debugPrint('[Voice] TTS init failed: $e');
+    // }
     final profile = await ref.read(currentUserProfileProvider.future);
     if (profile == null) return;
+    final meds = ref.read(familyMedicationsProvider).value;
+    if (profile == null || meds == null) return;
+    _syncDoseReminders(meds, profile.userId);
     _missedStream = streamMissedCheckIns(profile.userId);
-    print("profile.userId");
-    print("profile.userId");
-    print(profile.userId);
+
     if (mounted) {
       setState(() {
         load = false;
       });
     }
+  }
+
+  Future<void> _syncChain = Future.value();
+
+  // Future<void> _syncDoseReminders(List meds, String userId) async {
+  //   final mine = meds
+  //       .where((m) => m.isActive && m.assignedTo == userId)
+  //       .toList();
+  //   await DoseNotificationService.instance.syncMine(
+  //     mine,
+  //   ); // Android countdown + iOS T-15 alert
+  //   await DoseLiveActivityService.instance.sync(mine); // iOS Live Activity
+  // }
+  Future<void> _syncDoseReminders(List meds, String userId) {
+    final mine = meds
+        .where((m) => m.isActive && m.assignedTo == userId)
+        .toList();
+    _syncChain = _syncChain.then((_) async {
+      try {
+        await DoseNotificationService.instance.syncMine(mine);
+        await DoseLiveActivityService.instance.sync(mine);
+      } catch (e) {
+        debugPrint('[DoseSync] failed: $e');
+      }
+    });
+    return _syncChain;
   }
 
   @override
@@ -457,15 +730,6 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
         });
       }
     }
-  }
-
-  @override
-  void dispose() {
-    _sosTimer?.cancel();
-    _pulseController.dispose();
-    _speech.stop();
-    _tts.stop();
-    super.dispose();
   }
 
   Future<void> _resolveDueSchedules(String userId) async {
@@ -608,7 +872,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
         );
       }
       // Insert well_event for family visibility
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'user_name': profile.fullName,
@@ -629,6 +893,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
         'longitude': lng,
         'status_message': '${profile.fullName} -Status check-in',
       });
+      _missedStream = streamMissedCheckIns(profile.userId);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -776,6 +1041,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
               .from('family_members')
               .select('user_id')
               .eq('family_id', profile.familyId);
+          _missedStream = streamMissedCheckIns(profile.userId);
 
           for (final m in members) {
             final targetUserId = m['user_id'];
@@ -862,11 +1128,54 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            Text(
-              'My Menu',
-              style: Theme.of(
-                ctx,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+            GestureDetector(
+              // onTap: () async {
+              //   late final Life360LocationService locationService;
+              //   locationService =
+              //       Life360LocationService(Supabase.instance.client);
+              //
+              //
+              //   final prefs = await SharedPreferences.getInstance();
+              //   final familyId = prefs.getString('last_family_id');
+              //
+              //   final userId = Supabase.instance.client.auth.currentUser
+              //       ?.id;
+              //
+              //   Navigator.push(
+              //     context,
+              //     MaterialPageRoute(
+              //       builder: (context) =>
+              //           StreamBuilder<List<MemberLocation>>(
+              //             stream: locationService.watchMembers(
+              //                 familyId ?? ""),
+              //             builder: (context, snapshot) {
+              //               if (!snapshot.hasData) {
+              //                 return const Scaffold(
+              //                   body: Center(
+              //                       child: CircularProgressIndicator()),
+              //                 );
+              //               }
+              //
+              //               final myLocation = snapshot.data!
+              //                   .where((member) => member.id == userId)
+              //                   .toList();
+              //
+              //               return Life360MapScreen(
+              //                 members: myLocation,
+              //                 showAllMembers: false,
+              //               );
+              //             },
+              //           ),
+              //     ),
+              //   );
+              // },
+              ////
+              child: Text(
+                'My Menu',
+                style: Theme.of(
+                  ctx,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              ),
             ),
             const SizedBox(height: 24),
             _elderMenuItem(ctx, Icons.family_restroom, 'View Family', () {
@@ -889,15 +1198,52 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                 builder: (_) => MedicationsSheet(fromLeader: false),
               );
             }),
-            _elderMenuItem(ctx, Icons.calendar_month, 'Calendar', () {
-              Navigator.pop(ctx);
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (_) => const CalendarSheet(),
-              );
-            }),
+            // _elderMenuItem(
+            //   ctx,
+            //   Icons.directions_car,
+            //   'Driving Detection',
+            //   () async {
+            //     Navigator.pop(ctx);
+            //
+            //     late final Life360LocationService locationService;
+            //     locationService = Life360LocationService(
+            //       Supabase.instance.client,
+            //     );
+            //
+            //     final prefs = await SharedPreferences.getInstance();
+            //     final familyId = prefs.getString('last_family_id');
+            //
+            //     Navigator.push(
+            //       context,
+            //       MaterialPageRoute(
+            //         builder: (context) => StreamBuilder<List<MemberLocation>>(
+            //           stream: locationService.watchMembers(familyId ?? ""),
+            //           builder: (context, snapshot) {
+            //             if (!snapshot.hasData) {
+            //               return const Scaffold(
+            //                 body: Center(child: CircularProgressIndicator()),
+            //               );
+            //             }
+            //
+            //             return Life360MapScreen(
+            //               members: snapshot.data!,
+            //               showAllMembers: true,
+            //             );
+            //           },
+            //         ),
+            //       ),
+            //     );
+            //   },
+            // ),
+            // _elderMenuItem(ctx, Icons.calendar_month, 'Calendar', () {
+            //   Navigator.pop(ctx);
+            //   showModalBottomSheet(
+            //     context: context,
+            //     isScrollControlled: true,
+            //     backgroundColor: Colors.transparent,
+            //     builder: (_) => const CalendarSheet(),
+            //   );
+            // }),
             _elderMenuItem(ctx, Icons.chat, 'Family Chat', () {
               Navigator.pop(ctx);
               showModalBottomSheet(
@@ -1060,7 +1406,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
           rethrow;
         }
       }
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': missedCheckIn!['family_id'],
         'user_id': profile.userId,
         'user_name': profile.fullName,
@@ -1084,6 +1430,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
         'longitude': lng,
         'status_message': "Manual check-in",
       });
+      _missedStream = streamMissedCheckIns(profile.userId);
 
       if (!mounted) return;
 
@@ -1246,7 +1593,17 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
       backgroundColor: load ? Colors.white : ShieldColors.activeTeal,
       body: load
           ? Center(
-              child: CircularProgressIndicator(color: ShieldColors.activeTeal),
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(24),
+                    topRight: Radius.circular(24),
+                  ),
+                ),
+                child: const ShieldLoader(),
+              ),
             )
           : GestureDetector(
               onTap: () {
@@ -1260,38 +1617,40 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                       familyMedicationsProvider,
                     );
                     final safetyRepo = ref.invalidate(safetyRepositoryProvider);
+
+                    ref.invalidate(toolsRepositoryProvider);
+
+                    // final safetyRepo = ref.invalidate(
+                    //   safetyRepositoryProvider,
+                    // );
                   },
                   child: SingleChildScrollView(
-                    child: RefreshIndicator(
-                      onRefresh: () async {
-                        final medicationsAsync = ref.invalidate(
-                          familyMedicationsProvider,
-                        );
-                        final safetyRepo = ref.invalidate(
-                          safetyRepositoryProvider,
-                        );
-                      },
-                      child: Column(
-                        children: [
-                          // Header with protected status
-                          Container(
-                            color: ShieldColors.activeTeal,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 15,
-                              vertical: 15,
-                            ),
-                            child: Row(
-                              children: [
-                                Image.asset(
-                                  'assets/logo.png',
-                                  height: 40,
-                                  width: 40,
-                                ),
-                                SizedBox(width: 6),
-                                Column(
+                    child: Column(
+                      children: [
+                        // Header with protected status
+                        Container(
+                          color: ShieldColors.activeTeal,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 15,
+                            vertical: 15,
+                          ),
+                          child: Row(
+                            children: [
+                              Image.asset(
+                                'assets/logo.png',
+                                height: 40,
+                                width: 40,
+                              ),
+                              SizedBox(width: 6),
+
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       "$firstName's Portal",
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: Theme.of(context)
                                           .textTheme
                                           .titleLarge
@@ -1304,7 +1663,7 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                     const SizedBox(height: 4),
                                     Container(
                                       padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
+                                        horizontal: 8,
                                         vertical: 4,
                                       ),
                                       decoration: BoxDecoration(
@@ -1324,1209 +1683,1240 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                     ),
                                   ],
                                 ),
-                                Spacer(),
-                                GestureDetector(
-                                  onTap: () {
-                                    showModalBottomSheet(
-                                      context: context,
-                                      isScrollControlled: true,
-                                      backgroundColor: Colors.transparent,
-                                      builder: (_) =>
-                                          const ProfileSettingsView(),
-                                    );
-                                  },
-                                  child: Container(
-                                    width: 52,
-                                    height: 52,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.grey.shade300,
-                                      border: Border.all(
-                                        color: Colors.white,
-                                        width: 2,
-                                      ),
+                              ),
+                              Spacer(),
+                              GestureDetector(
+                                onTap: () {
+                                  showModalBottomSheet(
+                                    context: context,
+                                    isScrollControlled: true,
+                                    backgroundColor: Colors.transparent,
+                                    builder: (_) => const ProfileSettingsView(),
+                                  );
+                                },
+                                child: Container(
+                                  width: 52,
+                                  height: 52,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Colors.grey.shade300,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 2,
                                     ),
-                                    child: _avatarUrl != null
-                                        ? ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              26,
-                                            ),
-                                            child: Image.network(
-                                              '${_avatarUrl}?t=${DateTime.now().millisecondsSinceEpoch}' ??
-                                                  "",
-                                              fit: BoxFit.cover,
-                                            ),
-                                          )
-                                        : const Icon(
-                                            Icons.person,
-                                            color: Colors.grey,
-                                          ),
                                   ),
+                                  child: _avatarUrl != null
+                                      ? ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            26,
+                                          ),
+                                          child: Image.network(
+                                            '${_avatarUrl}?t=${DateTime.now().millisecondsSinceEpoch}' ??
+                                                "",
+                                            fit: BoxFit.cover,
+                                          ),
+                                        )
+                                      : const Icon(
+                                          Icons.person,
+                                          color: Colors.grey,
+                                        ),
                                 ),
-                              ],
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        Container(
+                          decoration: BoxDecoration(
+                            color: ShieldColors.surfaceLight,
+                            borderRadius: BorderRadius.only(
+                              topRight: Radius.circular(20),
+                              topLeft: Radius.circular(20),
+                            ),
+                            border: Border.all(
+                              color: ShieldColors.surfaceLight.withValues(
+                                alpha: 0.3,
+                              ),
                             ),
                           ),
 
-                          Container(
-                            decoration: BoxDecoration(
-                              color: ShieldColors.surfaceLight,
-                              borderRadius: BorderRadius.only(
-                                topRight: Radius.circular(20),
-                                topLeft: Radius.circular(20),
-                              ),
-                              border: Border.all(
-                                color: ShieldColors.surfaceLight.withValues(
-                                  alpha: 0.3,
-                                ),
-                              ),
-                            ),
+                          child: Column(
+                            children: [
+                              StreamBuilder<List<Map<String, dynamic>>>(
+                                stream: _missedStream,
+                                builder: (context, snapshot) {
+                                  final missed = snapshot.data ?? [];
 
-                            child: Column(
-                              children: [
-                                StreamBuilder<List<Map<String, dynamic>>>(
-                                  stream: _missedStream,
-                                  builder: (context, snapshot) {
-                                    final missed = snapshot.data ?? [];
+                                  print(
+                                    "STREAM STATE: ${snapshot.connectionState}",
+                                  );
+                                  print("STREAM ERROR: ${snapshot.error}");
+                                  print("STREAM DATA: ${snapshot.data}");
 
-                                    print(
-                                      "STREAM STATE: ${snapshot.connectionState}",
-                                    );
-                                    print("STREAM ERROR: ${snapshot.error}");
-                                    print("STREAM DATA: ${snapshot.data}");
+                                  // final missed = snapshot.data ?? [];
 
-                                    // final missed = snapshot.data ?? [];
+                                  print("MISSED COUNT: ${missed.length}");
 
-                                    print("MISSED COUNT: ${missed.length}");
+                                  if (missed.isEmpty) {
+                                    missedCheckIn = null;
+                                    return const SizedBox();
+                                  }
 
-                                    if (missed.isEmpty) {
-                                      missedCheckIn = null;
-                                      return const SizedBox();
-                                    }
+                                  missedCheckIn = missed.first;
 
-                                    missedCheckIn = missed.first;
+                                  final latestMissed = missed.first;
 
-                                    final latestMissed = missed.first;
+                                  return Container(
+                                    margin: const EdgeInsets.only(
+                                      bottom: 16,
+                                      right: 12,
+                                      left: 12,
+                                      top: 12,
+                                    ),
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      //  border: Border.all(color: Colors.orange),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(16),
 
-                                    return Container(
-                                      margin: const EdgeInsets.only(
-                                        bottom: 16,
-                                        right: 12,
-                                        left: 12,
-                                        top: 12,
-                                      ),
-                                      padding: const EdgeInsets.all(16),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(12),
-                                        //  border: Border.all(color: Colors.orange),
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.center,
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.all(16),
-
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: ShieldColors.tealWash,
-                                            ),
-                                            child: Icon(
-                                              Icons
-                                                  .notifications_active_outlined,
-                                              color: ShieldColors.activeTeal,
-                                              size: 32,
-                                            ),
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: ShieldColors.tealWash,
                                           ),
-                                          const SizedBox(height: 12),
-
-                                          Text(
-                                            "You missed your\n scheduled check-in",
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              fontSize: 20,
-
-                                              fontWeight: FontWeight.bold,
-                                              color: ShieldColors.activeTeal,
-                                            ),
+                                          child: Icon(
+                                            Icons.notifications_active_outlined,
+                                            color: ShieldColors.activeTeal,
+                                            size: 32,
                                           ),
+                                        ),
+                                        const SizedBox(height: 12),
 
-                                          // SizedBox(height: 10),
-                                          // const Row(
-                                          //   children: [
-                                          //     Icon(
-                                          //       Icons.warning_amber_rounded,
-                                          //       color: Colors.orange,
-                                          //     ),
-                                          //     SizedBox(width: 8),
-                                          //     Expanded(
-                                          //       child: Text(
-                                          //         "You missed your scheduled check-in",
-                                          //         style: TextStyle(
-                                          //           fontSize: 16,
-                                          //           fontWeight: FontWeight.bold,
-                                          //         ),
-                                          //       ),
-                                          //     ),
-                                          //   ],
-                                          // ),
-                                          const SizedBox(height: 18),
+                                        Text(
+                                          "You missed your\n scheduled check-in",
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 20,
 
-                                          Column(
-                                            children: [
-                                              GestureDetector(
-                                                onTap: () async {
-                                                  if (imOkayLoad) return;
-                                                  await _imOkayPressed();
+                                            fontWeight: FontWeight.bold,
+                                            color: ShieldColors.activeTeal,
+                                          ),
+                                        ),
 
-                                                  if (!mounted) return;
+                                        // SizedBox(height: 10),
+                                        // const Row(
+                                        //   children: [
+                                        //     Icon(
+                                        //       Icons.warning_amber_rounded,
+                                        //       color: Colors.orange,
+                                        //     ),
+                                        //     SizedBox(width: 8),
+                                        //     Expanded(
+                                        //       child: Text(
+                                        //         "You missed your scheduled check-in",
+                                        //         style: TextStyle(
+                                        //           fontSize: 16,
+                                        //           fontWeight: FontWeight.bold,
+                                        //         ),
+                                        //       ),
+                                        //     ),
+                                        //   ],
+                                        // ),
+                                        const SizedBox(height: 18),
 
-                                                  setState(() {
-                                                    missedCheckIn = null;
-                                                  });
-                                                },
-                                                child: Container(
-                                                  width: double.infinity,
-                                                  padding: EdgeInsets.all(14),
-                                                  decoration: BoxDecoration(
-                                                    color:
-                                                        ShieldColors.activeTeal,
+                                        Column(
+                                          children: [
+                                            GestureDetector(
+                                              onTap: () async {
+                                                if (imOkayLoad) return;
+                                                await _imOkayPressed();
 
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          12,
-                                                        ),
-                                                  ),
-                                                  child: imOkayLoad
-                                                      ? Center(
-                                                          child:
-                                                              CircularProgressIndicator(
-                                                                color: Colors
-                                                                    .white,
-                                                              ),
-                                                        )
-                                                      : Row(
-                                                          mainAxisAlignment:
-                                                              MainAxisAlignment
-                                                                  .center,
-                                                          children: [
-                                                            Icon(
-                                                              Icons
-                                                                  .check_circle_outline,
+                                                if (!mounted) return;
+
+                                                setState(() {
+                                                  missedCheckIn = null;
+                                                });
+                                              },
+                                              child: Container(
+                                                width: double.infinity,
+                                                padding: EdgeInsets.all(14),
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      ShieldColors.activeTeal,
+
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
+                                                ),
+                                                child: imOkayLoad
+                                                    ? Center(
+                                                        child:
+                                                            CircularProgressIndicator(
                                                               color:
                                                                   Colors.white,
                                                             ),
-                                                            SizedBox(width: 10),
-                                                            SizedBox(
-                                                              child: const Text(
-                                                                "I'M OKAY",
-                                                                style: TextStyle(
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                  color: Colors
-                                                                      .white,
-                                                                ),
-                                                              ),
-                                                            ),
-                                                          ],
-                                                        ),
-                                                ),
-                                              ),
-
-                                              const SizedBox(height: 12),
-                                              GestureDetector(
-                                                onTap: () async {
-                                                  _startSosCountdown();
-                                                },
-                                                child: Container(
-                                                  width: double.infinity,
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.red,
-
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          12,
-                                                        ),
-                                                  ),
-                                                  padding: EdgeInsets.all(14),
-                                                  child: Row(
-                                                    mainAxisAlignment:
-                                                        MainAxisAlignment
-                                                            .center,
-                                                    children: [
-                                                      Icon(
-                                                        Icons
-                                                            .sports_soccer_sharp,
-                                                        color: Colors.white,
-                                                      ),
-                                                      SizedBox(width: 10),
-                                                      SizedBox(
-                                                        child: const Text(
-                                                          "I NEED HELP",
-                                                          style: TextStyle(
-                                                            fontWeight:
-                                                                FontWeight.bold,
+                                                      )
+                                                    : Row(
+                                                        mainAxisAlignment:
+                                                            MainAxisAlignment
+                                                                .center,
+                                                        children: [
+                                                          Icon(
+                                                            Icons
+                                                                .check_circle_outline,
                                                             color: Colors.white,
                                                           ),
-                                                        ),
+                                                          SizedBox(width: 10),
+                                                          SizedBox(
+                                                            child: const Text(
+                                                              "I'M OKAY",
+                                                              style: TextStyle(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                                color: Colors
+                                                                    .white,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
                                                       ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 12),
-
-                                              TextField(
-                                                controller: notesController,
-                                                maxLines: 1,
-                                                textAlign: TextAlign.start,
-                                                focusNode: notesFocus,
-                                                decoration: InputDecoration(
-                                                  fillColor:
-                                                      ShieldColors.tealWash,
-                                                  hintText:
-                                                      "Add a note (Optional)",
-
-                                                  prefixIcon: Icon(
-                                                    Icons.edit,
-                                                    color: Colors.grey.shade500,
-                                                    size: 15,
-                                                  ),
-                                                  enabledBorder:
-                                                      OutlineInputBorder(
-                                                        borderSide: BorderSide(
-                                                          color: ShieldColors
-                                                              .tealWash,
-                                                        ),
-                                                      ),
-                                                  border: OutlineInputBorder(),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  },
-                                ),
-
-                                //  if (missedCheckIn != null)
-                                const SizedBox(height: 24),
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 24.0,
-                                  ),
-                                  child: PendingActionsCard(),
-                                ),
-
-                                //   const Spacer(flex: 2),
-
-                                // AI Voice Assistant — animated pulsing aura
-                                GestureDetector(
-                                  onTap: _startListening,
-                                  child: Column(
-                                    children: [
-                                      AnimatedBuilder(
-                                        animation: _pulseAnimation,
-                                        builder: (context, child) {
-                                          return Transform.scale(
-                                            scale: _isListening
-                                                ? _pulseAnimation.value
-                                                : 1.0,
-                                            child: Container(
-                                              width: 180,
-                                              height: 180,
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                border: Border.all(
-                                                  color: _isListening
-                                                      ? ShieldColors.urgentRed
-                                                      : _isProcessing
-                                                      ? const Color(0xFF6B4EE6)
-                                                      : ShieldColors.activeTeal,
-                                                  width: 3,
-                                                ),
-                                                color:
-                                                    (_isListening
-                                                            ? ShieldColors
-                                                                  .urgentRed
-                                                            : _isProcessing
-                                                            ? const Color(
-                                                                0xFF6B4EE6,
-                                                              )
-                                                            : ShieldColors
-                                                                  .activeTeal)
-                                                        .withValues(alpha: 0.1),
-                                              ),
-                                              child: Icon(
-                                                _isListening
-                                                    ? Icons.hearing
-                                                    : _isProcessing
-                                                    ? Icons.auto_awesome
-                                                    : Icons.mic,
-                                                size: 56,
-                                                color: _isListening
-                                                    ? ShieldColors.urgentRed
-                                                    : _isProcessing
-                                                    ? const Color(0xFF6B4EE6)
-                                                    : ShieldColors.activeTeal,
                                               ),
                                             ),
-                                          );
-                                        },
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        _statusText,
-                                        style: TextStyle(
-                                          color: Colors.grey.withValues(
-                                            alpha: 0.9,
-                                          ),
-                                          fontSize: 13,
-                                          fontStyle: FontStyle.italic,
-                                        ),
-                                      ),
-                                      // Show question and response
-                                      if (_lastQuestion.isNotEmpty) ...[
-                                        const SizedBox(height: 12),
-                                        Container(
-                                          margin: const EdgeInsets.symmetric(
-                                            horizontal: 24,
-                                          ),
-                                          padding: const EdgeInsets.all(12),
-                                          decoration: BoxDecoration(
-                                            color: Colors.grey.withValues(
-                                              alpha: 0.5,
-                                            ),
-                                            borderRadius:
-                                                ShieldDesign.roundedTwelve,
-                                          ),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  const Text(
-                                                    '🗣️ ',
-                                                    style: TextStyle(
-                                                      fontSize: 14,
-                                                    ),
-                                                  ),
-                                                  Expanded(
-                                                    child: Text(
-                                                      _lastQuestion,
-                                                      style: TextStyle(
-                                                        color: Colors
-                                                            .grey
-                                                            .shade500,
-                                                        fontSize: 13,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              if (_lastResponse.isNotEmpty) ...[
-                                                const SizedBox(height: 6),
-                                                Row(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
+
+                                            const SizedBox(height: 12),
+                                            GestureDetector(
+                                              onTap: () async {
+                                                _startSosCountdown();
+                                              },
+                                              child: Container(
+                                                width: double.infinity,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.red,
+
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
+                                                ),
+                                                padding: EdgeInsets.all(14),
+                                                child: Row(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.center,
                                                   children: [
-                                                    const Text(
-                                                      '🤖 ',
-                                                      style: TextStyle(
-                                                        fontSize: 14,
-                                                      ),
+                                                    Icon(
+                                                      Icons.sports_soccer_sharp,
+                                                      color: Colors.white,
                                                     ),
-                                                    Expanded(
-                                                      child: Text(
-                                                        _lastResponse,
-                                                        style: const TextStyle(
-                                                          color: Colors.black,
-                                                          fontSize: 13,
+                                                    SizedBox(width: 10),
+                                                    SizedBox(
+                                                      child: const Text(
+                                                        "I NEED HELP",
+                                                        style: TextStyle(
                                                           fontWeight:
-                                                              FontWeight.w500,
+                                                              FontWeight.bold,
+                                                          color: Colors.white,
                                                         ),
                                                       ),
                                                     ),
                                                   ],
                                                 ),
-                                              ],
-                                              if (_isProcessing)
-                                                const Padding(
-                                                  padding: EdgeInsets.only(
-                                                    top: 8,
-                                                  ),
-                                                  child:
-                                                      LinearProgressIndicator(
-                                                        backgroundColor:
-                                                            Colors.black,
-                                                        color: Color(
-                                                          0xFF6B4EE6,
-                                                        ),
-                                                      ),
+                                              ),
+                                            ),
+                                            const SizedBox(height: 12),
+
+                                            TextField(
+                                              controller: notesController,
+                                              maxLines: 1,
+                                              textAlign: TextAlign.start,
+                                              focusNode: notesFocus,
+                                              decoration: InputDecoration(
+                                                fillColor:
+                                                    ShieldColors.tealWash,
+                                                hintText:
+                                                    "Add a note (Optional)",
+
+                                                prefixIcon: Icon(
+                                                  Icons.edit,
+                                                  color: Colors.grey.shade500,
+                                                  size: 15,
                                                 ),
-                                            ],
-                                          ),
+                                                enabledBorder:
+                                                    OutlineInputBorder(
+                                                      borderSide: BorderSide(
+                                                        color: ShieldColors
+                                                            .tealWash,
+                                                      ),
+                                                    ),
+                                                border: OutlineInputBorder(),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ],
-                                    ],
-                                  ),
+                                    ),
+                                  );
+                                },
+                              ),
+
+                              //  if (missedCheckIn != null)
+                              const SizedBox(height: 24),
+                              const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 24.0),
+                                child: PendingActionsCard(),
+                              ),
+
+                              //   const Spacer(flex: 2),
+
+                              // AI Voice Assistant — animated pulsing aura
+                              // GestureDetector(
+                              //   onTap: _startListening,
+                              //   child: Column(
+                              //     children: [
+                              //       AnimatedBuilder(
+                              //         animation: _pulseAnimation,
+                              //         builder: (context, child) {
+                              //           return Transform.scale(
+                              //             scale: _isListening
+                              //                 ? _pulseAnimation.value
+                              //                 : 1.0,
+                              //             child: Container(
+                              //               width: 180,
+                              //               height: 180,
+                              //               decoration: BoxDecoration(
+                              //                 shape: BoxShape.circle,
+                              //                 border: Border.all(
+                              //                   color: _isListening
+                              //                       ? ShieldColors.urgentRed
+                              //                       : _isProcessing
+                              //                       ? const Color(0xFF6B4EE6)
+                              //                       : ShieldColors.activeTeal,
+                              //                   width: 3,
+                              //                 ),
+                              //                 color:
+                              //                     (_isListening
+                              //                             ? ShieldColors
+                              //                                   .urgentRed
+                              //                             : _isProcessing
+                              //                             ? const Color(
+                              //                                 0xFF6B4EE6,
+                              //                               )
+                              //                             : ShieldColors
+                              //                                   .activeTeal)
+                              //                         .withValues(alpha: 0.1),
+                              //               ),
+                              //               child: Icon(
+                              //                 _isListening
+                              //                     ? Icons.hearing
+                              //                     : _isProcessing
+                              //                     ? Icons.auto_awesome
+                              //                     : Icons.mic,
+                              //                 size: 56,
+                              //                 color: _isListening
+                              //                     ? ShieldColors.urgentRed
+                              //                     : _isProcessing
+                              //                     ? const Color(0xFF6B4EE6)
+                              //                     : ShieldColors.activeTeal,
+                              //               ),
+                              //             ),
+                              //           );
+                              //         },
+                              //       ),
+                              //       const SizedBox(height: 8),
+                              //       Text(
+                              //         _statusText,
+                              //         style: TextStyle(
+                              //           color: Colors.grey.withValues(
+                              //             alpha: 0.9,
+                              //           ),
+                              //           fontSize: 13,
+                              //           fontStyle: FontStyle.italic,
+                              //         ),
+                              //       ),
+                              //       // Show question and response
+                              //       if (_lastQuestion.isNotEmpty) ...[
+                              //         const SizedBox(height: 12),
+                              //         Container(
+                              //           margin: const EdgeInsets.symmetric(
+                              //             horizontal: 24,
+                              //           ),
+                              //           padding: const EdgeInsets.all(12),
+                              //           decoration: BoxDecoration(
+                              //             color: Colors.grey.withValues(
+                              //               alpha: 0.5,
+                              //             ),
+                              //             borderRadius:
+                              //                 ShieldDesign.roundedTwelve,
+                              //           ),
+                              //           child: Column(
+                              //             crossAxisAlignment:
+                              //                 CrossAxisAlignment.start,
+                              //             children: [
+                              //               Row(
+                              //                 crossAxisAlignment:
+                              //                     CrossAxisAlignment.start,
+                              //                 children: [
+                              //                   const Text(
+                              //                     '🗣️ ',
+                              //                     style: TextStyle(
+                              //                       fontSize: 14,
+                              //                     ),
+                              //                   ),
+                              //                   Expanded(
+                              //                     child: Text(
+                              //                       _lastQuestion,
+                              //                       style: TextStyle(
+                              //                         color: Colors
+                              //                             .grey
+                              //                             .shade500,
+                              //                         fontSize: 13,
+                              //                       ),
+                              //                     ),
+                              //                   ),
+                              //                 ],
+                              //               ),
+                              //               if (_lastResponse.isNotEmpty) ...[
+                              //                 const SizedBox(height: 6),
+                              //                 Row(
+                              //                   crossAxisAlignment:
+                              //                       CrossAxisAlignment.start,
+                              //                   children: [
+                              //                     const Text(
+                              //                       '🤖 ',
+                              //                       style: TextStyle(
+                              //                         fontSize: 14,
+                              //                       ),
+                              //                     ),
+                              //                     Expanded(
+                              //                       child: Text(
+                              //                         _lastResponse,
+                              //                         style: const TextStyle(
+                              //                           color: Colors.black,
+                              //                           fontSize: 13,
+                              //                           fontWeight:
+                              //                               FontWeight.w500,
+                              //                         ),
+                              //                       ),
+                              //                     ),
+                              //                   ],
+                              //                 ),
+                              //               ],
+                              //               if (_isProcessing)
+                              //                 const Padding(
+                              //                   padding: EdgeInsets.only(
+                              //                     top: 8,
+                              //                   ),
+                              //                   child:
+                              //                       LinearProgressIndicator(
+                              //                         backgroundColor:
+                              //                             Colors.black,
+                              //                         color: Color(
+                              //                           0xFF6B4EE6,
+                              //                         ),
+                              //                       ),
+                              //                 ),
+                              //             ],
+                              //           ),
+                              //         ),
+                              //       ],
+                              //     ],
+                              //   ),
+                              // ),
+                              SizedBox(height: 25),
+                              // const Spacer(flex: 1),
+
+                              // Action Buttons
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24.0,
                                 ),
-                                SizedBox(height: 25),
-                                // const Spacer(flex: 1),
-
-                                // Action Buttons
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 24.0,
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      Container(
-                                        width: double.infinity,
-                                        padding: const EdgeInsets.all(20),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFF1C2438),
-                                          borderRadius:
-                                              ShieldDesign.roundedTwelve,
-                                        ),
-                                        child: Text(
-                                          'Welcome $firstName.\nYou are protected by the Family Shield.',
-                                          textAlign: TextAlign.center,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodyLarge
-                                              ?.copyWith(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.w500,
-                                                height: 1.4,
-                                              ),
-                                        ),
+                                child: Column(
+                                  children: [
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(20),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF1C2438),
+                                        borderRadius:
+                                            ShieldDesign.roundedTwelve,
                                       ),
-                                      const SizedBox(height: 16),
-                                      medicationsAsync.when(
-                                        data: (medications) {
-                                          final activeMeds = medications
-                                              .where(
-                                                (m) =>
-                                                    m.isActive &&
-                                                    m.assignedTo ==
-                                                        profileAsync
-                                                            .value!
-                                                            .userId,
-                                              )
-                                              .toList();
-
-                                          if (activeMeds.isEmpty) {
-                                            return const SizedBox.shrink();
-                                          }
-
-                                          return Container(
-                                            margin: const EdgeInsets.only(
-                                              bottom: 18,
-                                            ),
-                                            padding: const EdgeInsets.all(16),
-                                            decoration: BoxDecoration(
+                                      child: Text(
+                                        'Welcome $firstName.\nYou are protected by the Family Shield.',
+                                        textAlign: TextAlign.center,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyLarge
+                                            ?.copyWith(
                                               color: Colors.white,
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black
-                                                      .withValues(alpha: 0.2),
-                                                  blurRadius: 10,
-                                                  offset: const Offset(0, 4),
-                                                ),
-                                              ],
+                                              fontWeight: FontWeight.w500,
+                                              height: 1.4,
                                             ),
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  'MEDICATION MONITOR',
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .labelMedium
-                                                      ?.copyWith(
-                                                        color: ShieldColors
-                                                            .textLabel,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        letterSpacing: 1.2,
-                                                      ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    medicationsAsync.when(
+                                      data: (medications) {
+                                        final activeMeds = medications
+                                            .where(
+                                              (m) =>
+                                                  m.isActive &&
+                                                  m.assignedTo ==
+                                                      profileAsync
+                                                          .value!
+                                                          .userId,
+                                            )
+                                            .toList();
+
+                                        if (activeMeds.isEmpty) {
+                                          return const SizedBox.shrink();
+                                        }
+
+                                        return Container(
+                                          margin: const EdgeInsets.only(
+                                            bottom: 18,
+                                          ),
+                                          padding: const EdgeInsets.all(16),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius: BorderRadius.circular(
+                                              20,
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withValues(
+                                                  alpha: 0.2,
                                                 ),
+                                                blurRadius: 10,
+                                                offset: const Offset(0, 4),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'MEDICATION MONITOR',
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .labelMedium
+                                                    ?.copyWith(
+                                                      color: ShieldColors
+                                                          .textLabel,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      letterSpacing: 1.2,
+                                                    ),
+                                              ),
 
-                                                const SizedBox(height: 14),
+                                              const SizedBox(height: 14),
 
-                                                // ...activeMeds.map((med) {
-                                                //   // final nextDose = med.nextDoseToday;
-                                                //   DateTime? nextDose;
-                                                //
-                                                //   if (med
-                                                //       .scheduleTimes
-                                                //       .isNotEmpty) {
-                                                //     final now =
-                                                //         DateTime.now();
-                                                //
-                                                //     final upcomingDoses =
-                                                //         <DateTime>[];
-                                                //
-                                                //     final startDate =
-                                                //         med.startDate ?? now;
-                                                //
-                                                //     for (final time
-                                                //         in med
-                                                //             .scheduleTimes) {
-                                                //       try {
-                                                //         final parts = time
-                                                //             .split(':');
-                                                //
-                                                //         final hour =
-                                                //             int.parse(
-                                                //               parts[0],
-                                                //             );
-                                                //         final minute =
-                                                //             int.parse(
-                                                //               parts[1],
-                                                //             );
-                                                //
-                                                //         DateTime doseTime =
-                                                //             DateTime(
-                                                //               now.year,
-                                                //               now.month,
-                                                //               now.day,
-                                                //               hour,
-                                                //               minute,
-                                                //             );
-                                                //
-                                                //         final frequency = med
-                                                //             .frequency
-                                                //             .toLowerCase();
-                                                //
-                                                //         // DAILY
-                                                //         if (frequency
-                                                //             .contains(
-                                                //               'daily',
-                                                //             )) {
-                                                //           if (doseTime
-                                                //               .isBefore(
-                                                //                 now,
-                                                //               )) {
-                                                //             doseTime =
-                                                //                 doseTime.add(
-                                                //                   const Duration(
-                                                //                     days: 1,
-                                                //                   ),
-                                                //                 );
-                                                //           }
-                                                //         }
-                                                //         // EVERY OTHER DAY
-                                                //         else if (frequency
-                                                //             .contains(
-                                                //               'every other',
-                                                //             )) {
-                                                //           final daysSinceStart =
-                                                //               now
-                                                //                   .difference(
-                                                //                     startDate,
-                                                //                   )
-                                                //                   .inDays;
-                                                //
-                                                //           final shouldTakeToday =
-                                                //               daysSinceStart %
-                                                //                   2 ==
-                                                //               0;
-                                                //
-                                                //           if (!shouldTakeToday ||
-                                                //               doseTime
-                                                //                   .isBefore(
-                                                //                     now,
-                                                //                   )) {
-                                                //             doseTime =
-                                                //                 doseTime.add(
-                                                //                   const Duration(
-                                                //                     days: 1,
-                                                //                   ),
-                                                //                 );
-                                                //
-                                                //             while (doseTime
-                                                //                         .difference(
-                                                //                           startDate,
-                                                //                         )
-                                                //                         .inDays %
-                                                //                     2 !=
-                                                //                 0) {
-                                                //               doseTime =
-                                                //                   doseTime.add(
-                                                //                     const Duration(
-                                                //                       days: 1,
-                                                //                     ),
-                                                //                   );
-                                                //             }
-                                                //           }
-                                                //         }
-                                                //         // WEEKLY
-                                                //         else if (frequency
-                                                //             .contains(
-                                                //               'weekly',
-                                                //             )) {
-                                                //           doseTime = DateTime(
-                                                //             now.year,
-                                                //             now.month,
-                                                //             now.day,
-                                                //             hour,
-                                                //             minute,
-                                                //           );
-                                                //
-                                                //           while (doseTime
-                                                //                       .weekday !=
-                                                //                   startDate
-                                                //                       .weekday ||
-                                                //               doseTime
-                                                //                   .isBefore(
-                                                //                     now,
-                                                //                   )) {
-                                                //             doseTime =
-                                                //                 doseTime.add(
-                                                //                   const Duration(
-                                                //                     days: 1,
-                                                //                   ),
-                                                //                 );
-                                                //           }
-                                                //         }
-                                                //         // MONTHLY
-                                                //         else if (frequency
-                                                //             .contains(
-                                                //               'monthly',
-                                                //             )) {
-                                                //           doseTime = DateTime(
-                                                //             now.year,
-                                                //             now.month,
-                                                //             startDate.day,
-                                                //             hour,
-                                                //             minute,
-                                                //           );
-                                                //
-                                                //           if (doseTime
-                                                //               .isBefore(
-                                                //                 now,
-                                                //               )) {
-                                                //             doseTime =
-                                                //                 DateTime(
-                                                //                   now.year,
-                                                //                   now.month +
-                                                //                       1,
-                                                //                   startDate
-                                                //                       .day,
-                                                //                   hour,
-                                                //                   minute,
-                                                //                 );
-                                                //           }
-                                                //         }
-                                                //         // AS NEEDED
-                                                //         else if (frequency
-                                                //             .contains(
-                                                //               'as needed',
-                                                //             )) {
-                                                //           continue;
-                                                //         }
-                                                //
-                                                //         upcomingDoses.add(
-                                                //           doseTime,
-                                                //         );
-                                                //       } catch (e) {
-                                                //         debugPrint(
-                                                //           "Dose parse error: $e",
-                                                //         );
-                                                //       }
-                                                //     }
-                                                //
-                                                //     upcomingDoses.sort();
-                                                //
-                                                //     if (upcomingDoses
-                                                //         .isNotEmpty) {
-                                                //       nextDose =
-                                                //           upcomingDoses.first;
-                                                //     }
-                                                //   }
-                                                //   String countdownText =
-                                                //       'No upcoming dose';
-                                                //   Color statusColor =
-                                                //       Colors.grey;
-                                                //
-                                                //   Duration? diff;
-                                                //
-                                                //   if (nextDose != null) {
-                                                //     diff = nextDose
-                                                //         .difference(
-                                                //           DateTime.now(),
-                                                //         );
-                                                //   }
-                                                //   countdownText =
-                                                //       '${diff?.inHours}h ${diff?.inMinutes.remainder(60)}m ${diff?.inSeconds.remainder(60)}s';
-                                                //   return Container(
-                                                //     margin:
-                                                //         const EdgeInsets.only(
-                                                //           bottom: 12,
-                                                //         ),
-                                                //     padding:
-                                                //         const EdgeInsets.all(
-                                                //           14,
-                                                //         ),
-                                                //     decoration: BoxDecoration(
-                                                //       color:
-                                                //           Colors.grey.shade50,
-                                                //       borderRadius:
-                                                //           BorderRadius.circular(
-                                                //             16,
-                                                //           ),
-                                                //       border: Border.all(
-                                                //         color: statusColor
-                                                //             .withValues(
-                                                //               alpha: 0.2,
-                                                //             ),
-                                                //       ),
-                                                //     ),
-                                                //     child: Row(
-                                                //       mainAxisAlignment:
-                                                //           MainAxisAlignment
-                                                //               .spaceBetween,
-                                                //       children: [
-                                                //         Icon(
-                                                //           Icons
-                                                //               .local_hospital,
-                                                //           color:
-                                                //               Colors.purple,
-                                                //           size: 28,
-                                                //         ),
-                                                //
-                                                //         const SizedBox(
-                                                //           width: 7,
-                                                //         ),
-                                                //
-                                                //         Expanded(
-                                                //           child: Row(
-                                                //             children: [
-                                                //               Expanded(
-                                                //                 child: Column(
-                                                //                   crossAxisAlignment:
-                                                //                       CrossAxisAlignment
-                                                //                           .start,
-                                                //                   children: [
-                                                //                     Text(
-                                                //                       med.medicationName,
-                                                //                       style: const TextStyle(
-                                                //                         fontWeight:
-                                                //                             FontWeight.bold,
-                                                //                         fontSize:
-                                                //                             15,
-                                                //                       ),
-                                                //                     ),
-                                                //
-                                                //                     const SizedBox(
-                                                //                       height:
-                                                //                           4,
-                                                //                     ),
-                                                //
-                                                //                     Text(
-                                                //                       '${med.dosage} • ${med.scheduleSummary}',
-                                                //                       style: TextStyle(
-                                                //                         color: Colors
-                                                //                             .grey
-                                                //                             .shade700,
-                                                //                         fontSize:
-                                                //                             12,
-                                                //                       ),
-                                                //                     ),
-                                                //
-                                                //                     const SizedBox(
-                                                //                       height:
-                                                //                           6,
-                                                //                     ),
-                                                //
-                                                //                     // if (nextDose !=
-                                                //                     //     null) ...[
-                                                //                     //   const SizedBox(
-                                                //                     //     height: 4,
-                                                //                     //   ),
-                                                //                     //
-                                                //                     //   Text(
-                                                //                     //     'At ${DateFormat.jm().format(nextDose)}',
-                                                //                     //     style: TextStyle(
-                                                //                     //       color: Colors
-                                                //                     //           .grey
-                                                //                     //           .shade600,
-                                                //                     //       fontSize: 11,
-                                                //                     //     ),
-                                                //                     //   ),
-                                                //                     // ],
-                                                //                   ],
-                                                //                 ),
-                                                //               ),
-                                                //               Expanded(
-                                                //                 child: Column(
-                                                //                   crossAxisAlignment:
-                                                //                       CrossAxisAlignment
-                                                //                           .end,
-                                                //                   mainAxisAlignment:
-                                                //                       MainAxisAlignment
-                                                //                           .end,
-                                                //                   children: [
-                                                //                     Row(
-                                                //                       mainAxisAlignment:
-                                                //                           MainAxisAlignment.end,
-                                                //                       children: [
-                                                //                         if (nextDose !=
-                                                //                             null)
-                                                //                           TweenAnimationBuilder<
-                                                //                             double
-                                                //                           >(
-                                                //                             tween:
-                                                //                                 Tween<
-                                                //                                   double
-                                                //                                 >(
-                                                //                                   begin: nextDose!
-                                                //                                       .difference(
-                                                //                                         DateTime.now(),
-                                                //                                       )
-                                                //                                       .inSeconds
-                                                //                                       .toDouble(),
-                                                //                                   end: 0,
-                                                //                                 ),
-                                                //                             duration: nextDose!.difference(
-                                                //                               DateTime.now(),
-                                                //                             ),
-                                                //                             builder:
-                                                //                                 (
-                                                //                                   context,
-                                                //                                   value,
-                                                //                                   child,
-                                                //                                 ) {
-                                                //                                   final diff = Duration(
-                                                //                                     seconds: value.toInt(),
-                                                //                                   );
-                                                //
-                                                //                                   if (diff.isNegative ||
-                                                //                                       diff.inSeconds <=
-                                                //                                           0) {
-                                                //                                     return const Text(
-                                                //                                       "Time Reached",
-                                                //                                       style: TextStyle(
-                                                //                                         color: Colors.red,
-                                                //                                         fontWeight: FontWeight.bold,
-                                                //                                       ),
-                                                //                                     );
-                                                //                                   }
-                                                //
-                                                //                                   final hours = diff.inHours;
-                                                //                                   final mins = diff.inMinutes.remainder(
-                                                //                                     60,
-                                                //                                   );
-                                                //                                   final secs = diff.inSeconds.remainder(
-                                                //                                     60,
-                                                //                                   );
-                                                //
-                                                //                                   final text =
-                                                //                                       '${hours.toString().padLeft(2, '0')}h '
-                                                //                                       '${mins.toString().padLeft(2, '0')}m '
-                                                //                                       '${secs.toString().padLeft(2, '0')}s';
-                                                //
-                                                //                                   return Text(
-                                                //                                     text,
-                                                //                                     style: TextStyle(
-                                                //                                       color: ShieldColors.activeTeal,
-                                                //                                       fontWeight: FontWeight.w600,
-                                                //                                       fontSize: 12,
-                                                //                                     ),
-                                                //                                   );
-                                                //                                 },
-                                                //                           ),
-                                                //                       ],
-                                                //                     ),
-                                                //                     Text(
-                                                //                       "Until Next Dose",
-                                                //                       style: TextStyle(
-                                                //                         fontSize:
-                                                //                             12,
-                                                //                         fontWeight:
-                                                //                             FontWeight.bold,
-                                                //                         color:
-                                                //                             ShieldColors.activeTeal,
-                                                //                       ),
-                                                //                     ),
-                                                //                   ],
-                                                //                 ),
-                                                //               ),
-                                                //             ],
-                                                //           ),
-                                                //         ),
-                                                //       ],
-                                                //     ),
-                                                //   );
-                                                // }),
-                                                ...activeMeds.map((med) {
-                                                  // final nextDose = med.nextDoseToday;
-                                                  DateTime? nextDose;
+                                              // ...activeMeds.map((med) {
+                                              //   // final nextDose = med.nextDoseToday;
+                                              //   DateTime? nextDose;
+                                              //
+                                              //   if (med
+                                              //       .scheduleTimes
+                                              //       .isNotEmpty) {
+                                              //     final now =
+                                              //         DateTime.now();
+                                              //
+                                              //     final upcomingDoses =
+                                              //         <DateTime>[];
+                                              //
+                                              //     final startDate =
+                                              //         med.startDate ?? now;
+                                              //
+                                              //     for (final time
+                                              //         in med
+                                              //             .scheduleTimes) {
+                                              //       try {
+                                              //         final parts = time
+                                              //             .split(':');
+                                              //
+                                              //         final hour =
+                                              //             int.parse(
+                                              //               parts[0],
+                                              //             );
+                                              //         final minute =
+                                              //             int.parse(
+                                              //               parts[1],
+                                              //             );
+                                              //
+                                              //         DateTime doseTime =
+                                              //             DateTime(
+                                              //               now.year,
+                                              //               now.month,
+                                              //               now.day,
+                                              //               hour,
+                                              //               minute,
+                                              //             );
+                                              //
+                                              //         final frequency = med
+                                              //             .frequency
+                                              //             .toLowerCase();
+                                              //
+                                              //         // DAILY
+                                              //         if (frequency
+                                              //             .contains(
+                                              //               'daily',
+                                              //             )) {
+                                              //           if (doseTime
+                                              //               .isBefore(
+                                              //                 now,
+                                              //               )) {
+                                              //             doseTime =
+                                              //                 doseTime.add(
+                                              //                   const Duration(
+                                              //                     days: 1,
+                                              //                   ),
+                                              //                 );
+                                              //           }
+                                              //         }
+                                              //         // EVERY OTHER DAY
+                                              //         else if (frequency
+                                              //             .contains(
+                                              //               'every other',
+                                              //             )) {
+                                              //           final daysSinceStart =
+                                              //               now
+                                              //                   .difference(
+                                              //                     startDate,
+                                              //                   )
+                                              //                   .inDays;
+                                              //
+                                              //           final shouldTakeToday =
+                                              //               daysSinceStart %
+                                              //                   2 ==
+                                              //               0;
+                                              //
+                                              //           if (!shouldTakeToday ||
+                                              //               doseTime
+                                              //                   .isBefore(
+                                              //                     now,
+                                              //                   )) {
+                                              //             doseTime =
+                                              //                 doseTime.add(
+                                              //                   const Duration(
+                                              //                     days: 1,
+                                              //                   ),
+                                              //                 );
+                                              //
+                                              //             while (doseTime
+                                              //                         .difference(
+                                              //                           startDate,
+                                              //                         )
+                                              //                         .inDays %
+                                              //                     2 !=
+                                              //                 0) {
+                                              //               doseTime =
+                                              //                   doseTime.add(
+                                              //                     const Duration(
+                                              //                       days: 1,
+                                              //                     ),
+                                              //                   );
+                                              //             }
+                                              //           }
+                                              //         }
+                                              //         // WEEKLY
+                                              //         else if (frequency
+                                              //             .contains(
+                                              //               'weekly',
+                                              //             )) {
+                                              //           doseTime = DateTime(
+                                              //             now.year,
+                                              //             now.month,
+                                              //             now.day,
+                                              //             hour,
+                                              //             minute,
+                                              //           );
+                                              //
+                                              //           while (doseTime
+                                              //                       .weekday !=
+                                              //                   startDate
+                                              //                       .weekday ||
+                                              //               doseTime
+                                              //                   .isBefore(
+                                              //                     now,
+                                              //                   )) {
+                                              //             doseTime =
+                                              //                 doseTime.add(
+                                              //                   const Duration(
+                                              //                     days: 1,
+                                              //                   ),
+                                              //                 );
+                                              //           }
+                                              //         }
+                                              //         // MONTHLY
+                                              //         else if (frequency
+                                              //             .contains(
+                                              //               'monthly',
+                                              //             )) {
+                                              //           doseTime = DateTime(
+                                              //             now.year,
+                                              //             now.month,
+                                              //             startDate.day,
+                                              //             hour,
+                                              //             minute,
+                                              //           );
+                                              //
+                                              //           if (doseTime
+                                              //               .isBefore(
+                                              //                 now,
+                                              //               )) {
+                                              //             doseTime =
+                                              //                 DateTime(
+                                              //                   now.year,
+                                              //                   now.month +
+                                              //                       1,
+                                              //                   startDate
+                                              //                       .day,
+                                              //                   hour,
+                                              //                   minute,
+                                              //                 );
+                                              //           }
+                                              //         }
+                                              //         // AS NEEDED
+                                              //         else if (frequency
+                                              //             .contains(
+                                              //               'as needed',
+                                              //             )) {
+                                              //           continue;
+                                              //         }
+                                              //
+                                              //         upcomingDoses.add(
+                                              //           doseTime,
+                                              //         );
+                                              //       } catch (e) {
+                                              //         debugPrint(
+                                              //           "Dose parse error: $e",
+                                              //         );
+                                              //       }
+                                              //     }
+                                              //
+                                              //     upcomingDoses.sort();
+                                              //
+                                              //     if (upcomingDoses
+                                              //         .isNotEmpty) {
+                                              //       nextDose =
+                                              //           upcomingDoses.first;
+                                              //     }
+                                              //   }
+                                              //   String countdownText =
+                                              //       'No upcoming dose';
+                                              //   Color statusColor =
+                                              //       Colors.grey;
+                                              //
+                                              //   Duration? diff;
+                                              //
+                                              //   if (nextDose != null) {
+                                              //     diff = nextDose
+                                              //         .difference(
+                                              //           DateTime.now(),
+                                              //         );
+                                              //   }
+                                              //   countdownText =
+                                              //       '${diff?.inHours}h ${diff?.inMinutes.remainder(60)}m ${diff?.inSeconds.remainder(60)}s';
+                                              //   return Container(
+                                              //     margin:
+                                              //         const EdgeInsets.only(
+                                              //           bottom: 12,
+                                              //         ),
+                                              //     padding:
+                                              //         const EdgeInsets.all(
+                                              //           14,
+                                              //         ),
+                                              //     decoration: BoxDecoration(
+                                              //       color:
+                                              //           Colors.grey.shade50,
+                                              //       borderRadius:
+                                              //           BorderRadius.circular(
+                                              //             16,
+                                              //           ),
+                                              //       border: Border.all(
+                                              //         color: statusColor
+                                              //             .withValues(
+                                              //               alpha: 0.2,
+                                              //             ),
+                                              //       ),
+                                              //     ),
+                                              //     child: Row(
+                                              //       mainAxisAlignment:
+                                              //           MainAxisAlignment
+                                              //               .spaceBetween,
+                                              //       children: [
+                                              //         Icon(
+                                              //           Icons
+                                              //               .local_hospital,
+                                              //           color:
+                                              //               Colors.purple,
+                                              //           size: 28,
+                                              //         ),
+                                              //
+                                              //         const SizedBox(
+                                              //           width: 7,
+                                              //         ),
+                                              //
+                                              //         Expanded(
+                                              //           child: Row(
+                                              //             children: [
+                                              //               Expanded(
+                                              //                 child: Column(
+                                              //                   crossAxisAlignment:
+                                              //                       CrossAxisAlignment
+                                              //                           .start,
+                                              //                   children: [
+                                              //                     Text(
+                                              //                       med.medicationName,
+                                              //                       style: const TextStyle(
+                                              //                         fontWeight:
+                                              //                             FontWeight.bold,
+                                              //                         fontSize:
+                                              //                             15,
+                                              //                       ),
+                                              //                     ),
+                                              //
+                                              //                     const SizedBox(
+                                              //                       height:
+                                              //                           4,
+                                              //                     ),
+                                              //
+                                              //                     Text(
+                                              //                       '${med.dosage} • ${med.scheduleSummary}',
+                                              //                       style: TextStyle(
+                                              //                         color: Colors
+                                              //                             .grey
+                                              //                             .shade700,
+                                              //                         fontSize:
+                                              //                             12,
+                                              //                       ),
+                                              //                     ),
+                                              //
+                                              //                     const SizedBox(
+                                              //                       height:
+                                              //                           6,
+                                              //                     ),
+                                              //
+                                              //                     // if (nextDose !=
+                                              //                     //     null) ...[
+                                              //                     //   const SizedBox(
+                                              //                     //     height: 4,
+                                              //                     //   ),
+                                              //                     //
+                                              //                     //   Text(
+                                              //                     //     'At ${DateFormat.jm().format(nextDose)}',
+                                              //                     //     style: TextStyle(
+                                              //                     //       color: Colors
+                                              //                     //           .grey
+                                              //                     //           .shade600,
+                                              //                     //       fontSize: 11,
+                                              //                     //     ),
+                                              //                     //   ),
+                                              //                     // ],
+                                              //                   ],
+                                              //                 ),
+                                              //               ),
+                                              //               Expanded(
+                                              //                 child: Column(
+                                              //                   crossAxisAlignment:
+                                              //                       CrossAxisAlignment
+                                              //                           .end,
+                                              //                   mainAxisAlignment:
+                                              //                       MainAxisAlignment
+                                              //                           .end,
+                                              //                   children: [
+                                              //                     Row(
+                                              //                       mainAxisAlignment:
+                                              //                           MainAxisAlignment.end,
+                                              //                       children: [
+                                              //                         if (nextDose !=
+                                              //                             null)
+                                              //                           TweenAnimationBuilder<
+                                              //                             double
+                                              //                           >(
+                                              //                             tween:
+                                              //                                 Tween<
+                                              //                                   double
+                                              //                                 >(
+                                              //                                   begin: nextDose!
+                                              //                                       .difference(
+                                              //                                         DateTime.now(),
+                                              //                                       )
+                                              //                                       .inSeconds
+                                              //                                       .toDouble(),
+                                              //                                   end: 0,
+                                              //                                 ),
+                                              //                             duration: nextDose!.difference(
+                                              //                               DateTime.now(),
+                                              //                             ),
+                                              //                             builder:
+                                              //                                 (
+                                              //                                   context,
+                                              //                                   value,
+                                              //                                   child,
+                                              //                                 ) {
+                                              //                                   final diff = Duration(
+                                              //                                     seconds: value.toInt(),
+                                              //                                   );
+                                              //
+                                              //                                   if (diff.isNegative ||
+                                              //                                       diff.inSeconds <=
+                                              //                                           0) {
+                                              //                                     return const Text(
+                                              //                                       "Time Reached",
+                                              //                                       style: TextStyle(
+                                              //                                         color: Colors.red,
+                                              //                                         fontWeight: FontWeight.bold,
+                                              //                                       ),
+                                              //                                     );
+                                              //                                   }
+                                              //
+                                              //                                   final hours = diff.inHours;
+                                              //                                   final mins = diff.inMinutes.remainder(
+                                              //                                     60,
+                                              //                                   );
+                                              //                                   final secs = diff.inSeconds.remainder(
+                                              //                                     60,
+                                              //                                   );
+                                              //
+                                              //                                   final text =
+                                              //                                       '${hours.toString().padLeft(2, '0')}h '
+                                              //                                       '${mins.toString().padLeft(2, '0')}m '
+                                              //                                       '${secs.toString().padLeft(2, '0')}s';
+                                              //
+                                              //                                   return Text(
+                                              //                                     text,
+                                              //                                     style: TextStyle(
+                                              //                                       color: ShieldColors.activeTeal,
+                                              //                                       fontWeight: FontWeight.w600,
+                                              //                                       fontSize: 12,
+                                              //                                     ),
+                                              //                                   );
+                                              //                                 },
+                                              //                           ),
+                                              //                       ],
+                                              //                     ),
+                                              //                     Text(
+                                              //                       "Until Next Dose",
+                                              //                       style: TextStyle(
+                                              //                         fontSize:
+                                              //                             12,
+                                              //                         fontWeight:
+                                              //                             FontWeight.bold,
+                                              //                         color:
+                                              //                             ShieldColors.activeTeal,
+                                              //                       ),
+                                              //                     ),
+                                              //                   ],
+                                              //                 ),
+                                              //               ),
+                                              //             ],
+                                              //           ),
+                                              //         ),
+                                              //       ],
+                                              //     ),
+                                              //   );
+                                              // }),
+                                              ...activeMeds.map((med) {
+                                                // final nextDose = med.nextDoseToday;
+                                                DateTime? nextDose;
 
-                                                  final allLogsAsync = ref
-                                                      .watch(
-                                                        allDoseLogsProvider,
-                                                      );
-                                                  final logs =
-                                                      allLogsAsync.value ?? [];
+                                                final allLogsAsync = ref.watch(
+                                                  allDoseLogsProvider,
+                                                );
+                                                final logs =
+                                                    allLogsAsync.value ?? [];
 
-                                                  final now = DateTime.now();
-                                                  final startDate =
-                                                      med.startDate ?? now;
+                                                final now = DateTime.now();
+                                                final startDate =
+                                                    med.startDate ?? now;
 
-                                                  bool isTakenToday = false;
+                                                bool isTakenToday = false;
 
-                                                  final medicationLogs = logs
-                                                      .where(
-                                                        (l) =>
-                                                            l.medicationId ==
-                                                                med.id &&
-                                                            l.status ==
-                                                                'taken' &&
-                                                            l.takenAt != null &&
-                                                            med.assignedTo ==
-                                                                profileAsync
-                                                                    .value
-                                                                    ?.userId,
-                                                      );
+                                                final medicationLogs = logs
+                                                    .where(
+                                                      (l) =>
+                                                          l.medicationId ==
+                                                              med.id &&
+                                                          l.status == 'taken' &&
+                                                          l.takenAt != null &&
+                                                          med.assignedTo ==
+                                                              profileAsync
+                                                                  .value
+                                                                  ?.userId,
+                                                    );
 
-                                                  switch (med.recurrence) {
-                                                    case 'daily':
-                                                      isTakenToday =
-                                                          medicationLogs.any(
-                                                            (log) =>
-                                                                log
-                                                                        .takenAt!
-                                                                        .year ==
-                                                                    now.year &&
-                                                                log
-                                                                        .takenAt!
-                                                                        .month ==
-                                                                    now.month &&
-                                                                log
-                                                                        .takenAt!
-                                                                        .day ==
-                                                                    now.day,
-                                                          );
-                                                      break;
-
-                                                    case 'every_other_day':
-                                                      final diffDays = now
-                                                          .difference(startDate)
-                                                          .inDays;
-
-                                                      final shouldTakeToday =
-                                                          diffDays % 2 == 0;
-
-                                                      isTakenToday =
-                                                          shouldTakeToday &&
-                                                          medicationLogs.any(
-                                                            (log) =>
-                                                                log
-                                                                        .takenAt!
-                                                                        .year ==
-                                                                    now.year &&
-                                                                log
-                                                                        .takenAt!
-                                                                        .month ==
-                                                                    now.month &&
-                                                                log
-                                                                        .takenAt!
-                                                                        .day ==
-                                                                    now.day,
-                                                          );
-                                                      break;
-
-                                                    case 'weekly':
-                                                      isTakenToday =
-                                                          medicationLogs.any((
-                                                            log,
-                                                          ) {
-                                                            final d =
-                                                                log.takenAt!;
-
-                                                            return d.weekday ==
-                                                                    now.weekday &&
-                                                                d.year ==
-                                                                    now.year;
-                                                          });
-                                                      break;
-
-                                                    case 'monthly':
-                                                      isTakenToday =
-                                                          medicationLogs.any((
-                                                            log,
-                                                          ) {
-                                                            final d =
-                                                                log.takenAt!;
-
-                                                            return d.day ==
-                                                                    now.day &&
-                                                                d.month ==
-                                                                    now.month &&
-                                                                d.year ==
-                                                                    now.year;
-                                                          });
-                                                      break;
-                                                  }
-
-                                                  if (med
-                                                      .scheduleTimes
-                                                      .isNotEmpty) {
-                                                    final upcomingDoses =
-                                                        <DateTime>[];
-
-                                                    for (final time
-                                                        in med.scheduleTimes) {
-                                                      try {
-                                                        final parts = time
-                                                            .split(':');
-
-                                                        final hour = int.parse(
-                                                          parts[0],
+                                                switch (med.recurrence) {
+                                                  case 'daily':
+                                                    isTakenToday =
+                                                        medicationLogs.any(
+                                                          (log) =>
+                                                              log
+                                                                      .takenAt!
+                                                                      .year ==
+                                                                  now.year &&
+                                                              log
+                                                                      .takenAt!
+                                                                      .month ==
+                                                                  now.month &&
+                                                              log
+                                                                      .takenAt!
+                                                                      .day ==
+                                                                  now.day,
                                                         );
+                                                    break;
 
-                                                        final minute =
-                                                            int.parse(parts[1]);
+                                                  case 'every_other_day':
+                                                    final diffDays = now
+                                                        .difference(startDate)
+                                                        .inDays;
 
-                                                        DateTime doseTime =
+                                                    final shouldTakeToday =
+                                                        diffDays % 2 == 0;
+
+                                                    isTakenToday =
+                                                        shouldTakeToday &&
+                                                        medicationLogs.any(
+                                                          (log) =>
+                                                              log
+                                                                      .takenAt!
+                                                                      .year ==
+                                                                  now.year &&
+                                                              log
+                                                                      .takenAt!
+                                                                      .month ==
+                                                                  now.month &&
+                                                              log
+                                                                      .takenAt!
+                                                                      .day ==
+                                                                  now.day,
+                                                        );
+                                                    break;
+
+                                                  case 'weekly':
+                                                    isTakenToday =
+                                                        medicationLogs.any((
+                                                          log,
+                                                        ) {
+                                                          final d =
+                                                              log.takenAt!;
+
+                                                          return d.weekday ==
+                                                                  now.weekday &&
+                                                              d.year ==
+                                                                  now.year;
+                                                        });
+                                                    break;
+
+                                                  case 'monthly':
+                                                    isTakenToday =
+                                                        medicationLogs.any((
+                                                          log,
+                                                        ) {
+                                                          final d =
+                                                              log.takenAt!;
+
+                                                          return d.day ==
+                                                                  now.day &&
+                                                              d.month ==
+                                                                  now.month &&
+                                                              d.year ==
+                                                                  now.year;
+                                                        });
+                                                    break;
+                                                }
+
+                                                if (med
+                                                    .scheduleTimes
+                                                    .isNotEmpty) {
+                                                  final upcomingDoses =
+                                                      <DateTime>[];
+
+                                                  for (final time
+                                                      in med.scheduleTimes) {
+                                                    try {
+                                                      final parts = time.split(
+                                                        ':',
+                                                      );
+
+                                                      final hour = int.parse(
+                                                        parts[0],
+                                                      );
+
+                                                      final minute = int.parse(
+                                                        parts[1],
+                                                      );
+
+                                                      DateTime doseTime =
+                                                          DateTime(
+                                                            now.year,
+                                                            now.month,
+                                                            now.day,
+                                                            hour,
+                                                            minute,
+                                                          );
+
+                                                      final frequency = med
+                                                          .frequency
+                                                          .toLowerCase();
+
+                                                      // already logged → move next occurrence
+                                                      if (isTakenToday) {
+                                                        switch (med
+                                                            .recurrence) {
+                                                          case 'daily':
+                                                            doseTime = doseTime
+                                                                .add(
+                                                                  const Duration(
+                                                                    days: 1,
+                                                                  ),
+                                                                );
+                                                            break;
+
+                                                          case 'every_other_day':
+                                                            doseTime = doseTime
+                                                                .add(
+                                                                  const Duration(
+                                                                    days: 2,
+                                                                  ),
+                                                                );
+                                                            break;
+
+                                                          case 'weekly':
+                                                            doseTime = doseTime
+                                                                .add(
+                                                                  const Duration(
+                                                                    days: 7,
+                                                                  ),
+                                                                );
+                                                            break;
+
+                                                          case 'monthly':
+                                                            doseTime = DateTime(
+                                                              doseTime.year,
+                                                              doseTime.month +
+                                                                  1,
+                                                              doseTime.day,
+                                                              doseTime.hour,
+                                                              doseTime.minute,
+                                                            );
+                                                            break;
+                                                        }
+                                                      }
+                                                      // WEEKLY
+                                                      else if (frequency
+                                                          .contains('weekly')) {
+                                                        // Sunday = 0 ... Saturday = 6 (same numbering the cron uses)
+                                                        final days =
+                                                            List<int>.from(
+                                                              med.daysOfWeek ??
+                                                                  <int>[],
+                                                            )..sort();
+                                                        if (days.isEmpty)
+                                                          days.add(
+                                                            startDate.weekday %
+                                                                7,
+                                                          );
+
+                                                        // Don't count down to a date before the start date
+                                                        final from =
+                                                            startDate.isAfter(
+                                                              now,
+                                                            )
+                                                            ? startDate
+                                                            : now;
+                                                        final baseDay =
                                                             DateTime(
-                                                              now.year,
-                                                              now.month,
-                                                              now.day,
+                                                              from.year,
+                                                              from.month,
+                                                              from.day,
                                                               hour,
                                                               minute,
                                                             );
 
-                                                        final frequency = med
-                                                            .frequency
-                                                            .toLowerCase();
-
-                                                        // already logged → move next occurrence
-                                                        if (isTakenToday) {
-                                                          switch (med
-                                                              .recurrence) {
-                                                            case 'daily':
-                                                              doseTime =
-                                                                  doseTime.add(
-                                                                    const Duration(
-                                                                      days: 1,
-                                                                    ),
-                                                                  );
-                                                              break;
-
-                                                            case 'every_other_day':
-                                                              doseTime =
-                                                                  doseTime.add(
-                                                                    const Duration(
-                                                                      days: 2,
-                                                                    ),
-                                                                  );
-                                                              break;
-
-                                                            case 'weekly':
-                                                              doseTime =
-                                                                  doseTime.add(
-                                                                    const Duration(
-                                                                      days: 7,
-                                                                    ),
-                                                                  );
-                                                              break;
-
-                                                            case 'monthly':
-                                                              doseTime = DateTime(
-                                                                doseTime.year,
-                                                                doseTime.month +
-                                                                    1,
-                                                                doseTime.day,
-                                                                doseTime.hour,
-                                                                doseTime.minute,
+                                                        DateTime? best;
+                                                        for (final d in days) {
+                                                          final add =
+                                                              (d -
+                                                                  (baseDay.weekday %
+                                                                      7)) %
+                                                              7; // always 0..6 in Dart
+                                                          var candidate =
+                                                              baseDay.add(
+                                                                Duration(
+                                                                  days: add,
+                                                                ),
                                                               );
-                                                              break;
+                                                          if (candidate
+                                                              .isBefore(now)) {
+                                                            candidate =
+                                                                candidate.add(
+                                                                  const Duration(
+                                                                    days: 7,
+                                                                  ),
+                                                                );
                                                           }
+                                                          if (best == null ||
+                                                              candidate
+                                                                  .isBefore(
+                                                                    best,
+                                                                  ))
+                                                            best = candidate;
                                                         }
-                                                        // normal schedule
-                                                        else {
-                                                          if (frequency
-                                                              .contains(
-                                                                'daily',
-                                                              )) {
-                                                            if (doseTime
-                                                                .isBefore(
-                                                                  now,
-                                                                )) {
-                                                              doseTime =
-                                                                  doseTime.add(
-                                                                    const Duration(
-                                                                      days: 1,
-                                                                    ),
-                                                                  );
-                                                            }
-                                                          } else if (frequency
-                                                              .contains(
-                                                                'every other',
-                                                              )) {
-                                                            final daysSinceStart =
-                                                                now
-                                                                    .difference(
-                                                                      startDate,
-                                                                    )
-                                                                    .inDays;
+                                                        doseTime = best!;
+                                                      }
+                                                      // normal schedule
+                                                      else {
+                                                        if (frequency.contains(
+                                                          'daily',
+                                                        )) {
+                                                          if (doseTime.isBefore(
+                                                            now,
+                                                          )) {
+                                                            doseTime = doseTime
+                                                                .add(
+                                                                  const Duration(
+                                                                    days: 1,
+                                                                  ),
+                                                                );
+                                                          }
+                                                        } else if (frequency
+                                                            .contains(
+                                                              'every other',
+                                                            )) {
+                                                          final daysSinceStart =
+                                                              now
+                                                                  .difference(
+                                                                    startDate,
+                                                                  )
+                                                                  .inDays;
 
-                                                            final shouldTakeToday =
-                                                                daysSinceStart %
-                                                                    2 ==
-                                                                0;
+                                                          final shouldTakeToday =
+                                                              daysSinceStart %
+                                                                  2 ==
+                                                              0;
 
-                                                            if (!shouldTakeToday ||
-                                                                doseTime
-                                                                    .isBefore(
-                                                                      now,
-                                                                    )) {
-                                                              doseTime =
-                                                                  doseTime.add(
-                                                                    const Duration(
-                                                                      days: 1,
-                                                                    ),
-                                                                  );
-
-                                                              while (doseTime
-                                                                          .difference(
-                                                                            startDate,
-                                                                          )
-                                                                          .inDays %
-                                                                      2 !=
-                                                                  0) {
-                                                                doseTime =
-                                                                    doseTime.add(
-                                                                      const Duration(
-                                                                        days: 1,
-                                                                      ),
-                                                                    );
-                                                              }
-                                                            }
-                                                          } else if (frequency
-                                                              .contains(
-                                                                'weekly',
+                                                          if (!shouldTakeToday ||
+                                                              doseTime.isBefore(
+                                                                now,
                                                               )) {
+                                                            doseTime = doseTime
+                                                                .add(
+                                                                  const Duration(
+                                                                    days: 1,
+                                                                  ),
+                                                                );
+
                                                             while (doseTime
-                                                                        .weekday !=
-                                                                    startDate
-                                                                        .weekday ||
-                                                                doseTime
-                                                                    .isBefore(
-                                                                      now,
-                                                                    )) {
+                                                                        .difference(
+                                                                          startDate,
+                                                                        )
+                                                                        .inDays %
+                                                                    2 !=
+                                                                0) {
                                                               doseTime =
                                                                   doseTime.add(
                                                                     const Duration(
@@ -2534,616 +2924,624 @@ class _SeniorHUDState extends ConsumerState<SeniorHUD>
                                                                     ),
                                                                   );
                                                             }
-                                                          } else if (frequency
-                                                              .contains(
-                                                                'monthly',
+                                                          }
+                                                        } else if (frequency
+                                                            .contains(
+                                                              'weekly',
+                                                            )) {
+                                                          while (doseTime
+                                                                      .weekday !=
+                                                                  startDate
+                                                                      .weekday ||
+                                                              doseTime.isBefore(
+                                                                now,
                                                               )) {
+                                                            doseTime = doseTime
+                                                                .add(
+                                                                  const Duration(
+                                                                    days: 1,
+                                                                  ),
+                                                                );
+                                                          }
+                                                        } else if (frequency
+                                                            .contains(
+                                                              'monthly',
+                                                            )) {
+                                                          doseTime = DateTime(
+                                                            now.year,
+                                                            now.month,
+                                                            startDate.day,
+                                                            hour,
+                                                            minute,
+                                                          );
+
+                                                          if (doseTime.isBefore(
+                                                            now,
+                                                          )) {
                                                             doseTime = DateTime(
                                                               now.year,
-                                                              now.month,
+                                                              now.month + 1,
                                                               startDate.day,
                                                               hour,
                                                               minute,
                                                             );
-
-                                                            if (doseTime
-                                                                .isBefore(
-                                                                  now,
-                                                                )) {
-                                                              doseTime =
-                                                                  DateTime(
-                                                                    now.year,
-                                                                    now.month +
-                                                                        1,
-                                                                    startDate
-                                                                        .day,
-                                                                    hour,
-                                                                    minute,
-                                                                  );
-                                                            }
-                                                          } else if (frequency
-                                                              .contains(
-                                                                'as needed',
-                                                              )) {
-                                                            continue;
                                                           }
+                                                        } else if (frequency
+                                                            .contains(
+                                                              'as needed',
+                                                            )) {
+                                                          continue;
                                                         }
-
-                                                        upcomingDoses.add(
-                                                          doseTime,
-                                                        );
-                                                      } catch (e) {
-                                                        debugPrint(
-                                                          "Dose parse error: $e",
-                                                        );
                                                       }
-                                                    }
 
-                                                    upcomingDoses.sort();
-
-                                                    if (upcomingDoses
-                                                        .isNotEmpty) {
-                                                      nextDose =
-                                                          upcomingDoses.first;
+                                                      upcomingDoses.add(
+                                                        doseTime,
+                                                      );
+                                                    } catch (e) {
+                                                      debugPrint(
+                                                        "Dose parse error: $e",
+                                                      );
                                                     }
                                                   }
-                                                  return Container(
-                                                    margin:
-                                                        const EdgeInsets.only(
-                                                          bottom: 12,
+
+                                                  upcomingDoses.sort();
+
+                                                  if (upcomingDoses
+                                                      .isNotEmpty) {
+                                                    nextDose =
+                                                        upcomingDoses.first;
+                                                  }
+                                                }
+                                                return Container(
+                                                  margin: const EdgeInsets.only(
+                                                    bottom: 12,
+                                                  ),
+                                                  padding: const EdgeInsets.all(
+                                                    14,
+                                                  ),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.grey.shade50,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          16,
                                                         ),
-                                                    padding:
-                                                        const EdgeInsets.all(
-                                                          14,
-                                                        ),
-                                                    decoration: BoxDecoration(
-                                                      color:
-                                                          Colors.grey.shade50,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            16,
+                                                    border: Border.all(
+                                                      color: Colors.black
+                                                          .withValues(
+                                                            alpha: 0.2,
                                                           ),
-                                                      border: Border.all(
-                                                        color: Colors.black
-                                                            .withValues(
-                                                              alpha: 0.2,
-                                                            ),
-                                                      ),
                                                     ),
-                                                    child: Row(
-                                                      mainAxisAlignment:
-                                                          MainAxisAlignment
-                                                              .spaceBetween,
-                                                      children: [
-                                                        Icon(
-                                                          Icons.local_hospital,
-                                                          color: Colors.purple,
-                                                          size: 26,
-                                                        ),
+                                                  ),
+                                                  child: Row(
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .spaceBetween,
+                                                    children: [
+                                                      Icon(
+                                                        Icons.local_hospital,
+                                                        color: Colors.purple,
+                                                        size: 26,
+                                                      ),
 
-                                                        const SizedBox(
-                                                          width: 7,
-                                                        ),
+                                                      const SizedBox(width: 7),
 
-                                                        Expanded(
-                                                          child: Row(
-                                                            children: [
-                                                              Expanded(
-                                                                child: Column(
-                                                                  crossAxisAlignment:
-                                                                      CrossAxisAlignment
-                                                                          .start,
-                                                                  children: [
-                                                                    Text(
-                                                                      med.medicationName,
-                                                                      style: const TextStyle(
-                                                                        fontWeight:
-                                                                            FontWeight.bold,
-                                                                        fontSize:
-                                                                            15,
-                                                                      ),
+                                                      Expanded(
+                                                        child: Row(
+                                                          children: [
+                                                            Expanded(
+                                                              child: Column(
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .start,
+                                                                children: [
+                                                                  Text(
+                                                                    med.medicationName,
+                                                                    style: const TextStyle(
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .bold,
+                                                                      fontSize:
+                                                                          15,
                                                                     ),
+                                                                  ),
 
-                                                                    const SizedBox(
-                                                                      height: 4,
+                                                                  const SizedBox(
+                                                                    height: 4,
+                                                                  ),
+
+                                                                  Text(
+                                                                    '${med.dosage} • ${med.scheduleSummary}',
+                                                                    style: TextStyle(
+                                                                      color: Colors
+                                                                          .grey
+                                                                          .shade700,
+                                                                      fontSize:
+                                                                          12,
                                                                     ),
+                                                                  ),
 
-                                                                    Text(
-                                                                      '${med.dosage} • ${med.scheduleSummary}',
-                                                                      style: TextStyle(
-                                                                        color: Colors
-                                                                            .grey
-                                                                            .shade700,
-                                                                        fontSize:
-                                                                            12,
-                                                                      ),
-                                                                    ),
-
-                                                                    if (med.doctor !=
-                                                                        null) ...[
-                                                                      SizedBox(
-                                                                        height:
-                                                                            5,
-                                                                      ),
-
-                                                                      RichText(
-                                                                        text: TextSpan(
-                                                                          style: TextStyle(
-                                                                            color:
-                                                                                Colors.blueGrey,
-                                                                            fontSize:
-                                                                                12,
-                                                                            fontWeight:
-                                                                                FontWeight.w500,
-                                                                          ),
-                                                                          children: [
-                                                                            TextSpan(
-                                                                              text: 'Prescribing doctor: ',
-                                                                            ),
-                                                                            TextSpan(
-                                                                              text: med.doctor,
-                                                                              style: TextStyle(
-                                                                                fontWeight: FontWeight.bold,
-                                                                              ),
-                                                                            ),
-                                                                          ],
-                                                                        ),
-                                                                      ),
-                                                                    ],
-                                                                    if (med.instructions !=
-                                                                        null) ...[
-                                                                      SizedBox(
-                                                                        height:
-                                                                            5,
-                                                                      ),
-                                                                      RichText(
-                                                                        text: TextSpan(
-                                                                          style: TextStyle(
-                                                                            color:
-                                                                                Colors.blueGrey,
-                                                                            fontSize:
-                                                                                12,
-                                                                            fontWeight:
-                                                                                FontWeight.w500,
-                                                                          ),
-                                                                          children: [
-                                                                            TextSpan(
-                                                                              text: 'Instruction: ',
-                                                                            ),
-                                                                            TextSpan(
-                                                                              text: med.instructions,
-                                                                              style: TextStyle(
-                                                                                fontWeight: FontWeight.bold,
-                                                                              ),
-                                                                            ),
-                                                                          ],
-                                                                        ),
-                                                                      ),
-                                                                    ],
+                                                                  if (med.doctor !=
+                                                                      null) ...[
                                                                     SizedBox(
                                                                       height: 5,
                                                                     ),
 
-                                                                    // if (nextDose !=
-                                                                    //     null) ...[
-                                                                    //   const SizedBox(
-                                                                    //     height: 4,
-                                                                    //   ),
-                                                                    //
-                                                                    //   Text(
-                                                                    //     'At ${DateFormat.jm().format(nextDose)}',
-                                                                    //     style: TextStyle(
-                                                                    //       color: Colors
-                                                                    //           .grey
-                                                                    //           .shade600,
-                                                                    //       fontSize: 11,
-                                                                    //     ),
-                                                                    //   ),
-                                                                    // ],
-                                                                  ],
-                                                                ),
-                                                              ),
-                                                              Expanded(
-                                                                child: Column(
-                                                                  crossAxisAlignment:
-                                                                      CrossAxisAlignment
-                                                                          .end,
-                                                                  mainAxisAlignment:
-                                                                      MainAxisAlignment
-                                                                          .end,
-                                                                  children: [
-                                                                    Row(
-                                                                      mainAxisAlignment:
-                                                                          MainAxisAlignment
-                                                                              .end,
-                                                                      children: [
-                                                                        if (nextDose !=
-                                                                            null)
-                                                                          StreamBuilder(
-                                                                            stream: Stream.periodic(
-                                                                              const Duration(
-                                                                                seconds: 1,
-                                                                              ),
-                                                                            ),
-                                                                            builder:
-                                                                                (
-                                                                                  context,
-                                                                                  snapshot,
-                                                                                ) {
-                                                                                  final diff =
-                                                                                      nextDose?.difference(
-                                                                                        DateTime.now(),
-                                                                                      ) ??
-                                                                                      Duration.zero;
-
-                                                                                  // Prevent negative values
-                                                                                  final safeDiff = diff.isNegative
-                                                                                      ? Duration.zero
-                                                                                      : diff;
-
-                                                                                  final text =
-                                                                                      '${safeDiff.inHours.toString().padLeft(2, '0')}h '
-                                                                                      '${safeDiff.inMinutes.remainder(60).toString().padLeft(2, '0')}m '
-                                                                                      '${safeDiff.inSeconds.remainder(60).toString().padLeft(2, '0')}s';
-
-                                                                                  return Text(
-                                                                                    text,
-                                                                                    style: TextStyle(
-                                                                                      color: ShieldColors.activeTeal,
-                                                                                      fontWeight: FontWeight.w600,
-                                                                                      fontSize: 12,
-                                                                                    ),
-                                                                                  );
-                                                                                },
-                                                                          ),
-                                                                      ],
-                                                                    ),
-                                                                    Text(
-                                                                      "Until Next Dose",
-                                                                      style: TextStyle(
-                                                                        fontSize:
-                                                                            12,
-                                                                        fontWeight:
-                                                                            FontWeight.bold,
-                                                                        color: ShieldColors
-                                                                            .activeTeal,
-                                                                      ),
-                                                                    ),
-                                                                    const SizedBox(
-                                                                      height:
-                                                                          10,
-                                                                    ),
-                                                                    if (!isTakenToday)
-                                                                      SizedBox(
-                                                                        width:
-                                                                            110,
-                                                                        height:
-                                                                            34,
-                                                                        child: ElevatedButton(
-                                                                          onPressed:
-                                                                              _loggingMedicationId ==
-                                                                                  med.id
-                                                                              ? null
-                                                                              : () => _logDose(med),
-
-                                                                          style: ElevatedButton.styleFrom(
-                                                                            backgroundColor:
-                                                                                ShieldColors.activeTeal,
-                                                                            foregroundColor:
-                                                                                Colors.white,
-                                                                            elevation:
-                                                                                0,
-                                                                            padding:
-                                                                                EdgeInsets.zero,
-                                                                            shape: RoundedRectangleBorder(
-                                                                              borderRadius: BorderRadius.circular(
-                                                                                10,
-                                                                              ),
-                                                                            ),
-                                                                          ),
-
-                                                                          child:
-                                                                              _loggingMedicationId ==
-                                                                                  med.id
-                                                                              ? const SizedBox(
-                                                                                  width: 14,
-                                                                                  height: 14,
-                                                                                  child: CircularProgressIndicator(
-                                                                                    strokeWidth: 2,
-                                                                                    color: Colors.white,
-                                                                                  ),
-                                                                                )
-                                                                              : const Row(
-                                                                                  mainAxisAlignment: MainAxisAlignment.center,
-                                                                                  children: [
-                                                                                    Icon(
-                                                                                      Icons.check_circle_outline,
-                                                                                      size: 15,
-                                                                                    ),
-                                                                                    SizedBox(
-                                                                                      width: 5,
-                                                                                    ),
-                                                                                    Text(
-                                                                                      "Log Dose",
-                                                                                      style: TextStyle(
-                                                                                        fontSize: 11,
-                                                                                        fontWeight: FontWeight.w600,
-                                                                                      ),
-                                                                                    ),
-                                                                                  ],
-                                                                                ),
+                                                                    RichText(
+                                                                      text: TextSpan(
+                                                                        style: TextStyle(
+                                                                          color:
+                                                                              Colors.blueGrey,
+                                                                          fontSize:
+                                                                              12,
+                                                                          fontWeight:
+                                                                              FontWeight.w500,
                                                                         ),
+                                                                        children: [
+                                                                          TextSpan(
+                                                                            text:
+                                                                                'Prescribing doctor: ',
+                                                                          ),
+                                                                          TextSpan(
+                                                                            text:
+                                                                                med.doctor,
+                                                                            style: TextStyle(
+                                                                              fontWeight: FontWeight.bold,
+                                                                            ),
+                                                                          ),
+                                                                        ],
                                                                       ),
+                                                                    ),
                                                                   ],
-                                                                ),
+                                                                  if (med.instructions !=
+                                                                      null) ...[
+                                                                    SizedBox(
+                                                                      height: 5,
+                                                                    ),
+                                                                    RichText(
+                                                                      text: TextSpan(
+                                                                        style: TextStyle(
+                                                                          color:
+                                                                              Colors.blueGrey,
+                                                                          fontSize:
+                                                                              12,
+                                                                          fontWeight:
+                                                                              FontWeight.w500,
+                                                                        ),
+                                                                        children: [
+                                                                          TextSpan(
+                                                                            text:
+                                                                                'Instruction: ',
+                                                                          ),
+                                                                          TextSpan(
+                                                                            text:
+                                                                                med.instructions,
+                                                                            style: TextStyle(
+                                                                              fontWeight: FontWeight.bold,
+                                                                            ),
+                                                                          ),
+                                                                        ],
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                  SizedBox(
+                                                                    height: 5,
+                                                                  ),
+
+                                                                  // if (nextDose !=
+                                                                  //     null) ...[
+                                                                  //   const SizedBox(
+                                                                  //     height: 4,
+                                                                  //   ),
+                                                                  //
+                                                                  //   Text(
+                                                                  //     'At ${DateFormat.jm().format(nextDose)}',
+                                                                  //     style: TextStyle(
+                                                                  //       color: Colors
+                                                                  //           .grey
+                                                                  //           .shade600,
+                                                                  //       fontSize: 11,
+                                                                  //     ),
+                                                                  //   ),
+                                                                  // ],
+                                                                ],
                                                               ),
-                                                            ],
-                                                          ),
+                                                            ),
+                                                            Expanded(
+                                                              child: Column(
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .end,
+                                                                mainAxisAlignment:
+                                                                    MainAxisAlignment
+                                                                        .end,
+                                                                children: [
+                                                                  Row(
+                                                                    mainAxisAlignment:
+                                                                        MainAxisAlignment
+                                                                            .end,
+                                                                    children: [
+                                                                      if (nextDose !=
+                                                                          null)
+                                                                        StreamBuilder(
+                                                                          stream: Stream.periodic(
+                                                                            const Duration(
+                                                                              seconds: 1,
+                                                                            ),
+                                                                          ),
+                                                                          builder:
+                                                                              (
+                                                                                context,
+                                                                                snapshot,
+                                                                              ) {
+                                                                                final diff =
+                                                                                    nextDose?.difference(
+                                                                                      DateTime.now(),
+                                                                                    ) ??
+                                                                                    Duration.zero;
+
+                                                                                // Prevent negative values
+                                                                                final safeDiff = diff.isNegative
+                                                                                    ? Duration.zero
+                                                                                    : diff;
+
+                                                                                final text =
+                                                                                    '${safeDiff.inHours.toString().padLeft(2, '0')}h '
+                                                                                    '${safeDiff.inMinutes.remainder(60).toString().padLeft(2, '0')}m '
+                                                                                    '${safeDiff.inSeconds.remainder(60).toString().padLeft(2, '0')}s';
+
+                                                                                return Text(
+                                                                                  text,
+                                                                                  style: TextStyle(
+                                                                                    color: ShieldColors.activeTeal,
+                                                                                    fontWeight: FontWeight.w600,
+                                                                                    fontSize: 12,
+                                                                                  ),
+                                                                                );
+                                                                              },
+                                                                        ),
+                                                                    ],
+                                                                  ),
+                                                                  Text(
+                                                                    "Until Next Dose",
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .bold,
+                                                                      color: ShieldColors
+                                                                          .activeTeal,
+                                                                    ),
+                                                                  ),
+                                                                  const SizedBox(
+                                                                    height: 10,
+                                                                  ),
+                                                                  if (!isTakenToday)
+                                                                    SizedBox(
+                                                                      width:
+                                                                          110,
+                                                                      height:
+                                                                          34,
+                                                                      child: ElevatedButton(
+                                                                        onPressed:
+                                                                            _loggingMedicationId ==
+                                                                                med.id
+                                                                            ? null
+                                                                            : () => _logDose(
+                                                                                med,
+                                                                              ),
+
+                                                                        style: ElevatedButton.styleFrom(
+                                                                          backgroundColor:
+                                                                              ShieldColors.activeTeal,
+                                                                          foregroundColor:
+                                                                              Colors.white,
+                                                                          elevation:
+                                                                              0,
+                                                                          padding:
+                                                                              EdgeInsets.zero,
+                                                                          shape: RoundedRectangleBorder(
+                                                                            borderRadius: BorderRadius.circular(
+                                                                              10,
+                                                                            ),
+                                                                          ),
+                                                                        ),
+
+                                                                        child:
+                                                                            _loggingMedicationId ==
+                                                                                med.id
+                                                                            ? const SizedBox(
+                                                                                width: 14,
+                                                                                height: 14,
+                                                                                child: CircularProgressIndicator(
+                                                                                  strokeWidth: 2,
+                                                                                  color: Colors.white,
+                                                                                ),
+                                                                              )
+                                                                            : const Row(
+                                                                                mainAxisAlignment: MainAxisAlignment.center,
+                                                                                children: [
+                                                                                  Icon(
+                                                                                    Icons.check_circle_outline,
+                                                                                    size: 15,
+                                                                                  ),
+                                                                                  SizedBox(
+                                                                                    width: 5,
+                                                                                  ),
+                                                                                  Text(
+                                                                                    "Log Dose",
+                                                                                    style: TextStyle(
+                                                                                      fontSize: 11,
+                                                                                      fontWeight: FontWeight.w600,
+                                                                                    ),
+                                                                                  ),
+                                                                                ],
+                                                                              ),
+                                                                      ),
+                                                                    ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                          ],
                                                         ),
-                                                      ],
-                                                    ),
-                                                  );
-                                                }),
-                                              ],
-                                            ),
-                                          );
-                                        },
-                                        loading: () => const Center(
-                                          child: Padding(
-                                            padding: EdgeInsets.all(20),
-                                            child: CircularProgressIndicator(),
-                                          ),
-                                        ),
-                                        error: (e, st) =>
-                                            const SizedBox.shrink(),
-                                      ),
-                                      const SizedBox(height: 24),
-                                      StreamBuilder<List<Map<String, dynamic>>>(
-                                        stream: safetyRepo
-                                            .streamMyCheckinSchedules(
-                                              profileAsync.value!.userId,
-                                            ),
-                                        builder: (context, snapshot) {
-                                          final schedules = snapshot.data ?? [];
-                                          print("schedules");
-                                          print(schedules);
-                                          if (schedules.isEmpty) {
-                                            return const SizedBox.shrink();
-                                          }
-
-                                          // Get next upcoming checkin
-                                          DateTime? nextCheckin;
-                                          Map<String, dynamic>?
-                                          selectedSchedule;
-                                          for (final s in schedules) {
-                                            print(s);
-                                            print('checkin_time');
-                                            final time = s['checkin_time'];
-
-                                            final next = _getNextCheckinTime(s);
-
-                                            if (next == null) continue;
-                                            if (nextCheckin == null ||
-                                                next.isBefore(nextCheckin)) {
-                                              nextCheckin = next;
-                                              selectedSchedule = s;
-                                            }
-                                          }
-
-                                          if (nextCheckin == null ||
-                                              selectedSchedule == null) {
-                                            return const SizedBox.shrink();
-                                          }
-
-                                          final scheduleId =
-                                              selectedSchedule['id'];
-
-                                          return _NextCheckinCard(
-                                            nextCheckin: nextCheckin,
-                                            profile: profileAsync.value,
-                                            scheduleId: scheduleId,
-                                          );
-                                        },
-                                      ),
-                                      const SizedBox(height: 18),
-
-                                      _actionButton(
-                                        icon: Icons.family_restroom,
-                                        label: 'View Family',
-                                        color: ShieldColors.activeTeal,
-                                        onPressed: () {
-                                          showModalBottomSheet(
-                                            context: context,
-                                            isScrollControlled: true,
-                                            backgroundColor: Colors.transparent,
-                                            builder: (_) =>
-                                                const ContactsSheet(),
-                                          );
-                                        },
-                                      ),
-                                      const SizedBox(height: 18),
-                                      Text(
-                                        'YOUR SAFE ZONES',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelMedium
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.bold,
-                                              letterSpacing: 1.2,
-                                            ),
-                                      ),
-                                      const SizedBox(height: 16),
-                                      StreamBuilder<List<Map<String, dynamic>>>(
-                                        stream: toolsRepo
-                                            .streamAssignedSafeZones(
-                                              profileAsync.value!.familyId,
-                                              profileAsync.value!.userId,
-                                            ),
-                                        builder: (context, snapshot) {
-                                          if (snapshot.connectionState ==
-                                              ConnectionState.waiting) {
-                                            return const Center(
-                                              child:
-                                                  CircularProgressIndicator(),
-                                            );
-                                          }
-                                          final zones = snapshot.data ?? [];
-
-                                          if (zones.isEmpty) {
-                                            return Container(
-                                              height: 120,
-                                              alignment: Alignment.center,
-                                              decoration: BoxDecoration(
-                                                color: Colors.grey.shade200,
-                                                borderRadius:
-                                                    ShieldDesign.roundedTwelve,
-                                              ),
-                                              child: const Text(
-                                                'No Safe Zones Configured',
-                                              ),
-                                            );
-                                          }
-
-                                          return Column(
-                                            children: zones.map((zone) {
-                                              bool isInside =
-                                                  zone['name']
-                                                      .toString()
-                                                      .toLowerCase()
-                                                      .contains('school') ||
-                                                  zone['name']
-                                                      .toString()
-                                                      .toLowerCase()
-                                                      .contains('home');
-
-                                              return Container(
-                                                margin: const EdgeInsets.only(
-                                                  bottom: 12,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: isInside
-                                                      ? ShieldColors
-                                                            .safeZoneGreen
-                                                            .withValues(
-                                                              alpha: 0.1,
-                                                            )
-                                                      : Colors.white,
-                                                  borderRadius: ShieldDesign
-                                                      .roundedTwelve,
-                                                  border: Border.all(
-                                                    color: isInside
-                                                        ? ShieldColors
-                                                              .safeZoneGreen
-                                                        : Colors.grey.shade300,
-                                                  ),
-                                                ),
-                                                child: ListTile(
-                                                  leading: Icon(
-                                                    Icons.location_on,
-                                                    color: isInside
-                                                        ? ShieldColors
-                                                              .safeZoneGreen
-                                                        : Colors.grey,
-                                                  ),
-                                                  title: Text(
-                                                    zone['name'],
-                                                    style: const TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color:
-                                                          ShieldColors.textBody,
-                                                    ),
-                                                  ),
-                                                  subtitle: Column(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      if (zone['address'] !=
-                                                          null)
-                                                        Text(
-                                                          zone['address'],
-                                                          style: TextStyle(
-                                                            color: Colors.black,
-                                                          ),
-                                                        ),
-                                                      Text(
-                                                        'Radius: ${zone['radius_meters']}m',
                                                       ),
                                                     ],
                                                   ),
-                                                  trailing: isInside
-                                                      ? const Chip(
-                                                          label: Text('ACTIVE'),
-                                                          backgroundColor:
-                                                              ShieldColors
-                                                                  .safeZoneGreen,
-                                                          labelStyle: TextStyle(
-                                                            color: Colors.white,
-                                                            fontSize: 10,
-                                                          ),
-                                                        )
-                                                      : const Text(
-                                                          'Away',
-                                                          style: TextStyle(
-                                                            color: Colors.grey,
-                                                          ),
-                                                        ),
+                                                );
+                                              }),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                      loading: () => const Center(
+                                        child: Padding(
+                                          padding: EdgeInsets.all(20),
+                                          child: CircularProgressIndicator(),
+                                        ),
+                                      ),
+                                      error: (e, st) => const SizedBox.shrink(),
+                                    ),
+                                    const SizedBox(height: 24),
+                                    StreamBuilder<List<Map<String, dynamic>>>(
+                                      stream: safetyRepo
+                                          .streamMyCheckinSchedules(
+                                            profileAsync.value!.userId,
+                                          ),
+                                      builder: (context, snapshot) {
+                                        final schedules = snapshot.data ?? [];
+                                        print("schedules");
+                                        print(schedules);
+                                        if (schedules.isEmpty) {
+                                          return const SizedBox.shrink();
+                                        }
+
+                                        // Get next upcoming checkin
+                                        DateTime? nextCheckin;
+                                        Map<String, dynamic>? selectedSchedule;
+                                        for (final s in schedules) {
+                                          print(s);
+                                          print('checkin_time');
+                                          final time = s['checkin_time'];
+
+                                          final next = _getNextCheckinTime(s);
+
+                                          if (next == null) continue;
+                                          if (nextCheckin == null ||
+                                              next.isBefore(nextCheckin)) {
+                                            nextCheckin = next;
+                                            selectedSchedule = s;
+                                          }
+                                        }
+
+                                        if (nextCheckin == null ||
+                                            selectedSchedule == null) {
+                                          return const SizedBox.shrink();
+                                        }
+
+                                        final scheduleId =
+                                            selectedSchedule['id'];
+
+                                        return _NextCheckinCard(
+                                          nextCheckin: nextCheckin,
+                                          profile: profileAsync.value,
+                                          scheduleId: scheduleId,
+                                        );
+                                      },
+                                    ),
+                                    const SizedBox(height: 18),
+
+                                    _actionButton(
+                                      icon: Icons.family_restroom,
+                                      label: 'View Family',
+                                      color: ShieldColors.activeTeal,
+                                      onPressed: () {
+                                        showModalBottomSheet(
+                                          context: context,
+                                          isScrollControlled: true,
+                                          backgroundColor: Colors.transparent,
+                                          builder: (_) => const ContactsSheet(),
+                                        );
+                                      },
+                                    ),
+                                    const SizedBox(height: 18),
+                                    Text(
+                                      'YOUR SAFE ZONES',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                            letterSpacing: 1.2,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    StreamBuilder<List<Map<String, dynamic>>>(
+                                      stream: toolsRepo.streamAssignedSafeZones(
+                                        profileAsync.value!.familyId,
+                                        profileAsync.value!.userId,
+                                      ),
+                                      //
+                                      builder: (context, snapshot) {
+                                        if (!snapshot.hasData &&
+                                            snapshot.connectionState ==
+                                                ConnectionState.waiting &&
+                                            !_isCheckingIn) {
+                                          return const Center(
+                                            child: CircularProgressIndicator(),
+                                          );
+                                        }
+                                        final zones = snapshot.data ?? [];
+
+                                        if (zones.isEmpty) {
+                                          return Container(
+                                            height: 120,
+                                            alignment: Alignment.center,
+                                            decoration: BoxDecoration(
+                                              color: ShieldColors.activeTeal
+                                                  .withOpacity(0.05),
+                                              borderRadius:
+                                                  ShieldDesign.roundedTwelve,
+                                            ),
+                                            child: const Text(
+                                              'No Safe Zones Configured',
+                                            ),
+                                          );
+                                        }
+
+                                        return Column(
+                                          children: zones.map((zone) {
+                                            bool isInside =
+                                                zone['name']
+                                                    .toString()
+                                                    .toLowerCase()
+                                                    .contains('school') ||
+                                                zone['name']
+                                                    .toString()
+                                                    .toLowerCase()
+                                                    .contains('home');
+
+                                            return Container(
+                                              margin: const EdgeInsets.only(
+                                                bottom: 12,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: isInside
+                                                    ? ShieldColors.safeZoneGreen
+                                                          .withValues(
+                                                            alpha: 0.1,
+                                                          )
+                                                    : Colors.white,
+                                                borderRadius:
+                                                    ShieldDesign.roundedTwelve,
+                                                border: Border.all(
+                                                  color: isInside
+                                                      ? ShieldColors
+                                                            .safeZoneGreen
+                                                      : Colors.grey.shade300,
                                                 ),
-                                              );
-                                            }).toList(),
-                                          );
-                                        },
-                                      ),
+                                              ),
+                                              child: ListTile(
+                                                leading: Icon(
+                                                  Icons.location_on,
+                                                  color: isInside
+                                                      ? ShieldColors
+                                                            .safeZoneGreen
+                                                      : Colors.grey,
+                                                ),
+                                                title: Text(
+                                                  zone['name'],
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    color:
+                                                        ShieldColors.textBody,
+                                                  ),
+                                                ),
+                                                subtitle: Column(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    if (zone['address'] != null)
+                                                      Text(
+                                                        zone['address'],
+                                                        style: TextStyle(
+                                                          color: Colors.black,
+                                                        ),
+                                                      ),
+                                                    Text(
+                                                      'Radius: ${zone['radius_meters']}m',
+                                                    ),
+                                                  ],
+                                                ),
+                                                // trailing: isInside
+                                                //     ? const Chip(
+                                                //   label: Text('ACTIVE'),
+                                                //   backgroundColor:
+                                                //   ShieldColors
+                                                //       .safeZoneGreen,
+                                                //   labelStyle: TextStyle(
+                                                //     color: Colors.white,
+                                                //     fontSize: 10,
+                                                //   ),
+                                                // )
+                                                //     : const Text(
+                                                //   'Away',
+                                                //   style: TextStyle(
+                                                //     color: Colors.grey,
+                                                //   ),
+                                                // ),
+                                              ),
+                                            );
+                                          }).toList(),
+                                        );
+                                      },
+                                    ),
 
-                                      const SizedBox(height: 14),
-                                      // Check Status (manual check-in)
-                                      _actionButton(
-                                        icon: _isCheckingIn
-                                            ? Icons.hourglass_top
-                                            : Icons.health_and_safety,
-                                        label: _isCheckingIn
-                                            ? 'Broadcasting...'
-                                            : 'Manual Check-In',
-                                        color: const Color(0xFF3366FF),
-                                        onPressed: _isCheckingIn
-                                            ? null
-                                            : _performCheckIn,
-                                      ),
-                                      const SizedBox(height: 18),
+                                    const SizedBox(height: 14),
+                                    // Check Status (manual check-in)
+                                    _actionButton(
+                                      icon: _isCheckingIn
+                                          ? Icons.hourglass_top
+                                          : Icons.health_and_safety,
+                                      label: _isCheckingIn
+                                          ? 'Broadcasting...'
+                                          : 'Manual Check-In',
+                                      color: const Color(0xFF3366FF),
+                                      onPressed: _isCheckingIn
+                                          ? null
+                                          : _performCheckIn,
+                                    ),
+                                    const SizedBox(height: 18),
 
-                                      // Send Message
-                                      _actionButton(
-                                        icon: Icons.message_rounded,
-                                        label: 'Send Message',
-                                        color: const Color(0xFF1C2438),
-                                        border: true,
-                                        onPressed: () {
-                                          showModalBottomSheet(
-                                            context: context,
-                                            isScrollControlled: true,
-                                            useSafeArea: true,
+                                    // Send Message
+                                    _actionButton(
+                                      icon: Icons.message_rounded,
+                                      label: 'Send Message',
+                                      color: const Color(0xFF1C2438),
+                                      border: true,
+                                      onPressed: () {
+                                        showModalBottomSheet(
+                                          context: context,
+                                          isScrollControlled: true,
+                                          useSafeArea: true,
 
-                                            backgroundColor: Colors.transparent,
-                                            builder: (_) =>
-                                                const FamilyChatScreen(),
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                  ),
+                                          backgroundColor: Colors.transparent,
+                                          builder: (_) =>
+                                              const FamilyChatScreen(),
+                                        );
+                                      },
+                                    ),
+                                  ],
                                 ),
+                              ),
+                              const SizedBox(height: 200),
 
-                                const SizedBox(height: 20),
-
-                                // Bottom buttons — EMERGENCY + MENU (wrapped in SafeArea)
-                              ],
-                            ),
+                              // Bottom buttons — EMERGENCY + MENU (wrapped in SafeArea)
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -3650,7 +4048,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
       //       });
       //
       //       // Also register this as a well_event to ensure it shows up securely on the stream!
-      //       await Supabase.instance.client.from('well_events').insert({
+      //       await logWellEvent(Supabase.instance.client,{
       //         'family_id': widget.profile.familyId,
       //         'user_id': widget.profile.userId,
       //         'user_name': widget.profile.fullName,
@@ -4084,7 +4482,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                     });
 
                     // ── Insert well_event ────────────────────────────────────────────
-                    await Supabase.instance.client.from('well_events').insert({
+                    await logWellEvent(Supabase.instance.client, {
                       'family_id': widget.profile.familyId,
                       'user_id': widget.profile.userId,
                       'user_name': widget.profile.fullName,

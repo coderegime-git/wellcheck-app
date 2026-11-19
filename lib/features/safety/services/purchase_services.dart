@@ -7,6 +7,7 @@ import '../../../config/rc_config.dart';
 
 class PurchasesService {
   PurchasesService._();
+
   static final PurchasesService instance = PurchasesService._();
 
   // ──────────────────────────────────────────────
@@ -77,13 +78,15 @@ class PurchasesService {
   /// Returns true if the current user has an active WellCheck Pro entitlement.
   Future<bool> hasWellCheckPro() async {
     final info = await getCustomerInfo();
+    print("infoinfo $info");
     return _isProActive(info);
   }
 
   bool _isProActive(CustomerInfo? info) {
     if (info == null) return false;
-    return info.entitlements.active
-        .containsKey(RCConfig.entitlementWellCheckPro);
+    return info.entitlements.active.containsKey(
+      RCConfig.entitlementWellCheckPro,
+    );
   }
 
   // ──────────────────────────────────────────────
@@ -108,7 +111,8 @@ class PurchasesService {
       final result = await Purchases.purchasePackage(package);
       return result.customerInfo;
     } on PlatformException catch (e) {
-      if (e.code == PurchasesErrorCode.purchaseCancelledError.index.toString()) {
+      if (e.code ==
+          PurchasesErrorCode.purchaseCancelledError.index.toString()) {
         log('[RC] Purchase cancelled by user');
         return null;
       }

@@ -17,8 +17,13 @@ import 'package:geolocator/geolocator.dart';
 
 import '../../core/data/medication_provider.dart';
 import '../../core/notifications/push_notification_service.dart';
+import '../../main.dart';
+import '../../services/dose_live_activity_service.dart';
+import '../../services/dose_notification_service.dart';
+import '../../services/life360_location_service.dart';
 import '../safety/services/location_service.dart';
 import '../safety/services/pulse_service.dart';
+import 'leader_dashboard.dart';
 
 class StudentDashboard extends ConsumerStatefulWidget {
   const StudentDashboard({super.key});
@@ -43,10 +48,37 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
   final notesController = TextEditingController();
   final notesFocus = FocusNode();
 
+  //late final Life360LocationService locationService;
+  String? _zonesKey;
+  Stream<List<Map<String, dynamic>>>? _zonesStream;
+
+  Stream<List<Map<String, dynamic>>> _getZonesStream(
+    String familyId,
+    String userId,
+  ) {
+    final toolsRepo = ref.watch(toolsRepositoryProvider);
+
+    final key = '$familyId|$userId';
+    if (_zonesKey != key) {
+      _zonesKey = key;
+      _zonesStream = toolsRepo.streamAssignedSafeZones(familyId, userId);
+    }
+    return _zonesStream!;
+  }
+
   @override
   void initState() {
     initializeFCM();
+    // locationService = Life360LocationService(Supabase.instance.client);
+    // locationService.startSharingMyLocation();
     super.initState();
+  }
+
+  @override
+  void dispose() {
+    // locationService.dispose();
+    _sosTimer?.cancel();
+    super.dispose();
   }
 
   // Future<void> _imOkayPressed() async {
@@ -143,7 +175,7 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
   //       'longitude': lng,
   //       'status_message': "Manual check-in",
   //     });
-  //     await Supabase.instance.client.from('well_events').insert({
+  //     await logWellEvent(Supabase.instance.client,{
   //       'family_id': missedCheckIn!['family_id'],
   //       'user_id': profile.userId,
   //       'user_name': profile.fullName,
@@ -269,7 +301,7 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
           rethrow;
         }
       }
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': missedCheckIn!['family_id'],
         'user_id': profile.userId,
         'user_name': profile.fullName,
@@ -293,6 +325,7 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
         'longitude': lng,
         'status_message': "Manual check-in",
       });
+      _missedStream = streamMissedCheckIns(profile.userId);
 
       if (!mounted) return;
 
@@ -474,7 +507,10 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
     if (!mounted) return;
 
     if (profile == null) return;
+    await stopWellCheckService();
 
+    await initializeBackgroundService();
+    await startWellCheckService();
     _missedStream = streamMissedCheckIns(profile.userId);
 
     if (!mounted) return;
@@ -521,15 +557,38 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
       if (!mounted) return;
 
       if (profile == null) return;
-
+      final meds = ref.read(familyMedicationsProvider).value;
+      if (profile == null || meds == null) return;
+      _syncDoseReminders(meds, profile.userId);
       await PulseService().broadcastPulse(profile.userId);
+      //await PulseService.initializeBackgroundService();
     });
   }
 
-  @override
-  void dispose() {
-    _sosTimer?.cancel();
-    super.dispose();
+  Future<void> _syncChain = Future.value();
+
+  // Future<void> _syncDoseReminders(List meds, String userId) async {
+  //   final mine = meds
+  //       .where((m) => m.isActive && m.assignedTo == userId)
+  //       .toList();
+  //   await DoseNotificationService.instance.syncMine(
+  //     mine,
+  //   ); // Android countdown + iOS T-15 alert
+  //   await DoseLiveActivityService.instance.sync(mine); // iOS Live Activity
+  // }
+  Future<void> _syncDoseReminders(List meds, String userId) {
+    final mine = meds
+        .where((m) => m.isActive && m.assignedTo == userId)
+        .toList();
+    _syncChain = _syncChain.then((_) async {
+      try {
+        await DoseNotificationService.instance.syncMine(mine);
+        await DoseLiveActivityService.instance.sync(mine);
+      } catch (e) {
+        debugPrint('[DoseSync] failed: $e');
+      }
+    });
+    return _syncChain;
   }
 
   // void _startSosCountdown() {
@@ -700,6 +759,7 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
                 .from('family_members')
                 .select('user_id')
                 .eq('family_id', profile.familyId);
+            _missedStream = streamMissedCheckIns(profile.userId);
 
             for (final m in members) {
               final targetUserId = m['user_id'];
@@ -746,6 +806,328 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
     });
   }
 
+  Future<void> _logAsNeededDose(
+    Medication med,
+    dynamic profile,
+    DateTime now,
+    int batteryLevel,
+  ) async {
+    final supabase = Supabase.instance.client;
+
+    await supabase.from('dose_logs').insert({
+      'medication_id': med.id,
+      'user_id': med.assignedTo,
+      'family_id': profile.familyId,
+      'scheduled_at': now.toIso8601String(), // no schedule; use log time
+      'taken_at': now.toIso8601String(),
+      'status': 'taken',
+    });
+
+    await logWellEvent(supabase, {
+      'family_id': profile.familyId,
+      'user_id': profile.userId,
+      'event_type': 'medication_logged',
+      'title': 'Medication Taken',
+      'description':
+          '${profile.fullName ?? 'Someone'} logged ${med.medicationName} (${med.dosage})',
+      'battery_level': batteryLevel,
+    });
+
+    ref.invalidate(allDoseLogsProvider);
+    ref.invalidate(familyMedicationsProvider);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✓ ${med.medicationName} dose logged!'),
+          backgroundColor: ShieldColors.safeZoneGreen,
+        ),
+      );
+    }
+
+    final members = await supabase
+        .from('family_members')
+        .select('user_id')
+        .eq('family_id', profile.familyId);
+
+    for (final m in members) {
+      final targetUserId = m['user_id'];
+      if (targetUserId == profile.userId) continue;
+      try {
+        await supabase.functions.invoke(
+          'push-router',
+          body: {
+            "target_user_id": targetUserId,
+            "title": "Medications",
+            "body":
+                "${profile.fullName ?? 'Someone'}: ${med.medicationName} dose logged",
+            "action": "log_dose",
+          },
+        );
+      } catch (e) {
+        debugPrint("Push failed: $e");
+      }
+    }
+  }
+
+  // Future<void> _logDose(Medication med) async {
+  //   if (_loggingMedicationId != null) return;
+  //
+  //   setState(() {
+  //     _loggingMedicationId = med.id;
+  //   });
+  //
+  //   try {
+  //     final profile = await ref.read(currentUserProfileProvider.future);
+  //     if (profile == null) return;
+  //
+  //     final now = DateTime.now().toUtc();
+  //     int batteryLevel =
+  //         100; // Safe default for simulators and aggressive background iOS policies
+  //     try {
+  //       final battery = Battery();
+  //       batteryLevel = await battery.batteryLevel;
+  //     } catch (e) {
+  //       debugPrint(
+  //         'Battery info not available over isolate, using default: $e',
+  //       );
+  //     }
+  //     final supabase = Supabase.instance.client;
+  //
+  //     // Get the CURRENT scheduled dose information
+  //     // final medData = await supabase
+  //     //     .from('medications')
+  //     //     .select('scheduled_at, recurrence, days_of_week, reminder_sent')
+  //     //     .eq('id', med.id)
+  //     //     .single();
+  //     final medData = await supabase
+  //         .from('medications')
+  //         .select('scheduled_at, recurrence, days_of_week, reminder_sent')
+  //         .eq('id', med.id)
+  //         .single();
+  //
+  //     final isAsNeeded =
+  //         medData['recurrence'] == 'as_needed' ||
+  //         medData['scheduled_at'] == null;
+  //
+  //     if (isAsNeeded) {
+  //       await _logAsNeededDose(med, profile, now, batteryLevel);
+  //       return;
+  //     }
+  //
+  //     final scheduledAt = DateTime.parse(
+  //       medData['scheduled_at'].toString(),
+  //     ).toUtc();
+  //     // final scheduledAt = DateTime.parse(
+  //     //   medData['scheduled_at'].toString(),
+  //     // ).toUtc();
+  //
+  //     // Allow logging 1 hour BEFORE until 1 hour AFTER
+  //     final loggingWindowStart = scheduledAt.subtract(const Duration(hours: 1));
+  //
+  //     final loggingWindowEnd = scheduledAt.add(const Duration(hours: 1));
+  //
+  //     // ---------------------------------------------------------
+  //     // 1. TOO EARLY
+  //     // ---------------------------------------------------------
+  //     if (now.isBefore(loggingWindowStart)) {
+  //       final difference = loggingWindowStart.difference(now);
+  //
+  //       final hours = difference.inHours;
+  //       final minutes = difference.inMinutes % 60;
+  //       final seconds = difference.inSeconds % 60;
+  //
+  //       if (mounted) {
+  //         ScaffoldMessenger.of(context).showSnackBar(
+  //           SnackBar(
+  //             content: Text(
+  //               hours > 0
+  //                   ? 'Medication can be logged in ${hours}h ${minutes}m ${seconds}s.'
+  //                   : minutes > 0
+  //                   ? 'Medication can be logged in ${minutes}m ${seconds}s.'
+  //                   : 'Medication can be logged in ${seconds}s.',
+  //             ),
+  //           ),
+  //         );
+  //       }
+  //
+  //       return;
+  //     }
+  //
+  //     // ---------------------------------------------------------
+  //     // 2. LOGGING WINDOW EXPIRED
+  //     // ---------------------------------------------------------
+  //     if (now.isAfter(loggingWindowEnd)) {
+  //       if (mounted) {
+  //         ScaffoldMessenger.of(context).showSnackBar(
+  //           const SnackBar(
+  //             content: Text('The medication logging window has expired.'),
+  //           ),
+  //         );
+  //       }
+  //
+  //       return;
+  //     }
+  //
+  //     // ---------------------------------------------------------
+  //     // 3. CHECK IF THIS DOSE WAS ALREADY LOGGED
+  //     // ---------------------------------------------------------
+  //     final existingLog = await supabase
+  //         .from('dose_logs')
+  //         .select('id, status')
+  //         .eq('medication_id', med.id)
+  //         .eq('scheduled_at', scheduledAt.toIso8601String())
+  //         .maybeSingle();
+  //
+  //     if (existingLog != null) {
+  //       if (mounted) {
+  //         ScaffoldMessenger.of(context).showSnackBar(
+  //           const SnackBar(content: Text('Medication already recorded.')),
+  //         );
+  //       }
+  //
+  //       return;
+  //     }
+  //     await Supabase.instance.client.from('dose_logs').insert({
+  //       'medication_id': med.id,
+  //       'user_id': med.assignedTo,
+  //       'family_id': profile.familyId,
+  //       'scheduled_at': now.toIso8601String(),
+  //       'taken_at': now.toIso8601String(),
+  //       'status': 'taken',
+  //     });
+  //     // final medData = await Supabase.instance.client
+  //     //     .from('medications')
+  //     //     .select('scheduled_at, recurrence, days_of_week')
+  //     //     .eq('id', med.id)
+  //     //     .single();
+  //
+  //     DateTime nextDate = DateTime.parse(medData['scheduled_at']);
+  //
+  //     switch (medData['recurrence']) {
+  //       case 'daily':
+  //         nextDate = nextDate.add(const Duration(days: 1));
+  //         break;
+  //
+  //       case 'every_other_day':
+  //         nextDate = nextDate.add(const Duration(days: 2));
+  //         break;
+  //
+  //       case 'weekly':
+  //         final days = List<int>.from(medData['days_of_week'] ?? [])..sort();
+  //
+  //         if (days.isEmpty) {
+  //           nextDate = nextDate.add(const Duration(days: 7));
+  //         } else {
+  //           final currentDay = nextDate.weekday % 7;
+  //
+  //           int? found;
+  //
+  //           for (final d in days) {
+  //             if (d > currentDay) {
+  //               found = d;
+  //               break;
+  //             }
+  //           }
+  //
+  //           found ??= days.first + 7;
+  //
+  //           nextDate = nextDate.add(Duration(days: found - currentDay));
+  //         }
+  //
+  //         break;
+  //
+  //       case 'monthly':
+  //         nextDate = DateTime(
+  //           nextDate.year,
+  //           nextDate.month + 1,
+  //           nextDate.day,
+  //           nextDate.hour,
+  //           nextDate.minute,
+  //         );
+  //         break;
+  //
+  //       default:
+  //         break;
+  //     }
+  //     await Supabase.instance.client
+  //         .from('medications')
+  //         .update({
+  //           'scheduled_at': nextDate.toUtc().toIso8601String(),
+  //
+  //           'reminder_sent': false,
+  //           'reminder_sent_at': null,
+  //         })
+  //         .eq('id', med.id);
+  //     await logWellEvent(Supabase.instance.client, {
+  //       'family_id': profile.familyId,
+  //       'user_id': profile.userId,
+  //       'event_type': 'medication_logged',
+  //       'title': 'Medication Taken',
+  //       'description':
+  //           '${profile.fullName ?? 'Someone'} logged ${med.medicationName} (${med.dosage})',
+  //       'battery_level': batteryLevel,
+  //     });
+  //
+  //     // IMPORTANT
+  //     ref.invalidate(allDoseLogsProvider);
+  //     ref.invalidate(familyMedicationsProvider);
+  //
+  //     if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         SnackBar(
+  //           content: Text('✓ ${med.medicationName} dose logged!'),
+  //           backgroundColor: ShieldColors.safeZoneGreen,
+  //         ),
+  //       );
+  //     }
+  //
+  //     // Send push
+  //     final members = await Supabase.instance.client
+  //         .from('family_members')
+  //         .select('user_id')
+  //         .eq('family_id', profile.familyId);
+  //
+  //     for (final m in members) {
+  //       final targetUserId = m['user_id'];
+  //
+  //       if (targetUserId == profile.userId) continue;
+  //
+  //       try {
+  //         await Supabase.instance.client.functions.invoke(
+  //           'push-router',
+  //           body: {
+  //             "target_user_id": targetUserId,
+  //             "title": "Medications",
+  //             "body":
+  //                 "${profile.fullName ?? 'Someone'}: ${med.medicationName} dose logged",
+  //             "action": "log_dose",
+  //           },
+  //         );
+  //       } catch (e) {
+  //         debugPrint("Push failed: $e");
+  //       }
+  //     }
+  //   } catch (e) {
+  //     debugPrint('[Medication] Error logging dose: $e');
+  //
+  //     if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         SnackBar(
+  //           content: Text('Error logging dose: $e'),
+  //           backgroundColor: Colors.red,
+  //         ),
+  //       );
+  //     }
+  //   } finally {
+  //     if (mounted) {
+  //       setState(() {
+  //         _loggingMedicationId = null;
+  //       });
+  //     }
+  //   }
+  // }
+
   Future<void> _logDose(Medication med) async {
     if (_loggingMedicationId != null) return;
 
@@ -768,7 +1150,99 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
           'Battery info not available over isolate, using default: $e',
         );
       }
+      // final now = DateTime.now().toUtc();
+      final supabase = Supabase.instance.client;
 
+      final medData = await supabase
+          .from('medications')
+          .select('scheduled_at, recurrence, days_of_week, reminder_sent')
+          .eq('id', med.id)
+          .single();
+
+      final isAsNeeded =
+          medData['recurrence'] == 'as_needed' ||
+          medData['scheduled_at'] == null;
+
+      if (isAsNeeded) {
+        await DoseNotificationService.instance.cancelMedication(med.id);
+        //await DoseLiveActivityService.instance.end(med.id);
+        await DoseLiveActivityService.instance.reschedule(
+          med,
+          takenToday: true,
+        );
+        await _logAsNeededDose(med, profile, now, batteryLevel);
+        return;
+      }
+
+      final scheduledAt = DateTime.parse(
+        medData['scheduled_at'].toString(),
+      ).toUtc();
+
+      final openMissed = await supabase
+          .from('dose_logs')
+          .select('id')
+          .eq('medication_id', med.id)
+          .eq('status', 'missed')
+          .eq('nag_active', true)
+          .isFilter('taken_at', null);
+
+      // Window checks apply only to a normal dose, not a catch-up of a missed one
+      if (openMissed.isEmpty) {
+        final loggingWindowStart = scheduledAt.subtract(
+          const Duration(hours: 1),
+        );
+        final loggingWindowEnd = scheduledAt.add(const Duration(hours: 1));
+
+        if (now.isBefore(loggingWindowStart)) {
+          final difference = loggingWindowStart.difference(now);
+          final hours = difference.inHours;
+          final minutes = difference.inMinutes % 60;
+          final seconds = difference.inSeconds % 60;
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  hours > 0
+                      ? 'Medication can be logged in ${hours}h ${minutes}m ${seconds}s.'
+                      : minutes > 0
+                      ? 'Medication can be logged in ${minutes}m ${seconds}s.'
+                      : 'Medication can be logged in ${seconds}s.',
+                ),
+              ),
+            );
+          }
+          return;
+        }
+
+        if (now.isAfter(loggingWindowEnd)) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('The medication logging window has expired.'),
+              ),
+            );
+          }
+          return;
+        }
+
+        final existingLog = await supabase
+            .from('dose_logs')
+            .select('id, status')
+            .eq('medication_id', med.id)
+            .eq('scheduled_at', scheduledAt.toIso8601String())
+            .eq('status', 'taken')
+            .maybeSingle();
+
+        if (existingLog != null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Medication already recorded.')),
+            );
+          }
+          return;
+        }
+      }
       await Supabase.instance.client.from('dose_logs').insert({
         'medication_id': med.id,
         'user_id': med.assignedTo,
@@ -777,70 +1251,74 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
         'taken_at': now.toIso8601String(),
         'status': 'taken',
       });
-      final medData = await Supabase.instance.client
-          .from('medications')
-          .select('scheduled_at, recurrence, days_of_week')
-          .eq('id', med.id)
-          .single();
+      if (openMissed.isNotEmpty) {
+        // Cron already moved scheduled_at. Only stop the nagging.
+        await supabase
+            .from('dose_logs')
+            .update({'nag_active': false})
+            .eq('medication_id', med.id)
+            .eq('status', 'missed')
+            .eq('nag_active', true);
+      } else {
+        DateTime nextDate = DateTime.parse(medData['scheduled_at']);
 
-      DateTime nextDate = DateTime.parse(medData['scheduled_at']);
+        switch (medData['recurrence']) {
+          case 'daily':
+            nextDate = nextDate.add(const Duration(days: 1));
+            break;
 
-      switch (medData['recurrence']) {
-        case 'daily':
-          nextDate = nextDate.add(const Duration(days: 1));
-          break;
+          case 'every_other_day':
+            nextDate = nextDate.add(const Duration(days: 2));
+            break;
 
-        case 'every_other_day':
-          nextDate = nextDate.add(const Duration(days: 2));
-          break;
+          case 'weekly':
+            final days = List<int>.from(medData['days_of_week'] ?? [])..sort();
 
-        case 'weekly':
-          final days = List<int>.from(medData['days_of_week'] ?? [])..sort();
+            if (days.isEmpty) {
+              nextDate = nextDate.add(const Duration(days: 7));
+            } else {
+              final currentDay = nextDate.weekday % 7;
 
-          if (days.isEmpty) {
-            nextDate = nextDate.add(const Duration(days: 7));
-          } else {
-            final currentDay = nextDate.weekday % 7;
+              int? found;
 
-            int? found;
-
-            for (final d in days) {
-              if (d > currentDay) {
-                found = d;
-                break;
+              for (final d in days) {
+                if (d > currentDay) {
+                  found = d;
+                  break;
+                }
               }
+
+              found ??= days.first + 7;
+
+              nextDate = nextDate.add(Duration(days: found - currentDay));
             }
 
-            found ??= days.first + 7;
+            break;
 
-            nextDate = nextDate.add(Duration(days: found - currentDay));
-          }
+          case 'monthly':
+            nextDate = DateTime(
+              nextDate.year,
+              nextDate.month + 1,
+              nextDate.day,
+              nextDate.hour,
+              nextDate.minute,
+            );
+            break;
 
-          break;
+          default:
+            break;
+        }
+        await Supabase.instance.client
+            .from('medications')
+            .update({
+              'scheduled_at': nextDate.toUtc().toIso8601String(),
 
-        case 'monthly':
-          nextDate = DateTime(
-            nextDate.year,
-            nextDate.month + 1,
-            nextDate.day,
-            nextDate.hour,
-            nextDate.minute,
-          );
-          break;
-
-        default:
-          break;
+              'reminder_sent': false,
+              'reminder_sent_at': null,
+            })
+            .eq('id', med.id);
       }
-      await Supabase.instance.client
-          .from('medications')
-          .update({
-            'scheduled_at': nextDate.toUtc().toIso8601String(),
-
-            'reminder_sent': false,
-            'reminder_sent_at': null,
-          })
-          .eq('id', med.id);
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'event_type': 'medication_logged',
@@ -853,7 +1331,15 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
       // IMPORTANT
       ref.invalidate(allDoseLogsProvider);
       ref.invalidate(familyMedicationsProvider);
-
+      await DoseNotificationService.instance.cancelMedication(med.id);
+      //await DoseLiveActivityService.instance.end(med.id);
+      await DoseLiveActivityService.instance.reschedule(med, takenToday: true);
+      try {
+        final meds = await ref.read(familyMedicationsProvider.future);
+        await _syncDoseReminders(meds, profile.userId);
+      } catch (e) {
+        debugPrint('[DoseSync] resync after log failed: $e');
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -910,26 +1396,27 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
   }
 
   Stream<List<Map<String, dynamic>>> streamMissedCheckIns(String userId) {
+    const missedStatuses = {
+      'Missed check-in',
+      'Emergency escalation - repeated no-check-in alert',
+    };
+
     return Supabase.instance.client
         .from('check_ins')
         .stream(primaryKey: ['id'])
+        .eq('user_id', userId) // filter on the server
+        .order('created_at', ascending: false) // newest first
+        .limit(10)
         .map((rows) {
-          final missed = rows
-              .where(
-                (row) =>
-                    row['user_id'] == userId &&
-                    row['status_message'] == 'Missed check-in' &&
-                    (row['acknowledged'] ?? false) == false,
-              )
-              .toList();
+          if (rows.isEmpty) return <Map<String, dynamic>>[];
 
-          missed.sort(
-            (a, b) => DateTime.parse(
-              b['created_at'],
-            ).compareTo(DateTime.parse(a['created_at'])),
-          );
+          // rows are already newest first
+          final latest = rows.first;
 
-          return missed.take(1).toList();
+          // If the latest row is a real check-in, the missed state is resolved
+          return missedStatuses.contains(latest['status_message'])
+              ? [latest]
+              : <Map<String, dynamic>>[];
         });
   }
 
@@ -1022,1525 +1509,1497 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
     final medicationsAsync = ref.watch(familyMedicationsProvider);
 
     return Scaffold(
-      backgroundColor: isLoad ? Colors.white : ShieldColors.activeTeal,
-      body: isLoad
-          ? Center(child: CircularProgressIndicator())
-          : GestureDetector(
-              onTap: () {
-                FocusScope.of(context).unfocus();
-              },
-              child: SafeArea(
-                child: profileAsync.when(
-                  data: (profile) {
-                    if (profile == null) {
-                      return const Center(child: Text('No profile found.'));
-                    }
+      backgroundColor: ShieldColors.activeTeal,
+      body: /*isLoad
+          ? Expanded(
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(24),
+                    topRight: Radius.circular(24),
+                  ),
+                ),
+                child: const ShieldLoader(),
+              ),
+            )
+          : */ GestureDetector(
+        onTap: () {
+          FocusScope.of(context).unfocus();
+        },
+        child: SafeArea(
+          child: profileAsync.when(
+            data: (profile) {
+              if (profile == null) {
+                return const Center(child: Text('No profile found.'));
+              }
 
-                    final toolsRepo = ref.watch(toolsRepositoryProvider);
-                    final safetyRepo = ref.watch(safetyRepositoryProvider);
-                    return Column(
+              final toolsRepo = ref.watch(toolsRepositoryProvider);
+              final safetyRepo = ref.watch(safetyRepositoryProvider);
+              return Column(
+                children: [
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 18),
+                    margin: EdgeInsets.symmetric(vertical: 10),
+                    child: Row(
                       children: [
-                        Container(
-                          padding: EdgeInsets.symmetric(horizontal: 18),
-                          margin: EdgeInsets.symmetric(vertical: 10),
-                          child: Row(
-                            children: [
-                              Image.asset(
-                                'assets/logo.png',
-                                height: 40,
-                                width: 40,
+                        Image.asset('assets/logo.png', height: 40, width: 40),
+                        SizedBox(width: 6),
+                        Text(
+                          "Well-Check",
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(
+                                color: ShieldColors.backgroundWhite,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
                               ),
-                              SizedBox(width: 6),
-                              Text(
-                                "Well-Check",
-                                style: Theme.of(context).textTheme.headlineSmall
-                                    ?.copyWith(
-                                      color: ShieldColors.backgroundWhite,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                              ),
-                              Spacer(),
-                              GestureDetector(
-                                onTap: () {
-                                  showModalBottomSheet(
-                                    context: context,
-                                    isScrollControlled: true,
-                                    backgroundColor: Colors.transparent,
-                                    builder: (_) => const ProfileSettingsView(),
-                                  );
-                                },
-                                child: Container(
-                                  width: 52,
-                                  height: 52,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.grey.shade300,
-                                    border: Border.all(
-                                      color: Colors.white,
-                                      width: 2,
-                                    ),
-                                  ),
-                                  child: profile.avatarUrl != null
-                                      ? ClipRRect(
-                                          borderRadius: BorderRadius.circular(
-                                            26,
-                                          ),
-                                          child: Image.network(
-                                            '${profile.avatarUrl}?t=${DateTime.now().millisecondsSinceEpoch}',
-                                            fit: BoxFit.cover,
-                                          ),
-                                        )
-                                      : const Icon(
-                                          Icons.person,
-                                          color: Colors.grey,
-                                        ),
-                                ),
-                              ),
-                            ],
-                          ),
                         ),
-                        SizedBox(height: 6),
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 27,
-                          ),
-                          decoration: BoxDecoration(
-                            color: ShieldColors.softMint,
-
-                            borderRadius: BorderRadius.only(
-                              topLeft: Radius.circular(24),
-                              topRight: Radius.circular(24),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Hi, ${profile.fullName?.split(' ').first ?? 'there'}!',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .headlineMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                            color: ShieldColors.textBody,
-                                          ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      "You're safe & connected",
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyLarge
-                                          ?.copyWith(
-                                            color: ShieldColors.textLabel,
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-
-                              // Profile avatar — taps to open ProfileSettingsView
-                            ],
-                          ),
-                        ),
-                        Expanded(
+                        Spacer(),
+                        GestureDetector(
+                          onTap: () {
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) => const ProfileSettingsView(),
+                            );
+                          },
                           child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 18.0,
-                            ),
-
+                            width: 52,
+                            height: 52,
                             decoration: BoxDecoration(
-                              color: ShieldColors.softMint,
+                              shape: BoxShape.circle,
+                              color: Colors.grey.shade300,
+                              border: Border.all(color: Colors.white, width: 2),
                             ),
-                            child: RefreshIndicator(
-                              onRefresh: () async {
-                                ref.invalidate(familyMedicationsProvider);
-                                ref.invalidate(safetyRepositoryProvider);
-                              },
-                              child: SingleChildScrollView(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // Header
-                                    const SizedBox(height: 10),
-                                    StreamBuilder<List<Map<String, dynamic>>>(
-                                      stream: _missedStream,
-                                      builder: (context, snapshot) {
-                                        final missed = snapshot.data ?? [];
+                            child: profile.avatarUrl != null
+                                ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(26),
+                                    child: Image.network(
+                                      '${profile.avatarUrl}?t=${DateTime.now().millisecondsSinceEpoch}',
+                                      fit: BoxFit.cover,
+                                    ),
+                                  )
+                                : const Icon(Icons.person, color: Colors.grey),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 6),
+                  if (isLoad) ...[
+                    Expanded(
+                      child: Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(24),
+                            topRight: Radius.circular(24),
+                          ),
+                        ),
+                        child: const ShieldLoader(),
+                      ),
+                    ),
+                  ] else ...[
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 27,
+                      ),
+                      decoration: BoxDecoration(
+                        color: ShieldColors.softMint,
 
-                                        print(
-                                          "STREAM STATE: ${snapshot.connectionState}",
-                                        );
-                                        print(
-                                          "STREAM ERROR: ${snapshot.error}",
-                                        );
-                                        print("STREAM DATA: ${snapshot.data}");
+                        borderRadius: BorderRadius.only(
+                          topLeft: Radius.circular(24),
+                          topRight: Radius.circular(24),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Hi, ${profile.fullName?.split(' ').first ?? 'there'}!',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineMedium
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: ShieldColors.textBody,
+                                      ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  "You're safe & connected",
+                                  style: Theme.of(context).textTheme.bodyLarge
+                                      ?.copyWith(color: ShieldColors.textLabel),
+                                ),
+                              ],
+                            ),
+                          ),
 
-                                        // final missed = snapshot.data ?? [];
+                          // Profile avatar — taps to open ProfileSettingsView
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 18.0),
 
-                                        print("MISSED COUNT: ${missed.length}");
+                        decoration: BoxDecoration(color: ShieldColors.softMint),
+                        child: RefreshIndicator(
+                          onRefresh: () async {
+                            ref.invalidate(familyMedicationsProvider);
+                            ref.invalidate(safetyRepositoryProvider);
+                            ref.invalidate(toolsRepositoryProvider);
+                          },
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Header
+                                const SizedBox(height: 10),
+                                StreamBuilder<List<Map<String, dynamic>>>(
+                                  stream: _missedStream,
+                                  builder: (context, snapshot) {
+                                    final missed = snapshot.data ?? [];
 
-                                        if (missed.isEmpty) {
-                                          missedCheckIn = null;
-                                          return const SizedBox();
-                                        }
+                                    if (missed.isEmpty) {
+                                      missedCheckIn = null;
+                                      return const SizedBox();
+                                    }
 
-                                        missedCheckIn = missed.first;
+                                    missedCheckIn = missed.first;
 
-                                        final latestMissed = missed.first;
+                                    final latestMissed = missed.first;
 
-                                        return Container(
-                                          margin: const EdgeInsets.only(
-                                            bottom: 16,
-                                            right: 6,
-                                            left: 6,
-                                            top: 12,
-                                          ),
-                                          padding: const EdgeInsets.all(16),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white,
-                                            borderRadius: BorderRadius.circular(
-                                              12,
+                                    return Container(
+                                      margin: const EdgeInsets.only(
+                                        bottom: 16,
+                                        right: 6,
+                                        left: 6,
+                                        top: 12,
+                                      ),
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(12),
+                                        //  border: Border.all(color: Colors.orange),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(16),
+
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: ShieldColors.tealWash,
                                             ),
-                                            //  border: Border.all(color: Colors.orange),
+                                            child: Icon(
+                                              Icons
+                                                  .notifications_active_outlined,
+                                              color: ShieldColors.activeTeal,
+                                              size: 32,
+                                            ),
                                           ),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.center,
+                                          const SizedBox(height: 12),
+
+                                          Text(
+                                            "You missed your\n scheduled check-in",
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 20,
+
+                                              fontWeight: FontWeight.bold,
+                                              color: ShieldColors.activeTeal,
+                                            ),
+                                          ),
+
+                                          const SizedBox(height: 18),
+
+                                          Column(
                                             children: [
-                                              Container(
-                                                padding: const EdgeInsets.all(
-                                                  16,
-                                                ),
+                                              GestureDetector(
+                                                onTap: () async {
+                                                  if (imOkayLoad) return;
+                                                  await _imOkayPressed();
 
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: ShieldColors.tealWash,
-                                                ),
-                                                child: Icon(
-                                                  Icons
-                                                      .notifications_active_outlined,
-                                                  color:
-                                                      ShieldColors.activeTeal,
-                                                  size: 32,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 12),
+                                                  if (!mounted) return;
 
-                                              Text(
-                                                "You missed your\n scheduled check-in",
-                                                textAlign: TextAlign.center,
-                                                style: TextStyle(
-                                                  fontSize: 20,
+                                                  setState(() {
+                                                    missedCheckIn = null;
+                                                  });
+                                                },
+                                                child: Container(
+                                                  width: double.infinity,
+                                                  padding: EdgeInsets.all(14),
+                                                  decoration: BoxDecoration(
+                                                    color:
+                                                        ShieldColors.activeTeal,
 
-                                                  fontWeight: FontWeight.bold,
-                                                  color:
-                                                      ShieldColors.activeTeal,
-                                                ),
-                                              ),
-
-                                              const SizedBox(height: 18),
-
-                                              Column(
-                                                children: [
-                                                  GestureDetector(
-                                                    onTap: () async {
-                                                      if (imOkayLoad) return;
-                                                      await _imOkayPressed();
-
-                                                      if (!mounted) return;
-
-                                                      setState(() {
-                                                        missedCheckIn = null;
-                                                      });
-                                                    },
-                                                    child: Container(
-                                                      width: double.infinity,
-                                                      padding: EdgeInsets.all(
-                                                        14,
-                                                      ),
-                                                      decoration: BoxDecoration(
-                                                        color: ShieldColors
-                                                            .activeTeal,
-
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              12,
-                                                            ),
-                                                      ),
-                                                      child: imOkayLoad
-                                                          ? Center(
-                                                              child:
-                                                                  CircularProgressIndicator(
-                                                                    color: Colors
-                                                                        .white,
-                                                                  ),
-                                                            )
-                                                          : Row(
-                                                              mainAxisAlignment:
-                                                                  MainAxisAlignment
-                                                                      .center,
-                                                              children: [
-                                                                Icon(
-                                                                  Icons
-                                                                      .check_circle_outline,
-                                                                  color: Colors
-                                                                      .white,
-                                                                ),
-                                                                SizedBox(
-                                                                  width: 10,
-                                                                ),
-                                                                SizedBox(
-                                                                  child: const Text(
-                                                                    "I'M OKAY",
-                                                                    style: TextStyle(
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .bold,
-                                                                      color: Colors
-                                                                          .white,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                    ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          12,
+                                                        ),
                                                   ),
-
-                                                  const SizedBox(height: 12),
-                                                  GestureDetector(
-                                                    onTap: () async {
-                                                      _startSosCountdown();
-                                                    },
-                                                    child: Container(
-                                                      width: double.infinity,
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.red,
-
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              12,
-                                                            ),
-                                                      ),
-                                                      padding: EdgeInsets.all(
-                                                        14,
-                                                      ),
-                                                      child: Row(
-                                                        mainAxisAlignment:
-                                                            MainAxisAlignment
-                                                                .center,
-                                                        children: [
-                                                          Icon(
-                                                            Icons
-                                                                .sports_soccer_sharp,
-                                                            color: Colors.white,
-                                                          ),
-                                                          SizedBox(width: 10),
-                                                          SizedBox(
-                                                            child: const Text(
-                                                              "I NEED HELP",
-                                                              style: TextStyle(
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .bold,
+                                                  child: imOkayLoad
+                                                      ? Center(
+                                                          child:
+                                                              CircularProgressIndicator(
                                                                 color: Colors
                                                                     .white,
                                                               ),
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 12),
-
-                                                  TextField(
-                                                    controller: notesController,
-                                                    maxLines: 1,
-                                                    textAlign: TextAlign.start,
-                                                    focusNode: notesFocus,
-                                                    decoration: InputDecoration(
-                                                      fillColor:
-                                                          ShieldColors.tealWash,
-                                                      hintText:
-                                                          "Add a note (Optional)",
-
-                                                      prefixIcon: Icon(
-                                                        Icons.edit,
-                                                        color: Colors
-                                                            .grey
-                                                            .shade500,
-                                                        size: 15,
-                                                      ),
-                                                      enabledBorder:
-                                                          OutlineInputBorder(
-                                                            borderSide: BorderSide(
-                                                              color:
-                                                                  ShieldColors
-                                                                      .tealWash,
-                                                            ),
-                                                          ),
-                                                      border:
-                                                          OutlineInputBorder(),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      },
-                                    ),
-
-                                    //const SizedBox(height: 10),
-                                    const PendingActionsCard(),
-
-                                    //     const SizedBox(height: 10),
-                                    medicationsAsync.when(
-                                      data: (medications) {
-                                        final activeMeds = medications
-                                            .where(
-                                              (m) =>
-                                                  m.isActive &&
-                                                  m.assignedTo ==
-                                                      profile.userId,
-                                            )
-                                            .toList();
-
-                                        if (activeMeds.isEmpty) {
-                                          return const SizedBox.shrink();
-                                        }
-
-                                        return Container(
-                                          margin: const EdgeInsets.only(
-                                            bottom: 18,
-                                            top: 18,
-                                          ),
-                                          padding: const EdgeInsets.all(16),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white,
-                                            borderRadius: BorderRadius.circular(
-                                              20,
-                                            ),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black.withValues(
-                                                  alpha: 0.04,
-                                                ),
-                                                blurRadius: 10,
-                                                offset: const Offset(0, 4),
-                                              ),
-                                            ],
-                                          ),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'MEDICATION MONITOR',
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .labelMedium
-                                                    ?.copyWith(
-                                                      color: ShieldColors
-                                                          .textLabel,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      letterSpacing: 1.2,
-                                                    ),
-                                              ),
-
-                                              const SizedBox(height: 14),
-
-                                              ...activeMeds.map((med) {
-                                                // final nextDose = med.nextDoseToday;
-                                                DateTime? nextDose;
-
-                                                final allLogsAsync = ref.watch(
-                                                  allDoseLogsProvider,
-                                                );
-                                                final logs =
-                                                    allLogsAsync.value ?? [];
-
-                                                final now = DateTime.now();
-                                                final startDate =
-                                                    med.startDate ?? now;
-
-                                                bool isTakenToday = false;
-
-                                                final medicationLogs = logs
-                                                    .where(
-                                                      (l) =>
-                                                          l.medicationId ==
-                                                              med.id &&
-                                                          l.status == 'taken' &&
-                                                          l.takenAt != null &&
-                                                          med.assignedTo ==
-                                                              profile.userId,
-                                                    );
-
-                                                switch (med.recurrence) {
-                                                  case 'daily':
-                                                    isTakenToday =
-                                                        medicationLogs.any(
-                                                          (log) =>
-                                                              log
-                                                                      .takenAt!
-                                                                      .year ==
-                                                                  now.year &&
-                                                              log
-                                                                      .takenAt!
-                                                                      .month ==
-                                                                  now.month &&
-                                                              log
-                                                                      .takenAt!
-                                                                      .day ==
-                                                                  now.day,
-                                                        );
-                                                    break;
-
-                                                  case 'every_other_day':
-                                                    final diffDays = now
-                                                        .difference(startDate)
-                                                        .inDays;
-
-                                                    final shouldTakeToday =
-                                                        diffDays % 2 == 0;
-
-                                                    isTakenToday =
-                                                        shouldTakeToday &&
-                                                        medicationLogs.any(
-                                                          (log) =>
-                                                              log
-                                                                      .takenAt!
-                                                                      .year ==
-                                                                  now.year &&
-                                                              log
-                                                                      .takenAt!
-                                                                      .month ==
-                                                                  now.month &&
-                                                              log
-                                                                      .takenAt!
-                                                                      .day ==
-                                                                  now.day,
-                                                        );
-                                                    break;
-
-                                                  case 'weekly':
-                                                    isTakenToday =
-                                                        medicationLogs.any((
-                                                          log,
-                                                        ) {
-                                                          final d =
-                                                              log.takenAt!;
-
-                                                          return d.weekday ==
-                                                                  now.weekday &&
-                                                              d.year ==
-                                                                  now.year;
-                                                        });
-                                                    break;
-
-                                                  case 'monthly':
-                                                    isTakenToday =
-                                                        medicationLogs.any((
-                                                          log,
-                                                        ) {
-                                                          final d =
-                                                              log.takenAt!;
-
-                                                          return d.day ==
-                                                                  now.day &&
-                                                              d.month ==
-                                                                  now.month &&
-                                                              d.year ==
-                                                                  now.year;
-                                                        });
-                                                    break;
-                                                }
-
-                                                if (med
-                                                    .scheduleTimes
-                                                    .isNotEmpty) {
-                                                  final upcomingDoses =
-                                                      <DateTime>[];
-
-                                                  for (final time
-                                                      in med.scheduleTimes) {
-                                                    try {
-                                                      final parts = time.split(
-                                                        ':',
-                                                      );
-
-                                                      final hour = int.parse(
-                                                        parts[0],
-                                                      );
-
-                                                      final minute = int.parse(
-                                                        parts[1],
-                                                      );
-
-                                                      DateTime doseTime =
-                                                          DateTime(
-                                                            now.year,
-                                                            now.month,
-                                                            now.day,
-                                                            hour,
-                                                            minute,
-                                                          );
-
-                                                      final frequency = med
-                                                          .frequency
-                                                          .toLowerCase();
-
-                                                      // already logged → move next occurrence
-                                                      if (isTakenToday) {
-                                                        switch (med
-                                                            .recurrence) {
-                                                          case 'daily':
-                                                            doseTime = doseTime
-                                                                .add(
-                                                                  const Duration(
-                                                                    days: 1,
-                                                                  ),
-                                                                );
-                                                            break;
-
-                                                          case 'every_other_day':
-                                                            doseTime = doseTime
-                                                                .add(
-                                                                  const Duration(
-                                                                    days: 2,
-                                                                  ),
-                                                                );
-                                                            break;
-
-                                                          case 'weekly':
-                                                            doseTime = doseTime
-                                                                .add(
-                                                                  const Duration(
-                                                                    days: 7,
-                                                                  ),
-                                                                );
-                                                            break;
-
-                                                          case 'monthly':
-                                                            doseTime = DateTime(
-                                                              doseTime.year,
-                                                              doseTime.month +
-                                                                  1,
-                                                              doseTime.day,
-                                                              doseTime.hour,
-                                                              doseTime.minute,
-                                                            );
-                                                            break;
-                                                        }
-                                                      }
-                                                      // normal schedule
-                                                      else {
-                                                        if (frequency.contains(
-                                                          'daily',
-                                                        )) {
-                                                          if (doseTime.isBefore(
-                                                            now,
-                                                          )) {
-                                                            doseTime = doseTime
-                                                                .add(
-                                                                  const Duration(
-                                                                    days: 1,
-                                                                  ),
-                                                                );
-                                                          }
-                                                        } else if (frequency
-                                                            .contains(
-                                                              'every other',
-                                                            )) {
-                                                          final daysSinceStart =
-                                                              now
-                                                                  .difference(
-                                                                    startDate,
-                                                                  )
-                                                                  .inDays;
-
-                                                          final shouldTakeToday =
-                                                              daysSinceStart %
-                                                                  2 ==
-                                                              0;
-
-                                                          if (!shouldTakeToday ||
-                                                              doseTime.isBefore(
-                                                                now,
-                                                              )) {
-                                                            doseTime = doseTime
-                                                                .add(
-                                                                  const Duration(
-                                                                    days: 1,
-                                                                  ),
-                                                                );
-
-                                                            while (doseTime
-                                                                        .difference(
-                                                                          startDate,
-                                                                        )
-                                                                        .inDays %
-                                                                    2 !=
-                                                                0) {
-                                                              doseTime =
-                                                                  doseTime.add(
-                                                                    const Duration(
-                                                                      days: 1,
-                                                                    ),
-                                                                  );
-                                                            }
-                                                          }
-                                                        } else if (frequency
-                                                            .contains(
-                                                              'weekly',
-                                                            )) {
-                                                          while (doseTime
-                                                                      .weekday !=
-                                                                  startDate
-                                                                      .weekday ||
-                                                              doseTime.isBefore(
-                                                                now,
-                                                              )) {
-                                                            doseTime = doseTime
-                                                                .add(
-                                                                  const Duration(
-                                                                    days: 1,
-                                                                  ),
-                                                                );
-                                                          }
-                                                        } else if (frequency
-                                                            .contains(
-                                                              'monthly',
-                                                            )) {
-                                                          doseTime = DateTime(
-                                                            now.year,
-                                                            now.month,
-                                                            startDate.day,
-                                                            hour,
-                                                            minute,
-                                                          );
-
-                                                          if (doseTime.isBefore(
-                                                            now,
-                                                          )) {
-                                                            doseTime = DateTime(
-                                                              now.year,
-                                                              now.month + 1,
-                                                              startDate.day,
-                                                              hour,
-                                                              minute,
-                                                            );
-                                                          }
-                                                        } else if (frequency
-                                                            .contains(
-                                                              'as needed',
-                                                            )) {
-                                                          continue;
-                                                        }
-                                                      }
-
-                                                      upcomingDoses.add(
-                                                        doseTime,
-                                                      );
-                                                    } catch (e) {
-                                                      debugPrint(
-                                                        "Dose parse error: $e",
-                                                      );
-                                                    }
-                                                  }
-
-                                                  upcomingDoses.sort();
-
-                                                  if (upcomingDoses
-                                                      .isNotEmpty) {
-                                                    nextDose =
-                                                        upcomingDoses.first;
-                                                  }
-                                                }
-                                                return Container(
-                                                  margin: const EdgeInsets.only(
-                                                    bottom: 12,
-                                                  ),
-                                                  padding: const EdgeInsets.all(
-                                                    14,
-                                                  ),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.grey.shade50,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          16,
-                                                        ),
-                                                    border: Border.all(
-                                                      color: Colors.black
-                                                          .withValues(
-                                                            alpha: 0.2,
-                                                          ),
-                                                    ),
-                                                  ),
-                                                  child: Row(
-                                                    mainAxisAlignment:
-                                                        MainAxisAlignment
-                                                            .spaceBetween,
-                                                    children: [
-                                                      Icon(
-                                                        Icons.local_hospital,
-                                                        color: Colors.purple,
-                                                        size: 26,
-                                                      ),
-
-                                                      const SizedBox(width: 7),
-
-                                                      Expanded(
-                                                        child: Row(
+                                                        )
+                                                      : Row(
+                                                          mainAxisAlignment:
+                                                              MainAxisAlignment
+                                                                  .center,
                                                           children: [
-                                                            Expanded(
-                                                              child: Column(
-                                                                crossAxisAlignment:
-                                                                    CrossAxisAlignment
-                                                                        .start,
-                                                                children: [
-                                                                  Text(
-                                                                    med.medicationName,
-                                                                    style: const TextStyle(
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .bold,
-                                                                      fontSize:
-                                                                          15,
-                                                                    ),
-                                                                  ),
-
-                                                                  const SizedBox(
-                                                                    height: 4,
-                                                                  ),
-
-                                                                  Text(
-                                                                    '${med.dosage} • ${med.scheduleSummary}',
-                                                                    style: TextStyle(
-                                                                      color: Colors
-                                                                          .grey
-                                                                          .shade700,
-                                                                      fontSize:
-                                                                          12,
-                                                                    ),
-                                                                  ),
-
-                                                                  if (med.doctor !=
-                                                                      null) ...[
-                                                                    SizedBox(
-                                                                      height: 5,
-                                                                    ),
-
-                                                                    RichText(
-                                                                      text: TextSpan(
-                                                                        style: TextStyle(
-                                                                          color:
-                                                                              Colors.blueGrey,
-                                                                          fontSize:
-                                                                              12,
-                                                                          fontWeight:
-                                                                              FontWeight.w500,
-                                                                        ),
-                                                                        children: [
-                                                                          TextSpan(
-                                                                            text:
-                                                                                'Prescribing doctor: ',
-                                                                          ),
-                                                                          TextSpan(
-                                                                            text:
-                                                                                med.doctor,
-                                                                            style: TextStyle(
-                                                                              fontWeight: FontWeight.bold,
-                                                                            ),
-                                                                          ),
-                                                                        ],
-                                                                      ),
-                                                                    ),
-                                                                  ],
-                                                                  if (med.instructions !=
-                                                                      null) ...[
-                                                                    SizedBox(
-                                                                      height: 5,
-                                                                    ),
-                                                                    RichText(
-                                                                      text: TextSpan(
-                                                                        style: TextStyle(
-                                                                          color:
-                                                                              Colors.blueGrey,
-                                                                          fontSize:
-                                                                              12,
-                                                                          fontWeight:
-                                                                              FontWeight.w500,
-                                                                        ),
-                                                                        children: [
-                                                                          TextSpan(
-                                                                            text:
-                                                                                'Instruction: ',
-                                                                          ),
-                                                                          TextSpan(
-                                                                            text:
-                                                                                med.instructions,
-                                                                            style: TextStyle(
-                                                                              fontWeight: FontWeight.bold,
-                                                                            ),
-                                                                          ),
-                                                                        ],
-                                                                      ),
-                                                                    ),
-                                                                  ],
-                                                                  SizedBox(
-                                                                    height: 5,
-                                                                  ),
-
-                                                                  // if (nextDose !=
-                                                                  //     null) ...[
-                                                                  //   const SizedBox(
-                                                                  //     height: 4,
-                                                                  //   ),
-                                                                  //
-                                                                  //   Text(
-                                                                  //     'At ${DateFormat.jm().format(nextDose)}',
-                                                                  //     style: TextStyle(
-                                                                  //       color: Colors
-                                                                  //           .grey
-                                                                  //           .shade600,
-                                                                  //       fontSize: 11,
-                                                                  //     ),
-                                                                  //   ),
-                                                                  // ],
-                                                                ],
-                                                              ),
+                                                            Icon(
+                                                              Icons
+                                                                  .check_circle_outline,
+                                                              color:
+                                                                  Colors.white,
                                                             ),
-                                                            Expanded(
-                                                              child: Column(
-                                                                crossAxisAlignment:
-                                                                    CrossAxisAlignment
-                                                                        .end,
-                                                                mainAxisAlignment:
-                                                                    MainAxisAlignment
-                                                                        .end,
-                                                                children: [
-                                                                  Row(
-                                                                    mainAxisAlignment:
-                                                                        MainAxisAlignment
-                                                                            .end,
-                                                                    children: [
-                                                                      if (nextDose !=
-                                                                          null)
-                                                                        StreamBuilder(
-                                                                          stream: Stream.periodic(
-                                                                            const Duration(
-                                                                              seconds: 1,
-                                                                            ),
-                                                                          ),
-                                                                          builder:
-                                                                              (
-                                                                                context,
-                                                                                snapshot,
-                                                                              ) {
-                                                                                final diff =
-                                                                                    nextDose?.difference(
-                                                                                      DateTime.now(),
-                                                                                    ) ??
-                                                                                    Duration.zero;
-
-                                                                                // Prevent negative values
-                                                                                final safeDiff = diff.isNegative
-                                                                                    ? Duration.zero
-                                                                                    : diff;
-
-                                                                                final text =
-                                                                                    '${safeDiff.inHours.toString().padLeft(2, '0')}h '
-                                                                                    '${safeDiff.inMinutes.remainder(60).toString().padLeft(2, '0')}m '
-                                                                                    '${safeDiff.inSeconds.remainder(60).toString().padLeft(2, '0')}s';
-
-                                                                                return Text(
-                                                                                  text,
-                                                                                  style: TextStyle(
-                                                                                    color: ShieldColors.activeTeal,
-                                                                                    fontWeight: FontWeight.w600,
-                                                                                    fontSize: 12,
-                                                                                  ),
-                                                                                );
-                                                                              },
-                                                                        ),
-                                                                    ],
-                                                                  ),
-                                                                  Text(
-                                                                    "Until Next Dose",
-                                                                    style: TextStyle(
-                                                                      fontSize:
-                                                                          12,
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .bold,
-                                                                      color: ShieldColors
-                                                                          .activeTeal,
-                                                                    ),
-                                                                  ),
-                                                                  const SizedBox(
-                                                                    height: 10,
-                                                                  ),
-                                                                  if (!isTakenToday)
-                                                                    SizedBox(
-                                                                      width:
-                                                                          110,
-                                                                      height:
-                                                                          34,
-                                                                      child: ElevatedButton(
-                                                                        onPressed:
-                                                                            _loggingMedicationId ==
-                                                                                med.id
-                                                                            ? null
-                                                                            : () => _logDose(
-                                                                                med,
-                                                                              ),
-
-                                                                        style: ElevatedButton.styleFrom(
-                                                                          backgroundColor:
-                                                                              ShieldColors.activeTeal,
-                                                                          foregroundColor:
-                                                                              Colors.white,
-                                                                          elevation:
-                                                                              0,
-                                                                          padding:
-                                                                              EdgeInsets.zero,
-                                                                          shape: RoundedRectangleBorder(
-                                                                            borderRadius: BorderRadius.circular(
-                                                                              10,
-                                                                            ),
-                                                                          ),
-                                                                        ),
-
-                                                                        child:
-                                                                            _loggingMedicationId ==
-                                                                                med.id
-                                                                            ? const SizedBox(
-                                                                                width: 14,
-                                                                                height: 14,
-                                                                                child: CircularProgressIndicator(
-                                                                                  strokeWidth: 2,
-                                                                                  color: Colors.white,
-                                                                                ),
-                                                                              )
-                                                                            : const Row(
-                                                                                mainAxisAlignment: MainAxisAlignment.center,
-                                                                                children: [
-                                                                                  Icon(
-                                                                                    Icons.check_circle_outline,
-                                                                                    size: 15,
-                                                                                  ),
-                                                                                  SizedBox(
-                                                                                    width: 5,
-                                                                                  ),
-                                                                                  Text(
-                                                                                    "Log Dose",
-                                                                                    style: TextStyle(
-                                                                                      fontSize: 11,
-                                                                                      fontWeight: FontWeight.w600,
-                                                                                    ),
-                                                                                  ),
-                                                                                ],
-                                                                              ),
-                                                                      ),
-                                                                    ),
-                                                                ],
+                                                            SizedBox(width: 10),
+                                                            SizedBox(
+                                                              child: const Text(
+                                                                "I'M OKAY",
+                                                                style: TextStyle(
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                  color: Colors
+                                                                      .white,
+                                                                ),
                                                               ),
                                                             ),
                                                           ],
                                                         ),
+                                                ),
+                                              ),
+
+                                              const SizedBox(height: 12),
+                                              GestureDetector(
+                                                onTap: () async {
+                                                  _startSosCountdown();
+                                                },
+                                                child: Container(
+                                                  width: double.infinity,
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.red,
+
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          12,
+                                                        ),
+                                                  ),
+                                                  padding: EdgeInsets.all(14),
+                                                  child: Row(
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .center,
+                                                    children: [
+                                                      Icon(
+                                                        Icons
+                                                            .sports_soccer_sharp,
+                                                        color: Colors.white,
+                                                      ),
+                                                      SizedBox(width: 10),
+                                                      SizedBox(
+                                                        child: const Text(
+                                                          "I NEED HELP",
+                                                          style: TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            color: Colors.white,
+                                                          ),
+                                                        ),
                                                       ),
                                                     ],
                                                   ),
-                                                );
-                                              }),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 12),
+
+                                              TextField(
+                                                controller: notesController,
+                                                maxLines: 1,
+                                                textAlign: TextAlign.start,
+                                                focusNode: notesFocus,
+                                                decoration: InputDecoration(
+                                                  fillColor:
+                                                      ShieldColors.tealWash,
+                                                  hintText:
+                                                      "Add a note (Optional)",
+
+                                                  prefixIcon: Icon(
+                                                    Icons.edit,
+                                                    color: Colors.grey.shade500,
+                                                    size: 15,
+                                                  ),
+                                                  enabledBorder:
+                                                      OutlineInputBorder(
+                                                        borderSide: BorderSide(
+                                                          color: ShieldColors
+                                                              .tealWash,
+                                                        ),
+                                                      ),
+                                                  border: OutlineInputBorder(),
+                                                ),
+                                              ),
                                             ],
                                           ),
-                                        );
-                                      },
-                                      loading: () => const Center(
-                                        child: Padding(
-                                          padding: EdgeInsets.all(20),
-                                          child: CircularProgressIndicator(),
-                                        ),
+                                        ],
                                       ),
-                                      error: (e, st) => const SizedBox.shrink(),
-                                    ),
-                                    //  const SizedBox(height: 24),
-                                    StreamBuilder<List<Map<String, dynamic>>>(
-                                      stream: safetyRepo
-                                          .streamMyCheckinSchedules(
-                                            profile.userId,
-                                          ),
-                                      builder: (context, snapshot) {
-                                        final schedules = snapshot.data ?? [];
-                                        if (schedules.isEmpty) {
-                                          return const SizedBox.shrink();
-                                        }
+                                    );
+                                  },
+                                ),
 
-                                        // Get next upcoming checkin
-                                        DateTime? nextCheckin;
-                                        Map<String, dynamic>? selectedSchedule;
-                                        for (final s in schedules) {
-                                          print(s);
-                                          print('checkin_time');
-                                          final time = s['checkin_time'];
+                                //const SizedBox(height: 10),
+                                const PendingActionsCard(),
 
-                                          final next = _getNextCheckinTime(s);
+                                //     const SizedBox(height: 10),
+                                medicationsAsync.when(
+                                  data: (medications) {
+                                    final activeMeds = medications
+                                        .where(
+                                          (m) =>
+                                              m.isActive &&
+                                              m.assignedTo == profile.userId,
+                                        )
+                                        .toList();
 
-                                          if (next == null) continue;
-                                          if (nextCheckin == null ||
-                                              next.isBefore(nextCheckin)) {
-                                            nextCheckin = next;
-                                            selectedSchedule = s;
-                                          }
-                                        }
+                                    if (activeMeds.isEmpty) {
+                                      return const SizedBox.shrink();
+                                    }
 
-                                        if (nextCheckin == null ||
-                                            selectedSchedule == null) {
-                                          return const SizedBox.shrink();
-                                        }
-
-                                        final scheduleId =
-                                            selectedSchedule['id'];
-
-                                        return _NextCheckinCard(
-                                          nextCheckin: nextCheckin,
-                                          profile: profile,
-                                          scheduleId: scheduleId,
-                                        );
-                                      },
-                                    ),
-                                    // Safe Zones Status
-                                    Text(
-                                      'YOUR SAFE ZONES',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                            letterSpacing: 1.2,
-                                          ),
-                                    ),
-                                    const SizedBox(height: 16),
-                                    StreamBuilder<List<Map<String, dynamic>>>(
-                                      stream: toolsRepo.streamAssignedSafeZones(
-                                        profile.familyId,
-                                        profile.userId,
+                                    return Container(
+                                      margin: const EdgeInsets.only(
+                                        bottom: 18,
+                                        top: 18,
                                       ),
-                                      builder: (context, snapshot) {
-                                        if (snapshot.connectionState ==
-                                                ConnectionState.waiting &&
-                                            !emergencyLoad) {
-                                          return const Center(
-                                            child: CircularProgressIndicator(),
-                                          );
-                                        }
-                                        final zones = snapshot.data ?? [];
-
-                                        if (zones.isEmpty) {
-                                          return Container(
-                                            height: 120,
-                                            alignment: Alignment.center,
-                                            decoration: BoxDecoration(
-                                              color: Colors.grey.shade200,
-                                              borderRadius:
-                                                  ShieldDesign.roundedTwelve,
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(20),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(
+                                              alpha: 0.04,
                                             ),
-                                            child: const Text(
-                                              'No Safe Zones Configured',
-                                            ),
-                                          );
-                                        }
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'MEDICATION MONITOR',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelMedium
+                                                ?.copyWith(
+                                                  color: ShieldColors.textLabel,
+                                                  fontWeight: FontWeight.bold,
+                                                  letterSpacing: 1.2,
+                                                ),
+                                          ),
 
-                                        return Column(
-                                          children: zones.map((zone) {
-                                            bool isInside =
-                                                zone['name']
-                                                    .toString()
-                                                    .toLowerCase()
-                                                    .contains('school') ||
-                                                zone['name']
-                                                    .toString()
-                                                    .toLowerCase()
-                                                    .contains('home');
+                                          const SizedBox(height: 14),
 
+                                          ...activeMeds.map((med) {
+                                            // final nextDose = med.nextDoseToday;
+                                            DateTime? nextDose;
+
+                                            final allLogsAsync = ref.watch(
+                                              allDoseLogsProvider,
+                                            );
+                                            final logs =
+                                                allLogsAsync.value ?? [];
+
+                                            final now = DateTime.now();
+                                            final startDate =
+                                                med.startDate ?? now;
+
+                                            bool isTakenToday = false;
+
+                                            final medicationLogs = logs.where(
+                                              (l) =>
+                                                  l.medicationId == med.id &&
+                                                  l.status == 'taken' &&
+                                                  l.takenAt != null &&
+                                                  med.assignedTo ==
+                                                      profile.userId,
+                                            );
+
+                                            switch (med.recurrence) {
+                                              case 'daily':
+                                                isTakenToday = medicationLogs
+                                                    .any(
+                                                      (log) =>
+                                                          log.takenAt!.year ==
+                                                              now.year &&
+                                                          log.takenAt!.month ==
+                                                              now.month &&
+                                                          log.takenAt!.day ==
+                                                              now.day,
+                                                    );
+                                                break;
+
+                                              case 'every_other_day':
+                                                final diffDays = now
+                                                    .difference(startDate)
+                                                    .inDays;
+
+                                                final shouldTakeToday =
+                                                    diffDays % 2 == 0;
+
+                                                isTakenToday =
+                                                    shouldTakeToday &&
+                                                    medicationLogs.any(
+                                                      (log) =>
+                                                          log.takenAt!.year ==
+                                                              now.year &&
+                                                          log.takenAt!.month ==
+                                                              now.month &&
+                                                          log.takenAt!.day ==
+                                                              now.day,
+                                                    );
+                                                break;
+
+                                              case 'weekly':
+                                                isTakenToday = medicationLogs
+                                                    .any((log) {
+                                                      final d = log.takenAt!;
+
+                                                      return d.weekday ==
+                                                              now.weekday &&
+                                                          d.year == now.year;
+                                                    });
+                                                break;
+
+                                              case 'monthly':
+                                                isTakenToday = medicationLogs
+                                                    .any((log) {
+                                                      final d = log.takenAt!;
+
+                                                      return d.day == now.day &&
+                                                          d.month ==
+                                                              now.month &&
+                                                          d.year == now.year;
+                                                    });
+                                                break;
+                                            }
+
+                                            if (med.scheduleTimes.isNotEmpty) {
+                                              final upcomingDoses =
+                                                  <DateTime>[];
+
+                                              for (final time
+                                                  in med.scheduleTimes) {
+                                                try {
+                                                  final parts = time.split(':');
+
+                                                  final hour = int.parse(
+                                                    parts[0],
+                                                  );
+
+                                                  final minute = int.parse(
+                                                    parts[1],
+                                                  );
+
+                                                  DateTime doseTime = DateTime(
+                                                    now.year,
+                                                    now.month,
+                                                    now.day,
+                                                    hour,
+                                                    minute,
+                                                  );
+
+                                                  final frequency = med
+                                                      .frequency
+                                                      .toLowerCase();
+
+                                                  // already logged → move next occurrence
+                                                  if (isTakenToday) {
+                                                    switch (med.recurrence) {
+                                                      case 'daily':
+                                                        doseTime = doseTime.add(
+                                                          const Duration(
+                                                            days: 1,
+                                                          ),
+                                                        );
+                                                        break;
+
+                                                      case 'every_other_day':
+                                                        doseTime = doseTime.add(
+                                                          const Duration(
+                                                            days: 2,
+                                                          ),
+                                                        );
+                                                        break;
+
+                                                      case 'weekly':
+                                                        doseTime = doseTime.add(
+                                                          const Duration(
+                                                            days: 7,
+                                                          ),
+                                                        );
+                                                        break;
+
+                                                      case 'monthly':
+                                                        doseTime = DateTime(
+                                                          doseTime.year,
+                                                          doseTime.month + 1,
+                                                          doseTime.day,
+                                                          doseTime.hour,
+                                                          doseTime.minute,
+                                                        );
+                                                        break;
+                                                    }
+                                                  }
+                                                  // normal schedule
+                                                  else {
+                                                    if (frequency.contains(
+                                                      'daily',
+                                                    )) {
+                                                      if (doseTime.isBefore(
+                                                        now,
+                                                      )) {
+                                                        doseTime = doseTime.add(
+                                                          const Duration(
+                                                            days: 1,
+                                                          ),
+                                                        );
+                                                      }
+                                                    } // WEEKLY
+                                                    else if (frequency.contains(
+                                                      'weekly',
+                                                    )) {
+                                                      // Sunday = 0 ... Saturday = 6 (same numbering the cron uses)
+                                                      final days =
+                                                          List<int>.from(
+                                                            med.daysOfWeek ??
+                                                                <int>[],
+                                                          )..sort();
+                                                      if (days.isEmpty)
+                                                        days.add(
+                                                          startDate.weekday % 7,
+                                                        );
+
+                                                      // Don't count down to a date before the start date
+                                                      final from =
+                                                          startDate.isAfter(now)
+                                                          ? startDate
+                                                          : now;
+                                                      final baseDay = DateTime(
+                                                        from.year,
+                                                        from.month,
+                                                        from.day,
+                                                        hour,
+                                                        minute,
+                                                      );
+
+                                                      DateTime? best;
+                                                      for (final d in days) {
+                                                        final add =
+                                                            (d -
+                                                                (baseDay.weekday %
+                                                                    7)) %
+                                                            7; // always 0..6 in Dart
+                                                        var candidate = baseDay
+                                                            .add(
+                                                              Duration(
+                                                                days: add,
+                                                              ),
+                                                            );
+                                                        if (candidate.isBefore(
+                                                          now,
+                                                        )) {
+                                                          candidate = candidate
+                                                              .add(
+                                                                const Duration(
+                                                                  days: 7,
+                                                                ),
+                                                              );
+                                                        }
+                                                        if (best == null ||
+                                                            candidate.isBefore(
+                                                              best,
+                                                            ))
+                                                          best = candidate;
+                                                      }
+                                                      doseTime = best!;
+                                                    } else if (frequency
+                                                        .contains(
+                                                          'every other',
+                                                        )) {
+                                                      final daysSinceStart = now
+                                                          .difference(startDate)
+                                                          .inDays;
+
+                                                      final shouldTakeToday =
+                                                          daysSinceStart % 2 ==
+                                                          0;
+
+                                                      if (!shouldTakeToday ||
+                                                          doseTime.isBefore(
+                                                            now,
+                                                          )) {
+                                                        doseTime = doseTime.add(
+                                                          const Duration(
+                                                            days: 1,
+                                                          ),
+                                                        );
+
+                                                        while (doseTime
+                                                                    .difference(
+                                                                      startDate,
+                                                                    )
+                                                                    .inDays %
+                                                                2 !=
+                                                            0) {
+                                                          doseTime = doseTime
+                                                              .add(
+                                                                const Duration(
+                                                                  days: 1,
+                                                                ),
+                                                              );
+                                                        }
+                                                      }
+                                                    } else if (frequency
+                                                        .contains('weekly')) {
+                                                      while (doseTime.weekday !=
+                                                              startDate
+                                                                  .weekday ||
+                                                          doseTime.isBefore(
+                                                            now,
+                                                          )) {
+                                                        doseTime = doseTime.add(
+                                                          const Duration(
+                                                            days: 1,
+                                                          ),
+                                                        );
+                                                      }
+                                                    } else if (frequency
+                                                        .contains('monthly')) {
+                                                      doseTime = DateTime(
+                                                        now.year,
+                                                        now.month,
+                                                        startDate.day,
+                                                        hour,
+                                                        minute,
+                                                      );
+
+                                                      if (doseTime.isBefore(
+                                                        now,
+                                                      )) {
+                                                        doseTime = DateTime(
+                                                          now.year,
+                                                          now.month + 1,
+                                                          startDate.day,
+                                                          hour,
+                                                          minute,
+                                                        );
+                                                      }
+                                                    } else if (frequency
+                                                        .contains(
+                                                          'as needed',
+                                                        )) {
+                                                      continue;
+                                                    }
+                                                  }
+
+                                                  upcomingDoses.add(doseTime);
+                                                } catch (e) {
+                                                  debugPrint(
+                                                    "Dose parse error: $e",
+                                                  );
+                                                }
+                                              }
+
+                                              upcomingDoses.sort();
+
+                                              if (upcomingDoses.isNotEmpty) {
+                                                nextDose = upcomingDoses.first;
+                                              }
+                                            }
                                             return Container(
                                               margin: const EdgeInsets.only(
                                                 bottom: 12,
                                               ),
+                                              padding: const EdgeInsets.all(14),
                                               decoration: BoxDecoration(
-                                                color: isInside
-                                                    ? ShieldColors.safeZoneGreen
-                                                          .withValues(
-                                                            alpha: 0.1,
-                                                          )
-                                                    : Colors.white,
+                                                color: Colors.grey.shade50,
                                                 borderRadius:
-                                                    ShieldDesign.roundedTwelve,
+                                                    BorderRadius.circular(16),
                                                 border: Border.all(
-                                                  color: isInside
-                                                      ? ShieldColors
-                                                            .safeZoneGreen
-                                                      : Colors.grey.shade300,
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.2),
                                                 ),
                                               ),
-                                              child: ListTile(
-                                                leading: Icon(
-                                                  Icons.location_on,
-                                                  color: isInside
-                                                      ? ShieldColors
-                                                            .safeZoneGreen
-                                                      : Colors.grey,
-                                                ),
-                                                title: Text(
-                                                  zone['name'],
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    color:
-                                                        ShieldColors.textBody,
+                                              child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment
+                                                        .spaceBetween,
+                                                children: [
+                                                  Icon(
+                                                    Icons.local_hospital,
+                                                    color: Colors.purple,
+                                                    size: 26,
                                                   ),
-                                                ),
-                                                subtitle: Column(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    if (zone['address'] != null)
-                                                      Text(
-                                                        zone['address'],
-                                                        style: TextStyle(
-                                                          color: Colors.black,
+
+                                                  const SizedBox(width: 7),
+
+                                                  Expanded(
+                                                    child: Row(
+                                                      children: [
+                                                        Expanded(
+                                                          child: Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              Text(
+                                                                med.medicationName,
+                                                                style: const TextStyle(
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                  fontSize: 15,
+                                                                ),
+                                                              ),
+
+                                                              const SizedBox(
+                                                                height: 4,
+                                                              ),
+
+                                                              Text(
+                                                                '${med.dosage} • ${med.scheduleSummary}',
+                                                                style: TextStyle(
+                                                                  color: Colors
+                                                                      .grey
+                                                                      .shade700,
+                                                                  fontSize: 12,
+                                                                ),
+                                                              ),
+
+                                                              if (med.doctor !=
+                                                                  null) ...[
+                                                                SizedBox(
+                                                                  height: 5,
+                                                                ),
+
+                                                                RichText(
+                                                                  text: TextSpan(
+                                                                    style: TextStyle(
+                                                                      color: Colors
+                                                                          .blueGrey,
+                                                                      fontSize:
+                                                                          12,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w500,
+                                                                    ),
+                                                                    children: [
+                                                                      TextSpan(
+                                                                        text:
+                                                                            'Prescribing doctor: ',
+                                                                      ),
+                                                                      TextSpan(
+                                                                        text: med
+                                                                            .doctor,
+                                                                        style: TextStyle(
+                                                                          fontWeight:
+                                                                              FontWeight.bold,
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                              if (med.instructions !=
+                                                                  null) ...[
+                                                                SizedBox(
+                                                                  height: 5,
+                                                                ),
+                                                                RichText(
+                                                                  text: TextSpan(
+                                                                    style: TextStyle(
+                                                                      color: Colors
+                                                                          .blueGrey,
+                                                                      fontSize:
+                                                                          12,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w500,
+                                                                    ),
+                                                                    children: [
+                                                                      TextSpan(
+                                                                        text:
+                                                                            'Instruction: ',
+                                                                      ),
+                                                                      TextSpan(
+                                                                        text: med
+                                                                            .instructions,
+                                                                        style: TextStyle(
+                                                                          fontWeight:
+                                                                              FontWeight.bold,
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                              SizedBox(
+                                                                height: 5,
+                                                              ),
+
+                                                              // if (nextDose !=
+                                                              //     null) ...[
+                                                              //   const SizedBox(
+                                                              //     height: 4,
+                                                              //   ),
+                                                              //
+                                                              //   Text(
+                                                              //     'At ${DateFormat.jm().format(nextDose)}',
+                                                              //     style: TextStyle(
+                                                              //       color: Colors
+                                                              //           .grey
+                                                              //           .shade600,
+                                                              //       fontSize: 11,
+                                                              //     ),
+                                                              //   ),
+                                                              // ],
+                                                            ],
+                                                          ),
                                                         ),
-                                                      ),
-                                                    Text(
-                                                      'Radius: ${zone['radius_meters']}m',
+                                                        Expanded(
+                                                          child: Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .end,
+                                                            mainAxisAlignment:
+                                                                MainAxisAlignment
+                                                                    .end,
+                                                            children: [
+                                                              Row(
+                                                                mainAxisAlignment:
+                                                                    MainAxisAlignment
+                                                                        .end,
+                                                                children: [
+                                                                  if (nextDose !=
+                                                                      null)
+                                                                    StreamBuilder(
+                                                                      stream: Stream.periodic(
+                                                                        const Duration(
+                                                                          seconds:
+                                                                              1,
+                                                                        ),
+                                                                      ),
+                                                                      builder:
+                                                                          (
+                                                                            context,
+                                                                            snapshot,
+                                                                          ) {
+                                                                            final diff =
+                                                                                nextDose?.difference(
+                                                                                  DateTime.now(),
+                                                                                ) ??
+                                                                                Duration.zero;
+
+                                                                            // Prevent negative values
+                                                                            final safeDiff =
+                                                                                diff.isNegative
+                                                                                ? Duration.zero
+                                                                                : diff;
+
+                                                                            final text =
+                                                                                '${safeDiff.inHours.toString().padLeft(2, '0')}h '
+                                                                                '${safeDiff.inMinutes.remainder(60).toString().padLeft(2, '0')}m '
+                                                                                '${safeDiff.inSeconds.remainder(60).toString().padLeft(2, '0')}s';
+
+                                                                            return Text(
+                                                                              text,
+                                                                              style: TextStyle(
+                                                                                color: ShieldColors.activeTeal,
+                                                                                fontWeight: FontWeight.w600,
+                                                                                fontSize: 12,
+                                                                              ),
+                                                                            );
+                                                                          },
+                                                                    ),
+                                                                ],
+                                                              ),
+                                                              Text(
+                                                                "Until Next Dose",
+                                                                style: TextStyle(
+                                                                  fontSize: 12,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                  color: ShieldColors
+                                                                      .activeTeal,
+                                                                ),
+                                                              ),
+                                                              const SizedBox(
+                                                                height: 10,
+                                                              ),
+                                                              if (!isTakenToday)
+                                                                SizedBox(
+                                                                  width: 110,
+                                                                  height: 34,
+                                                                  child: ElevatedButton(
+                                                                    onPressed:
+                                                                        _loggingMedicationId ==
+                                                                            med.id
+                                                                        ? null
+                                                                        : () => _logDose(
+                                                                            med,
+                                                                          ),
+
+                                                                    style: ElevatedButton.styleFrom(
+                                                                      backgroundColor:
+                                                                          ShieldColors
+                                                                              .activeTeal,
+                                                                      foregroundColor:
+                                                                          Colors
+                                                                              .white,
+                                                                      elevation:
+                                                                          0,
+                                                                      padding:
+                                                                          EdgeInsets
+                                                                              .zero,
+                                                                      shape: RoundedRectangleBorder(
+                                                                        borderRadius:
+                                                                            BorderRadius.circular(
+                                                                              10,
+                                                                            ),
+                                                                      ),
+                                                                    ),
+
+                                                                    child:
+                                                                        _loggingMedicationId ==
+                                                                            med.id
+                                                                        ? const SizedBox(
+                                                                            width:
+                                                                                14,
+                                                                            height:
+                                                                                14,
+                                                                            child: CircularProgressIndicator(
+                                                                              strokeWidth: 2,
+                                                                              color: Colors.white,
+                                                                            ),
+                                                                          )
+                                                                        : const Row(
+                                                                            mainAxisAlignment:
+                                                                                MainAxisAlignment.center,
+                                                                            children: [
+                                                                              Icon(
+                                                                                Icons.check_circle_outline,
+                                                                                size: 15,
+                                                                              ),
+                                                                              SizedBox(
+                                                                                width: 5,
+                                                                              ),
+                                                                              Text(
+                                                                                "Log Dose",
+                                                                                style: TextStyle(
+                                                                                  fontSize: 11,
+                                                                                  fontWeight: FontWeight.w600,
+                                                                                ),
+                                                                              ),
+                                                                            ],
+                                                                          ),
+                                                                  ),
+                                                                ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
-                                                  ],
-                                                ),
-                                                trailing: isInside
-                                                    ? const Chip(
-                                                        label: Text('ACTIVE'),
-                                                        backgroundColor:
-                                                            ShieldColors
-                                                                .safeZoneGreen,
-                                                        labelStyle: TextStyle(
-                                                          color: Colors.white,
-                                                          fontSize: 10,
-                                                        ),
-                                                      )
-                                                    : const Text(
-                                                        'Away',
-                                                        style: TextStyle(
-                                                          color: Colors.grey,
-                                                        ),
-                                                      ),
+                                                  ),
+                                                ],
                                               ),
                                             );
-                                          }).toList(),
-                                        );
-                                      },
+                                          }),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                  loading: () => const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(20),
+                                      child: CircularProgressIndicator(),
                                     ),
+                                  ),
+                                  error: (e, st) => const SizedBox.shrink(),
+                                ),
+                                //  const SizedBox(height: 24),
+                                StreamBuilder<List<Map<String, dynamic>>>(
+                                  stream: safetyRepo.streamMyCheckinSchedules(
+                                    profile.userId,
+                                  ),
+                                  builder: (context, snapshot) {
+                                    final schedules = snapshot.data ?? [];
+                                    if (schedules.isEmpty) {
+                                      return const SizedBox.shrink();
+                                    }
 
-                                    const SizedBox(height: 14),
-                                    // Action Buttons
-                                    SizedBox(
-                                      width: double.infinity,
-                                      height: 56,
-                                      child: isCheckIn
-                                          ? Center(
-                                              child:
-                                                  CircularProgressIndicator(),
-                                            )
-                                          : ElevatedButton.icon(
-                                              onPressed: () async {
-                                                if (isCheckIn) return;
-                                                setState(() {
-                                                  isCheckIn = true;
-                                                });
-                                                // Fetch real GPS
-                                                double lat = 0.0;
-                                                double lng = 0.0;
-                                                bool gpsSuccess = false;
-                                                try {
-                                                  LocationPermission perm =
-                                                      await Geolocator.checkPermission();
-                                                  print(perm);
-                                                  if (perm ==
+                                    // Get next upcoming checkin
+                                    DateTime? nextCheckin;
+                                    Map<String, dynamic>? selectedSchedule;
+                                    for (final s in schedules) {
+                                      print(s);
+                                      print('checkin_time');
+                                      final time = s['checkin_time'];
+
+                                      final next = _getNextCheckinTime(s);
+
+                                      if (next == null) continue;
+                                      if (nextCheckin == null ||
+                                          next.isBefore(nextCheckin)) {
+                                        nextCheckin = next;
+                                        selectedSchedule = s;
+                                      }
+                                    }
+
+                                    if (nextCheckin == null ||
+                                        selectedSchedule == null) {
+                                      return const SizedBox.shrink();
+                                    }
+
+                                    final scheduleId = selectedSchedule['id'];
+
+                                    return _NextCheckinCard(
+                                      nextCheckin: nextCheckin,
+                                      profile: profile,
+                                      scheduleId: scheduleId,
+                                    );
+                                  },
+                                ),
+                                // Safe Zones Status
+                                Text(
+                                  'YOUR SAFE ZONES',
+                                  style: Theme.of(context).textTheme.labelMedium
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1.2,
+                                      ),
+                                ),
+                                const SizedBox(height: 16),
+                                StreamBuilder<List<Map<String, dynamic>>>(
+                                  stream: toolsRepo.streamAssignedSafeZones(
+                                    profile.familyId,
+                                    profile.userId,
+                                  ),
+                                  // stream: _getZonesStream(
+                                  //   profile.familyId,
+                                  //   profile.userId,
+                                  // ),
+                                  builder: (context, snapshot) {
+                                    if (!snapshot.hasData &&
+                                        snapshot.connectionState ==
+                                            ConnectionState.waiting &&
+                                        !emergencyLoad &&
+                                        !isCheckIn) {
+                                      return const Center(
+                                        child: CircularProgressIndicator(),
+                                      );
+                                    }
+                                    final zones = snapshot.data ?? [];
+
+                                    if (zones.isEmpty) {
+                                      return Container(
+                                        height: 120,
+                                        alignment: Alignment.center,
+                                        decoration: BoxDecoration(
+                                          color: ShieldColors.activeTeal
+                                              .withOpacity(0.05),
+                                          borderRadius:
+                                              ShieldDesign.roundedTwelve,
+                                        ),
+                                        child: const Text(
+                                          'No Safe Zones Configured',
+                                        ),
+                                      );
+                                    }
+
+                                    return Column(
+                                      children: zones.map((zone) {
+                                        bool isInside =
+                                            zone['name']
+                                                .toString()
+                                                .toLowerCase()
+                                                .contains('school') ||
+                                            zone['name']
+                                                .toString()
+                                                .toLowerCase()
+                                                .contains('home');
+
+                                        return Container(
+                                          margin: const EdgeInsets.only(
+                                            bottom: 12,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: isInside
+                                                ? ShieldColors.safeZoneGreen
+                                                      .withValues(alpha: 0.1)
+                                                : Colors.white,
+                                            borderRadius:
+                                                ShieldDesign.roundedTwelve,
+                                            border: Border.all(
+                                              color: isInside
+                                                  ? ShieldColors.safeZoneGreen
+                                                  : Colors.grey.shade300,
+                                            ),
+                                          ),
+                                          child: ListTile(
+                                            leading: Icon(
+                                              Icons.location_on,
+                                              color: isInside
+                                                  ? ShieldColors.safeZoneGreen
+                                                  : Colors.grey,
+                                            ),
+                                            title: Text(
+                                              zone['name'],
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: ShieldColors.textBody,
+                                              ),
+                                            ),
+                                            subtitle: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                if (zone['address'] != null)
+                                                  Text(
+                                                    zone['address'],
+                                                    style: TextStyle(
+                                                      color: Colors.black,
+                                                    ),
+                                                  ),
+                                                Text(
+                                                  'Radius: ${zone['radius_meters']}m',
+                                                ),
+                                              ],
+                                            ),
+                                            // trailing: isInside
+                                            //     ? const Chip(
+                                            //         label: Text('ACTIVE'),
+                                            //         backgroundColor:
+                                            //             ShieldColors
+                                            //                 .safeZoneGreen,
+                                            //         labelStyle: TextStyle(
+                                            //           color: Colors.white,
+                                            //           fontSize: 10,
+                                            //         ),
+                                            //       )
+                                            //     : const Text(
+                                            //         'Away',
+                                            //         style: TextStyle(
+                                            //           color: Colors.grey,
+                                            //         ),
+                                            //       ),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    );
+                                  },
+                                ),
+
+                                const SizedBox(height: 14),
+                                // Action Buttons
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 56,
+                                  child: isCheckIn
+                                      ? Center(
+                                          child: CircularProgressIndicator(),
+                                        )
+                                      : ElevatedButton.icon(
+                                          onPressed: () async {
+                                            if (isCheckIn) return;
+                                            setState(() {
+                                              isCheckIn = true;
+                                            });
+                                            // Fetch real GPS
+                                            double lat = 0.0;
+                                            double lng = 0.0;
+                                            bool gpsSuccess = false;
+                                            try {
+                                              LocationPermission perm =
+                                                  await Geolocator.checkPermission();
+                                              print(perm);
+                                              if (perm ==
+                                                  LocationPermission.denied) {
+                                                perm =
+                                                    await Geolocator.requestPermission();
+                                                print(perm);
+                                                print("adds");
+                                              } else if (perm ==
+                                                  LocationPermission
+                                                      .deniedForever) {
+                                                print("openLocationSettings");
+
+                                                await Geolocator.openLocationSettings();
+                                              }
+                                              if (perm !=
                                                       LocationPermission
-                                                          .denied) {
-                                                    perm =
-                                                        await Geolocator.requestPermission();
-                                                    print(perm);
-                                                    print("adds");
-                                                  } else if (perm ==
+                                                          .denied &&
+                                                  perm !=
                                                       LocationPermission
                                                           .deniedForever) {
-                                                    print(
-                                                      "openLocationSettings",
+                                                final pos =
+                                                    await Geolocator.getCurrentPosition(
+                                                      desiredAccuracy:
+                                                          LocationAccuracy
+                                                              .medium,
+                                                      timeLimit: const Duration(
+                                                        seconds: 8,
+                                                      ),
                                                     );
-
-                                                    await Geolocator.openLocationSettings();
-                                                  }
-                                                  if (perm !=
-                                                          LocationPermission
-                                                              .denied &&
-                                                      perm !=
-                                                          LocationPermission
-                                                              .deniedForever) {
-                                                    final pos =
-                                                        await Geolocator.getCurrentPosition(
-                                                          desiredAccuracy:
-                                                              LocationAccuracy
-                                                                  .medium,
-                                                          timeLimit:
-                                                              const Duration(
-                                                                seconds: 8,
-                                                              ),
-                                                        );
-                                                    lat = pos.latitude;
-                                                    lng = pos.longitude;
-                                                    gpsSuccess = true;
-                                                  }
-                                                } catch (e) {
-                                                  setState(() {
-                                                    isCheckIn = false;
-                                                  });
-                                                  print("fdfdf");
-                                                  // fallback to last known if timeout
-                                                  try {
-                                                    final lastPos =
-                                                        await Geolocator.getLastKnownPosition();
-                                                    if (lastPos != null) {
-                                                      lat = lastPos.latitude;
-                                                      lng = lastPos.longitude;
-                                                      gpsSuccess = true;
-                                                    }
-                                                  } catch (_) {
-                                                    setState(() {
-                                                      isCheckIn = false;
-                                                    });
-                                                  }
+                                                lat = pos.latitude;
+                                                lng = pos.longitude;
+                                                gpsSuccess = true;
+                                              }
+                                            } catch (e) {
+                                              setState(() {
+                                                isCheckIn = false;
+                                              });
+                                              print("fdfdf");
+                                              // fallback to last known if timeout
+                                              try {
+                                                final lastPos =
+                                                    await Geolocator.getLastKnownPosition();
+                                                if (lastPos != null) {
+                                                  lat = lastPos.latitude;
+                                                  lng = lastPos.longitude;
+                                                  gpsSuccess = true;
                                                 }
-                                                int level =
-                                                    100; // Safe default for simulators and aggressive background iOS policies
-                                                try {
-                                                  final battery = Battery();
-                                                  level = await battery
-                                                      .batteryLevel;
-                                                } catch (e) {
-                                                  setState(() {
-                                                    isCheckIn = false;
-                                                  });
-                                                  debugPrint(
-                                                    'Battery info not available over isolate, using default: $e',
-                                                  );
-                                                }
-
-                                                await safetyRepo.submitPulse(
-                                                  familyId: profile.familyId,
-                                                  latitude: lat,
-                                                  longitude: lng,
-                                                  batteryLevel: level,
-                                                  type: 'check_in',
-                                                );
-                                                await Supabase.instance.client
-                                                    .from('check_ins')
-                                                    .insert({
-                                                      'family_id':
-                                                          profile.familyId,
-                                                      'user_id': profile.userId,
-                                                      'latitude': lat,
-                                                      'longitude': lng,
-                                                      'status_message':
-                                                          "Manual check-in",
-                                                    });
-                                                await _resolveDueSchedules(
-                                                  profile.userId,
-                                                );
+                                              } catch (_) {
                                                 setState(() {
                                                   isCheckIn = false;
                                                 });
-                                                if (context.mounted) {
-                                                  ScaffoldMessenger.of(
-                                                    context,
-                                                  ).showSnackBar(
-                                                    SnackBar(
-                                                      content: Text(
-                                                        gpsSuccess
-                                                            ? 'Checked in successfully!'
-                                                            : 'Checked in (GPS unavailable)',
-                                                      ),
-                                                      backgroundColor:
-                                                          gpsSuccess
-                                                          ? ShieldColors
-                                                                .safeZoneGreen
-                                                          : Colors.orange,
-                                                    ),
-                                                  );
-                                                }
-                                              },
-                                              icon: const Icon(
-                                                Icons.check_circle_outline,
-                                                size: 24,
-                                              ),
-                                              label: const Text(
-                                                'Check In',
-                                                style: TextStyle(
-                                                  fontSize: 17,
-                                                  fontWeight: FontWeight.bold,
+                                              }
+                                            }
+                                            int level =
+                                                100; // Safe default for simulators and aggressive background iOS policies
+                                            try {
+                                              final battery = Battery();
+                                              level =
+                                                  await battery.batteryLevel;
+                                            } catch (e) {
+                                              setState(() {
+                                                isCheckIn = false;
+                                              });
+                                              debugPrint(
+                                                'Battery info not available over isolate, using default: $e',
+                                              );
+                                            }
+
+                                            await safetyRepo.submitPulse(
+                                              familyId: profile.familyId,
+                                              latitude: lat,
+                                              longitude: lng,
+                                              batteryLevel: level,
+                                              type: 'check_in',
+                                            );
+                                            await Supabase.instance.client
+                                                .from('check_ins')
+                                                .insert({
+                                                  'family_id': profile.familyId,
+                                                  'user_id': profile.userId,
+                                                  'latitude': lat,
+                                                  'longitude': lng,
+                                                  'status_message':
+                                                      "Manual check-in",
+                                                });
+                                            _missedStream =
+                                                streamMissedCheckIns(
+                                                  profile.userId,
+                                                );
+
+                                            await _resolveDueSchedules(
+                                              profile.userId,
+                                            );
+                                            setState(() {
+                                              isCheckIn = false;
+                                            });
+                                            if (context.mounted) {
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                    gpsSuccess
+                                                        ? 'Checked in successfully!'
+                                                        : 'Checked in (GPS unavailable)',
+                                                  ),
+                                                  backgroundColor: gpsSuccess
+                                                      ? ShieldColors
+                                                            .safeZoneGreen
+                                                      : Colors.orange,
                                                 ),
+                                              );
+                                            }
+                                          },
+                                          icon: const Icon(
+                                            Icons.check_circle_outline,
+                                            size: 24,
+                                          ),
+                                          label: const Text(
+                                            'Check In',
+                                            style: TextStyle(
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor:
+                                                ShieldColors.activeTeal,
+                                            foregroundColor: Colors.white,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  ShieldDesign.roundedTwelve,
+                                            ),
+                                            elevation: 4,
+                                          ),
+                                        ),
+                                ),
+                                const SizedBox(height: 12),
+                                // Message Family — now opens in-app chat
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 56,
+                                  child: ElevatedButton.icon(
+                                    onPressed: () {
+                                      showModalBottomSheet(
+                                        context: context,
+                                        isScrollControlled: true,
+                                        useSafeArea: true,
+
+                                        backgroundColor: Colors.transparent,
+                                        builder: (_) =>
+                                            const FamilyChatScreen(),
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.chat_bubble_outline,
+                                      size: 24,
+                                    ),
+                                    label: const Text(
+                                      'Message Family',
+                                      style: TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.white,
+                                      foregroundColor: ShieldColors.textBody,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            ShieldDesign.roundedTwelve,
+                                      ),
+                                      elevation: 2,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 32),
+
+                                // Family Status — BUG FIX: show name instead of role
+                                Text(
+                                  'FAMILY STATUS',
+                                  style: Theme.of(context).textTheme.labelMedium
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1.2,
+                                      ),
+                                ),
+                                const SizedBox(height: 16),
+                                StreamBuilder<List<Map<String, dynamic>>>(
+                                  stream: safetyRepo.streamActiveMembers(
+                                    profile.familyId,
+                                  ),
+                                  builder: (context, memberSnapshot) {
+                                    if (!memberSnapshot.hasData &&
+                                        !memberSnapshot.hasError &&
+                                        !emergencyLoad &&
+                                        !isCheckIn) {
+                                      return const Center(
+                                        child: CircularProgressIndicator(),
+                                      );
+                                    }
+                                    final members = memberSnapshot.data ?? [];
+                                    final parents = members
+                                        .where(
+                                          (m) =>
+                                              m['role'] == 'leader' ||
+                                              m['role'] == 'monitor',
+                                        )
+                                        .toList();
+
+                                    if (parents.isEmpty) {
+                                      return const Text('No parents online.');
+                                    }
+
+                                    return Column(
+                                      children: parents
+                                          .map(
+                                            (member) => Padding(
+                                              padding: const EdgeInsets.only(
+                                                bottom: 12,
                                               ),
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor:
-                                                    ShieldColors.activeTeal,
-                                                foregroundColor: Colors.white,
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius: ShieldDesign
-                                                      .roundedTwelve,
-                                                ),
-                                                elevation: 4,
+                                              child: ParentLocationRow(
+                                                // FIX: Display name, not role
+                                                name:
+                                                    member['full_name'] ??
+                                                    'Family Member',
+                                                location: 'Active on Shield',
+                                                // Assuming 'memberLoc' was intended to be this static string or derived elsewhere
+                                                isOnline: true,
+                                                // Assuming 'isOnline' was intended to be this static boolean or derived elsewhere
+                                                avatarUrl:
+                                                    member['avatar_url']
+                                                        as String?,
                                               ),
                                             ),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    // Message Family — now opens in-app chat
-                                    SizedBox(
-                                      width: double.infinity,
-                                      height: 56,
-                                      child: ElevatedButton.icon(
-                                        onPressed: () {
-                                          showModalBottomSheet(
-                                            context: context,
-                                            isScrollControlled: true,
-                                            useSafeArea: true,
-
-                                            backgroundColor: Colors.transparent,
-                                            builder: (_) =>
-                                                const FamilyChatScreen(),
-                                          );
-                                        },
-                                        icon: const Icon(
-                                          Icons.chat_bubble_outline,
-                                          size: 24,
-                                        ),
-                                        label: const Text(
-                                          'Message Family',
-                                          style: TextStyle(
-                                            fontSize: 17,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.white,
-                                          foregroundColor:
-                                              ShieldColors.textBody,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                ShieldDesign.roundedTwelve,
-                                          ),
-                                          elevation: 2,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 32),
-
-                                    // Family Status — BUG FIX: show name instead of role
-                                    Text(
-                                      'FAMILY STATUS',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                            letterSpacing: 1.2,
-                                          ),
-                                    ),
-                                    const SizedBox(height: 16),
-                                    StreamBuilder<List<Map<String, dynamic>>>(
-                                      stream: safetyRepo.streamActiveMembers(
-                                        profile.familyId,
-                                      ),
-                                      builder: (context, memberSnapshot) {
-                                        if (memberSnapshot.connectionState ==
-                                                ConnectionState.waiting &&
-                                            !emergencyLoad) {
-                                          return const Center(
-                                            child: CircularProgressIndicator(),
-                                          );
-                                        }
-                                        final members =
-                                            memberSnapshot.data ?? [];
-                                        final parents = members
-                                            .where(
-                                              (m) =>
-                                                  m['role'] == 'leader' ||
-                                                  m['role'] == 'monitor',
-                                            )
-                                            .toList();
-
-                                        if (parents.isEmpty) {
-                                          return const Text(
-                                            'No parents online.',
-                                          );
-                                        }
-
-                                        return Column(
-                                          children: parents
-                                              .map(
-                                                (member) => Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                        bottom: 12,
-                                                      ),
-                                                  child: ParentLocationRow(
-                                                    // FIX: Display name, not role
-                                                    name:
-                                                        member['full_name'] ??
-                                                        'Family Member',
-                                                    location:
-                                                        'Active on Shield',
-                                                    // Assuming 'memberLoc' was intended to be this static string or derived elsewhere
-                                                    isOnline: true,
-                                                    // Assuming 'isOnline' was intended to be this static boolean or derived elsewhere
-                                                    avatarUrl:
-                                                        member['avatar_url']
-                                                            as String?,
-                                                  ),
-                                                ),
-                                              )
-                                              .toList(),
-                                        );
-                                      },
-                                    ),
-                                    const SizedBox(height: 100),
-                                  ],
+                                          )
+                                          .toList(),
+                                    );
+                                  },
                                 ),
-                              ),
+                                const SizedBox(height: 100),
+                              ],
                             ),
                           ),
                         ),
-                      ],
-                    );
-                  },
-                  loading: () =>
-                      const Center(child: CircularProgressIndicator()),
-                  error: (e, st) => Center(child: Text('Error: $e')),
-                ),
-              ),
-            ),
+                      ),
+                    ),
+                  ],
+                ],
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, st) => Center(child: Text('Error: $e')),
+          ),
+        ),
+      ),
       // Elder-portal style anchored bottom bar
       bottomNavigationBar: Container(
         color: Colors.white,
@@ -3099,7 +3558,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
         //     });
         //
         //     // Also register this as a well_event to ensure it shows up securely on the stream!
-        //     await Supabase.instance.client.from('well_events').insert({
+        //     await logWellEvent(Supabase.instance.client,{
         //       'family_id': widget.profile.familyId,
         //       'user_id': widget.profile.userId,
         //       'user_name': widget.profile.fullName,
@@ -3644,7 +4103,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                     });
 
                     // ── Insert well_event ────────────────────────────────────────────
-                    await Supabase.instance.client.from('well_events').insert({
+                    await logWellEvent(Supabase.instance.client, {
                       'family_id': widget.profile.familyId,
                       'user_id': widget.profile.userId,
                       'user_name': widget.profile.fullName,

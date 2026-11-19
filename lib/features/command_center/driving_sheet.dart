@@ -105,8 +105,10 @@ class _DrivingSheetState extends ConsumerState<DrivingSheet> {
                     style: TextStyle(color: Colors.grey, fontSize: 12),
                   ),
                 ],
-              ),Spacer(),
-              const Icon(Icons.speed, color: Colors.orange, size: 28),SizedBox(width: 12,),
+              ),
+              Spacer(),
+              const Icon(Icons.speed, color: Colors.orange, size: 28),
+              SizedBox(width: 12),
 
               GestureDetector(
                 onTap: () async {
@@ -284,7 +286,7 @@ class _DrivingSheetState extends ConsumerState<DrivingSheet> {
                               overflow: TextOverflow.ellipsis,
                             ),
                             trailing: Text(
-                              timeStr,
+                              timeStr == "0m ago" ? "Just now" : timeStr,
                               style: const TextStyle(
                                 color: Colors.grey,
                                 fontSize: 11,

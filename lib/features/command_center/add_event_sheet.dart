@@ -7,8 +7,13 @@ import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/data/calendar_provider.dart';
+import '../../main.dart';
+
 class AddEventSheet extends ConsumerStatefulWidget {
-  const AddEventSheet({super.key});
+  final CalendarEvent? event;
+
+  const AddEventSheet({super.key, this.event});
 
   @override
   ConsumerState<AddEventSheet> createState() => _AddEventSheetState();
@@ -39,6 +44,19 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
   @override
   void initState() {
     super.initState();
+    if (widget.event != null) {
+      final event = widget.event!;
+
+      _titleController.text = event.title;
+      _locationController.text = event.location ?? '';
+      _notesController.text = event.notes ?? '';
+
+      _selectedDate = event.eventDatetime.toLocal();
+      _selectedTime = TimeOfDay.fromDateTime(event.eventDatetime.toLocal());
+
+      _eventType = event.eventType ?? 'Personal';
+    }
+
     _fetchFamilyMembers();
   }
 
@@ -56,14 +74,29 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
         setState(() {
           _familyMembers = List<Map<String, dynamic>>.from(res);
           _isLoadingMembers = false;
+
           if (_familyMembers.isNotEmpty) {
-            final me = _familyMembers
-                .where((m) => m['user_id'] == profile.userId)
-                .toList();
-            if (me.isNotEmpty) {
-              _selectedUserId = me.first['user_id'];
+            if (widget.event != null) {
+              final participants = widget.event!.participants;
+
+              if (participants != null && participants.isNotEmpty) {
+                final participantId = participants.first.toString();
+
+                final exists = _familyMembers.any(
+                  (member) => member['user_id'].toString() == participantId,
+                );
+
+                _selectedUserId = exists ? participantId : null;
+              }
             } else {
-              _selectedUserId = _familyMembers.first['user_id'];
+              final me = _familyMembers
+                  .where((m) => m['user_id'] == profile.userId)
+                  .toList();
+              if (me.isNotEmpty) {
+                _selectedUserId = me.first['user_id'];
+              } else {
+                _selectedUserId = _familyMembers.first['user_id'];
+              }
             }
           }
         });
@@ -83,19 +116,46 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
         setState(() => _memberError = !valid);
         return valid;
 
+      // case 2:
+      //   final formValid = _formKey.currentState?.validate() ?? true;
+      //   final dateValid = _selectedDate != null;
+      //   final timeValid = _selectedTime != null;
+      //   setState(() {
+      //     _dateError = !dateValid;
+      //     _timeError = !timeValid;
+      //   });
+      //   return formValid && dateValid && timeValid;
       case 2:
         final formValid = _formKey.currentState?.validate() ?? true;
         final dateValid = _selectedDate != null;
         final timeValid = _selectedTime != null;
+        final tooSoon = _isTooSoon();
         setState(() {
           _dateError = !dateValid;
           _timeError = !timeValid;
+          _tooSoonError = tooSoon;
         });
-        return formValid && dateValid && timeValid;
-
+        return formValid && dateValid && timeValid && !tooSoon;
       default:
         return true;
     }
+  }
+
+  bool _tooSoonError = false;
+
+  DateTime get _minimumAppointmentTime =>
+      DateTime.now().add(const Duration(hours: 1));
+
+  bool _isTooSoon() {
+    if (_selectedDate == null || _selectedTime == null) return false;
+    final selected = DateTime(
+      _selectedDate!.year,
+      _selectedDate!.month,
+      _selectedDate!.day,
+      _selectedTime!.hour,
+      _selectedTime!.minute,
+    );
+    return selected.isBefore(_minimumAppointmentTime);
   }
 
   Future<void> _saveEvent() async {
@@ -117,15 +177,46 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
         _selectedTime!.hour,
         _selectedTime!.minute,
       );
+      final now = DateTime.now();
+      final minimumAppointmentTime = now.add(const Duration(hours: 1));
 
+      if (finalDateTime.isBefore(minimumAppointmentTime)) {
+        //setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _tooSoonError = true;
+          _currentStep = 2;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Appointment must be at least 1 hour from now.'),
+            ),
+          );
+        }
+
+        return;
+      }
       final title = _titleController.text.trim().isNotEmpty
           ? _titleController.text.trim()
           : _eventType;
 
-      await Supabase.instance.client.from('calendar_events').insert({
-        'family_id': profile.familyId,
-        'created_by': profile.userId,
+      // await Supabase.instance.client.from('calendar_events').insert({
+      //   'family_id': profile.familyId,
+      //   'created_by': profile.userId,
+      //   'title': title,
+      //   'event_datetime': finalDateTime.toUtc().toIso8601String(),
+      //   'location': _locationController.text.trim().isEmpty
+      //       ? null
+      //       : _locationController.text.trim(),
+      //   'participants': _selectedUserId != null ? [_selectedUserId] : [],
+      //   'notes': _notesController.text.trim().isEmpty
+      //       ? null
+      //       : _notesController.text.trim(),
+      // });
+      final eventData = {
         'title': title,
+        'event_type': _eventType,
         'event_datetime': finalDateTime.toUtc().toIso8601String(),
         'location': _locationController.text.trim().isEmpty
             ? null
@@ -134,8 +225,22 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
         'notes': _notesController.text.trim().isEmpty
             ? null
             : _notesController.text.trim(),
-      });
+      };
 
+      if (widget.event == null) {
+        // CREATE
+        await Supabase.instance.client.from('calendar_events').insert({
+          'family_id': profile.familyId,
+          'created_by': profile.userId,
+          ...eventData,
+        });
+      } else {
+        // EDIT
+        await Supabase.instance.client
+            .from('calendar_events')
+            .update(eventData)
+            .eq('id', widget.event!.id);
+      }
       int level =
           100; // Safe default for simulators and aggressive background iOS policies
       try {
@@ -148,10 +253,11 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
       }
 
       // Emit to family network
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'event_type': 'calendar',
+        'user_name': profile.fullName,
         'title': 'New Event Scheduled',
         'battery_level': level,
         'description':
@@ -161,8 +267,12 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
       if (mounted) {
         context.pop();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Appointment Scheduled!'),
+          SnackBar(
+            content: Text(
+              widget.event == null
+                  ? 'Appointment Scheduled!'
+                  : 'Appointment Updated!',
+            ),
             backgroundColor: ShieldColors.safeZoneGreen,
           ),
         );
@@ -180,21 +290,40 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
   }
 
   Future<void> _pickDate() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final minDate = DateUtils.dateOnly(_minimumAppointmentTime);
+    var initial = _selectedDate ?? minDate;
+    if (initial.isBefore(minDate)) initial = minDate;
+
     final picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate ?? DateTime.now(),
-      firstDate: DateTime.now(),
+      initialDate: initial,
+      firstDate: minDate,
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
     if (picked != null && mounted) {
       setState(() {
         _selectedDate = picked;
         _dateError = false;
+        _tooSoonError = _isTooSoon();
       });
     }
+    // final picked = await showDatePicker(
+    //   context: context,
+    //   initialDate: _selectedDate ?? DateTime.now(),
+    //   firstDate: DateTime.now(),
+    //   lastDate: DateTime.now().add(const Duration(days: 365)),
+    // );
+    // if (picked != null && mounted) {
+    //   setState(() {
+    //     _selectedDate = picked;
+    //     _dateError = false;
+    //   });
+    // }
   }
 
   Future<void> _pickTime() async {
+    FocusManager.instance.primaryFocus?.unfocus();
     final picked = await showTimePicker(
       context: context,
       initialTime: _selectedTime ?? TimeOfDay.now(),
@@ -203,6 +332,7 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
       setState(() {
         _selectedTime = picked;
         _timeError = false;
+        _tooSoonError = _isTooSoon();
       });
     }
   }
@@ -217,318 +347,357 @@ class _AddEventSheetState extends ConsumerState<AddEventSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: ShieldColors.backgroundWhite,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          widget.event == null
+              ? 'New Event / Appointment'
+              : 'Edit Event / Appointment',
+          style: Theme.of(
+            context,
+          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+        ),
       ),
-      padding: EdgeInsets.fromLTRB(
-        24,
-        12,
-        24,
-        MediaQuery.of(context).viewInsets.bottom + 32,
-      ),
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.9,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40,
-            height: 4,
-            margin: const EdgeInsets.only(bottom: 24),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade300,
-              borderRadius: BorderRadius.circular(2),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Container(
+            decoration: const BoxDecoration(
+              color: ShieldColors.backgroundWhite,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
-          ),
-          Text(
-            'New Event / Appointment',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: Stepper(
-              type: StepperType.vertical,
-              physics: const ClampingScrollPhysics(),
-              currentStep: _currentStep,
-              controlsBuilder: (context, details) {
-                return Padding(
-                  padding: const EdgeInsets.only(top: 16.0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: _isLoading
-                              ? null
-                              : (_currentStep == 3
-                                    ? _saveEvent
-                                    : details.onStepContinue),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: ShieldColors.activeTeal,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: ShieldDesign.roundedTwelve,
-                            ),
-                          ),
-                          child: _isLoading
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : Text(
-                                  _currentStep == 3
-                                      ? 'Schedule Event'
-                                      : 'Continue',
-                                ),
-                        ),
-                      ),
-                      if (_currentStep > 0) ...[
-                        const SizedBox(width: 8),
-                        TextButton(
-                          onPressed: _isLoading ? null : details.onStepCancel,
-                          child: const Text('Back'),
-                        ),
-                      ],
-                    ],
-                  ),
-                );
-              },
-              onStepContinue: () {
-                if (!_validateStep(_currentStep)) return;
-                if (_currentStep < 3) {
-                  setState(() => _currentStep += 1);
-                }
-              },
-              onStepCancel: () {
-                if (_currentStep > 0) {
-                  setState(() => _currentStep -= 1);
-                }
-              },
-              steps: [
-                // ---------------------------------------------------------
-                // Step 0 — Select Member
-                // ---------------------------------------------------------
-                Step(
-                  title: const Text('Select Member'),
-                  isActive: _currentStep >= 0,
-                  content: _isLoadingMembers
-                      ? const CircularProgressIndicator()
-                      : DropdownButtonFormField<String>(
-                          value: _selectedUserId,
-                          decoration: InputDecoration(
-                            border: OutlineInputBorder(
-                              borderRadius: ShieldDesign.roundedTwelve,
-                            ),
-                            prefixIcon: const Icon(Icons.person),
-                            errorText: _memberError
-                                ? 'Please select a member'
-                                : null,
-                          ),
-                          items: _familyMembers.map((member) {
-                            final profileData =
-                                member['profiles'] as Map<String, dynamic>?;
-                            final name =
-                                profileData?['full_name'] ??
-                                profileData?['email'] ??
-                                'Member';
-                            final role = member['role'];
-                            return DropdownMenuItem<String>(
-                              value: member['user_id'] as String,
-                              child: Text('$name ($role)'),
-                            );
-                          }).toList(),
-                          onChanged: (val) {
-                            setState(() {
-                              _selectedUserId = val;
-                              _memberError = false;
-                            });
-                          },
-                        ),
-                ),
-
-                // ---------------------------------------------------------
-                // Step 1 — Event Type
-                // ---------------------------------------------------------
-                Step(
-                  title: const Text('Event Type'),
-                  isActive: _currentStep >= 1,
-                  content: DropdownButtonFormField<String>(
-                    value: _eventType,
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(
-                        borderRadius: ShieldDesign.roundedTwelve,
-                      ),
-                      prefixIcon: const Icon(Icons.category),
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'Doctor Appointment',
-                        child: Text('Doctor Appointment'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'School Event',
-                        child: Text('School Event'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Personal',
-                        child: Text('Personal'),
-                      ),
-                    ],
-                    onChanged: (val) {
-                      setState(() => _eventType = val ?? 'Personal');
-                    },
-                  ),
-                ),
-
-                // ---------------------------------------------------------
-                // Step 2 — Details
-                // ---------------------------------------------------------
-                Step(
-                  title: const Text('Details'),
-                  isActive: _currentStep >= 2,
-                  content: Form(
-                    key: _formKey,
-                    autovalidateMode: AutovalidateMode.onUserInteraction,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        TextFormField(
-                          controller: _titleController,
-                          decoration: InputDecoration(
-                            labelText: 'Custom Title (Optional)',
-                            border: OutlineInputBorder(
-                              borderRadius: ShieldDesign.roundedTwelve,
-                            ),
-                          ),
-                          validator: (value) {
-                            if (value != null && value.trim().length > 60) {
-                              return 'Title must be under 60 characters';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _locationController,
-                          decoration: InputDecoration(
-                            labelText: 'Location / Clinic',
-                            border: OutlineInputBorder(
-                              borderRadius: ShieldDesign.roundedTwelve,
-                            ),
-                            prefixIcon: const Icon(Icons.place),
-                          ),
-                          validator: (value) {
-                            if (value != null && value.trim().length > 100) {
-                              return 'Location must be under 100 characters';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: InkWell(
+            // padding: EdgeInsets.fromLTRB(
+            //   12,
+            //   12,
+            //   12,
+            //   MediaQuery.of(context).viewInsets.bottom + 32,
+            // ),
+            // constraints: BoxConstraints(
+            //   maxHeight: MediaQuery.of(context).size.height * 0.9,
+            // ),
+            child: Column(
+              // mainAxisSize: MainAxisSize.min,
+              children: [
+                // Container(
+                //   width: 40,
+                //   height: 4,
+                //   margin: const EdgeInsets.only(bottom: 24),
+                //   decoration: BoxDecoration(
+                //     color: Colors.grey.shade300,
+                //     borderRadius: BorderRadius.circular(2),
+                //   ),
+                // ),
+                const SizedBox(height: 16),
+                Stepper(
+                  type: StepperType.vertical,
+                  physics: const ClampingScrollPhysics(),
+                  currentStep: _currentStep,
+                  controlsBuilder: (context, details) {
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 16.0),
+                      child: Row(
+                        children: [
+                          ElevatedButton(
+                            onPressed: _isLoading
+                                ? null
+                                : (_currentStep == 3
+                                      ? _saveEvent
+                                      : details.onStepContinue),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: ShieldColors.activeTeal,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
                                 borderRadius: ShieldDesign.roundedTwelve,
-                                onTap: _pickDate,
-                                child: InputDecorator(
-                                  decoration: InputDecoration(
-                                    labelText: 'Date',
-                                    border: OutlineInputBorder(
-                                      borderRadius: ShieldDesign.roundedTwelve,
-                                    ),
-                                    prefixIcon: const Icon(
-                                      Icons.calendar_today,
-                                    ),
-                                    errorText: _dateError
-                                        ? 'Date is required'
-                                        : null,
-                                  ),
-                                  child: Text(
-                                    _selectedDate == null
-                                        ? 'Select Date'
-                                        : DateFormat.yMd().format(
-                                            _selectedDate!,
-                                          ),
-                                  ),
-                                ),
                               ),
                             ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Text(
+                                    _currentStep == 3
+                                        ? (widget.event == null
+                                              ? 'Schedule Event'
+                                              : 'Update Event')
+                                        : 'Continue',
+                                  ),
+                          ),
+                          if (_currentStep > 0) ...[
                             const SizedBox(width: 8),
-                            Expanded(
-                              child: InkWell(
-                                borderRadius: ShieldDesign.roundedTwelve,
-                                onTap: _pickTime,
-                                child: InputDecorator(
-                                  decoration: InputDecoration(
-                                    labelText: 'Time',
-                                    border: OutlineInputBorder(
-                                      borderRadius: ShieldDesign.roundedTwelve,
-                                    ),
-                                    prefixIcon: const Icon(Icons.access_time),
-                                    errorText: _timeError
-                                        ? 'Time is required'
-                                        : null,
-                                  ),
+                            TextButton(
+                              onPressed: _isLoading
+                                  ? null
+                                  : details.onStepCancel,
+                              child: const Text('Back'),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  },
+                  onStepContinue: () {
+                    if (!_validateStep(_currentStep)) return;
+                    if (_currentStep < 3) {
+                      setState(() => _currentStep += 1);
+                    }
+                  },
+                  onStepCancel: () {
+                    if (_currentStep > 0) {
+                      setState(() => _currentStep -= 1);
+                    }
+                  },
+                  steps: [
+                    // ---------------------------------------------------------
+                    // Step 0 — Select Member
+                    // ---------------------------------------------------------
+                    Step(
+                      title: const Text('Select Member'),
+                      isActive: _currentStep >= 0,
+                      content: _isLoadingMembers
+                          ? const CircularProgressIndicator()
+                          : DropdownButtonFormField<String>(
+                              isExpanded: true,
+                              value: _selectedUserId,
+                              decoration: InputDecoration(
+                                border: OutlineInputBorder(
+                                  borderRadius: ShieldDesign.roundedTwelve,
+                                ),
+                                prefixIcon: const Icon(Icons.person),
+                                errorText: _memberError
+                                    ? 'Please select a member'
+                                    : null,
+                              ),
+                              items: _familyMembers.map((member) {
+                                final profileData =
+                                    member['profiles'] as Map<String, dynamic>?;
+                                final name =
+                                    profileData?['full_name'] ??
+                                    profileData?['email'] ??
+                                    'Member';
+                                final role = member['role'];
+                                return DropdownMenuItem<String>(
+                                  value: member['user_id'] as String,
                                   child: Text(
-                                    _selectedTime == null
-                                        ? 'Select Time'
-                                        : _selectedTime!.format(context),
+                                    '$name ($role)',
+                                    overflow: TextOverflow.ellipsis,
+
+                                    maxLines: 1,
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                setState(() {
+                                  _selectedUserId = val;
+                                  _memberError = false;
+                                });
+                              },
+                            ),
+                    ),
+
+                    // ---------------------------------------------------------
+                    // Step 1 — Event Type
+                    // ---------------------------------------------------------
+                    Step(
+                      title: const Text('Event Type'),
+                      isActive: _currentStep >= 1,
+                      content: DropdownButtonFormField<String>(
+                        value: _eventType,
+                        decoration: InputDecoration(
+                          border: OutlineInputBorder(
+                            borderRadius: ShieldDesign.roundedTwelve,
+                          ),
+                          prefixIcon: const Icon(Icons.category),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'Doctor Appointment',
+                            child: Text('Doctor Appointment'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'School Event',
+                            child: Text('School Event'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Personal',
+                            child: Text('Personal'),
+                          ),
+                        ],
+                        onChanged: (val) {
+                          setState(() => _eventType = val ?? 'Personal');
+                        },
+                      ),
+                    ),
+
+                    // ---------------------------------------------------------
+                    // Step 2 — Details
+                    // ---------------------------------------------------------
+                    Step(
+                      title: const Text('Details'),
+                      isActive: _currentStep >= 2,
+                      content: Form(
+                        key: _formKey,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SizedBox(height: 10),
+                            TextFormField(
+                              controller: _titleController,
+                              decoration: InputDecoration(
+                                labelText: 'Custom Title (Optional)',
+                                border: OutlineInputBorder(
+                                  borderRadius: ShieldDesign.roundedTwelve,
+                                ),
+                              ),
+                              validator: (value) {
+                                if (value != null && value.trim().length > 60) {
+                                  return 'Title must be under 60 characters';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 18),
+                            TextFormField(
+                              controller: _locationController,
+                              decoration: InputDecoration(
+                                labelText: 'Location / Clinic',
+                                border: OutlineInputBorder(
+                                  borderRadius: ShieldDesign.roundedTwelve,
+                                ),
+                                prefixIcon: const Icon(Icons.place),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return 'Location field is required';
+                                }
+                                if (value != null &&
+                                    value.trim().length > 100) {
+                                  return 'Location must be under 100 characters';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 18),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: InkWell(
+                                    borderRadius: ShieldDesign.roundedTwelve,
+                                    onTap: _pickDate,
+                                    child: InputDecorator(
+                                      decoration: InputDecoration(
+                                        labelText: 'Date',
+                                        border: OutlineInputBorder(
+                                          borderRadius:
+                                              ShieldDesign.roundedTwelve,
+                                        ),
+                                        prefixIcon: const Icon(
+                                          Icons.calendar_today,
+                                        ),
+                                        errorText: _dateError
+                                            ? 'Date is required'
+                                            : null,
+                                      ),
+                                      child: Text(
+                                        _selectedDate == null
+                                            ? 'Select Date'
+                                            : DateFormat.yMd().format(
+                                                _selectedDate!,
+                                              ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: InkWell(
+                                    borderRadius: ShieldDesign.roundedTwelve,
+                                    onTap: _pickTime,
+                                    child: InputDecorator(
+                                      decoration: InputDecoration(
+                                        labelText: 'Time',
+                                        border: OutlineInputBorder(
+                                          borderRadius:
+                                              ShieldDesign.roundedTwelve,
+                                        ),
+                                        prefixIcon: const Icon(
+                                          Icons.access_time,
+                                        ),
+                                        errorText: _timeError
+                                            ? 'Time is required'
+                                            : null,
+                                      ),
+                                      child: Text(
+                                        _selectedTime == null
+                                            ? 'Select Time'
+                                            : _selectedTime!.format(context),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (_tooSoonError)
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  top: 8,
+                                  left: 12,
+                                ),
+                                child: Text(
+                                  'Appointment must be at least 1 hour from now.',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error,
+                                    fontSize: 12,
                                   ),
                                 ),
                               ),
+                            const SizedBox(height: 18),
+                            TextFormField(
+                              controller: _notesController,
+                              maxLines: 2,
+                              decoration: InputDecoration(
+                                labelText: 'Notes',
+                                alignLabelWithHint: true,
+                                border: OutlineInputBorder(
+                                  borderRadius: ShieldDesign.roundedTwelve,
+                                ),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return 'Notes field is required';
+                                }
+                                return null;
+                              },
                             ),
                           ],
                         ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _notesController,
-                          maxLines: 2,
-                          decoration: InputDecoration(
-                            labelText: 'Notes',
-                            alignLabelWithHint: true,
-                            border: OutlineInputBorder(
-                              borderRadius: ShieldDesign.roundedTwelve,
-                            ),
-                          ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Notes field is required';
-                            }
-                            return null;
-                          },
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
 
-                // ---------------------------------------------------------
-                // Step 3 — Confirm
-                // ---------------------------------------------------------
-                Step(
-                  title: const Text('Confirm'),
-                  isActive: _currentStep >= 3,
-                  content: Text(
-                    'Will schedule $_eventType for '
-                    '${_selectedDate != null ? DateFormat.yMd().format(_selectedDate!) : '...'} '
-                    'at ${_selectedTime != null ? _selectedTime!.format(context) : '...'}. '
-                    'Tap Schedule to save to Family Calendar and alert participants.',
-                  ),
+                    // ---------------------------------------------------------
+                    // Step 3 — Confirm
+                    // ---------------------------------------------------------
+                    Step(
+                      title: const Text('Confirm'),
+                      isActive: _currentStep >= 3,
+                      content: Text(
+                        'Will schedule $_eventType for '
+                        '${_selectedDate != null ? DateFormat.yMd().format(_selectedDate!) : '...'} '
+                        'at ${_selectedTime != null ? _selectedTime!.format(context) : '...'}. '
+                        'Tap Schedule to save to Family Calendar and alert participants.',
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }

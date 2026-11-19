@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/features/command_center/checkin_history.dart';
 import 'package:well_check_v3/features/command_center/medication_history.dart';
@@ -15,10 +17,20 @@ import 'package:well_check_v3/features/command_center/campus_watch_sheet.dart';
 import 'package:well_check_v3/features/messaging/family_chat_screen.dart';
 import 'package:well_check_v3/features/profile/profile_settings_view.dart';
 
+import '../../../services/life360_location_service.dart';
+import '../../command_center/calendar_sheet.dart';
+import '../../tools/safe_zone_config_screen.dart';
+import '../../driving_detection/life360_screen.dart';
+
 class CommandCenterSheet extends StatefulWidget {
   bool? fromLeader = false;
+  bool? fromMonitor = false;
 
-  CommandCenterSheet({super.key, this.fromLeader = false});
+  CommandCenterSheet({
+    super.key,
+    this.fromLeader = false,
+    this.fromMonitor = false,
+  });
 
   @override
   State<CommandCenterSheet> createState() => _CommandCenterSheetState();
@@ -69,6 +81,23 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
             true,
           ),
         ),
+      if (widget.fromLeader == true)
+        _CmdItem(
+          Icons.edit_calendar_sharp,
+          'Calender',
+          'Schedule appointments',
+          ShieldColors.activeTeal,
+          () {
+            //  Navigator.of(context).pop();
+            // _pushSheet(context, CalendarSheet(), true);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => Scaffold(body: CalendarSheet()),
+              ),
+            );
+          },
+        ),
 
       _CmdItem(
         Icons.calendar_month,
@@ -105,7 +134,14 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
         const Color(0xFFE6894E),
         () {
           context.pop();
-          context.push('/safe-zone-config', extra: widget.fromLeader);
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) =>
+                  SafeZoneConfigScreen(fromLeader: widget.fromLeader ?? false),
+            ),
+          );
+          // context.push('/safe-zone-config', extra: widget.fromLeader);
         },
       ),
       _CmdItem(
@@ -140,18 +176,102 @@ class _CommandCenterSheetState extends State<CommandCenterSheet> {
       //     true,
       //   ),
       // ),
-      _CmdItem(
-        Icons.drive_eta,
-        'Driving',
-        'Driving safety',
-
-        Colors.orange,
-        () => _pushSheet(context, const DrivingSheet(), true),
-      ),
+      // _CmdItem(
+      //   Icons.drive_eta,
+      //   'Driving',
+      //   'Driving safety',
+      //
+      //   Colors.orange,
+      //   //      () => _pushSheet(context, const DrivingSheet(), true),
+      //   () async {
+      //     // late final Life360LocationService locationService;
+      //     // locationService = Life360LocationService(Supabase.instance.client);
+      //     // final prefs = await SharedPreferences.getInstance();
+      //     // final familyId = prefs.getString('last_family_id');
+      //     // Navigator.push(
+      //     //   context,
+      //     //   MaterialPageRoute(
+      //     //     builder: (context) => StreamBuilder<List<MemberLocation>>(
+      //     //       stream: locationService.watchMembers(familyId ?? ""),
+      //     //       builder: (context, snapshot) {
+      //     //         if (!snapshot.hasData) {
+      //     //           return const Scaffold(
+      //     //             body: Center(child: CircularProgressIndicator()),
+      //     //           );
+      //     //         }
+      //     //         return Life360MapScreen(members: snapshot.data!);
+      //     //       },
+      //     //     ),
+      //     //   ),
+      //     // );
+      //     if (widget.fromLeader == true || widget.fromMonitor == true) {
+      //       late final Life360LocationService locationService;
+      //       locationService = Life360LocationService(Supabase.instance.client);
+      //
+      //       final prefs = await SharedPreferences.getInstance();
+      //       final familyId = prefs.getString('last_family_id');
+      //
+      //       Navigator.push(
+      //         context,
+      //         MaterialPageRoute(
+      //           builder: (context) => StreamBuilder<List<MemberLocation>>(
+      //             stream: locationService.watchMembers(familyId ?? ""),
+      //             builder: (context, snapshot) {
+      //               if (!snapshot.hasData) {
+      //                 return const Scaffold(
+      //                   body: Center(child: CircularProgressIndicator()),
+      //                 );
+      //               }
+      //
+      //               return Life360MapScreen(
+      //                 members: snapshot.data!,
+      //                 showAllMembers: true,
+      //               );
+      //             },
+      //           ),
+      //         ),
+      //       );
+      //     } else {
+      //       // Non-leader
+      //       late final Life360LocationService locationService;
+      //       locationService = Life360LocationService(Supabase.instance.client);
+      //
+      //       final prefs = await SharedPreferences.getInstance();
+      //       final familyId = prefs.getString('last_family_id');
+      //
+      //       final userId = Supabase.instance.client.auth.currentUser?.id;
+      //
+      //       Navigator.push(
+      //         context,
+      //         MaterialPageRoute(
+      //           builder: (context) => StreamBuilder<List<MemberLocation>>(
+      //             stream: locationService.watchMembers(familyId ?? ""),
+      //             builder: (context, snapshot) {
+      //               if (!snapshot.hasData) {
+      //                 return const Scaffold(
+      //                   body: Center(child: CircularProgressIndicator()),
+      //                 );
+      //               }
+      //
+      //               final myLocation = snapshot.data!
+      //                   .where((member) => member.id == userId)
+      //                   .toList();
+      //
+      //               return Life360MapScreen(
+      //                 members: myLocation,
+      //                 showAllMembers: false,
+      //               );
+      //             },
+      //           ),
+      //         ),
+      //       );
+      //     }
+      //   },
+      // ),
       _CmdItem(
         Icons.school,
         'Campus Watch',
-        'School updates',
+        'Zone updates',
         const Color(0xFF1ABC9C),
         () => _pushSheet(
           context,

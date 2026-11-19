@@ -12,6 +12,7 @@ class UserProfile {
   final String? phone;
   final String? fullName; // From joined profiles view
   final String? avatarUrl; // From joined profiles view
+  final String? referralCode;
 
   UserProfile({
     required this.userId,
@@ -20,6 +21,7 @@ class UserProfile {
     this.fullName,
     this.phone,
     this.avatarUrl,
+    this.referralCode,
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -30,7 +32,10 @@ class UserProfile {
       phone: json['phone'] as String?,
       fullName: json['full_name'] as String?,
       // May be null if not joined
-      avatarUrl: json['avatar_url'] as String?, // May be null if not joined
+      avatarUrl: json['avatar_url'] as String?,
+      // May be null if not joined
+      referralCode:
+          json['referral_code'] as String?, // May be null if not joined
     );
   }
 }
@@ -47,7 +52,7 @@ Future<UserProfile?> currentUserProfile(Ref ref) async {
   try {
     final response = await supabase
         .from('family_members')
-        .select('*, profiles(full_name, avatar_url)')
+        .select('*, profiles(full_name, avatar_url,referral_code)')
         .eq('user_id', userId)
         .limit(1)
         .maybeSingle();
@@ -57,6 +62,7 @@ Future<UserProfile?> currentUserProfile(Ref ref) async {
       final profileData = response['profiles'] as Map<String, dynamic>?;
       response['full_name'] = profileData?['full_name'];
       response['avatar_url'] = profileData?['avatar_url'];
+      response['referral_code'] = profileData?['referral_code'];
 
       final profile = UserProfile.fromJson(response);
 
@@ -66,7 +72,7 @@ Future<UserProfile?> currentUserProfile(Ref ref) async {
       await prefs.setString('last_family_id', profile.familyId);
       await prefs.setString('last_user_name', profile.fullName ?? "");
       await prefs.setString('last_user_role', profile.role ?? "");
-
+      await prefs.setString('last_user_profile', profile.avatarUrl ?? "");
       return profile;
     }
   } catch (e) {

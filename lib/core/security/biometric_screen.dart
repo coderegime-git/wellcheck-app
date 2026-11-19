@@ -30,14 +30,15 @@ class _BiometricGateScreenState extends ConsumerState<BiometricGateScreen> {
   Future<void> _checkAndAuthenticate() async {
     final prefs = await SharedPreferences.getInstance();
     final biometricEnabled = prefs.getBool('priv_biometric') ?? false;
-
+    //
     if (!biometricEnabled) {
       // Biometric not required — show dashboard directly
-      if (mounted)
+      if (mounted) {
         setState(() {
           _authenticated = true;
           _checking = false;
         });
+      }
       return;
     }
 
@@ -94,23 +95,13 @@ class _BiometricGateScreenState extends ConsumerState<BiometricGateScreen> {
   Widget build(BuildContext context) {
     if (_checking) {
       return const Scaffold(
-        backgroundColor: Color(0xFF131A2A),
+        backgroundColor: Colors.white,
         body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.fingerprint, size: 64, color: ShieldColors.activeTeal),
-              SizedBox(height: 24),
-              Text(
-                'Verifying Identity...',
-                style: TextStyle(color: Colors.white70),
-              ),
-            ],
-          ),
+          child: CircularProgressIndicator(color: ShieldColors.activeTeal),
         ),
       );
     }
-
+    //
     if (!_authenticated) {
       return const Scaffold(
         backgroundColor: Color(0xFF131A2A),

@@ -50,7 +50,7 @@ class _AuraAssistantScreenState extends State<AuraAssistantScreen>
         body: {
           'prompt': prompt,
           'context':
-              'Well-Check V3 Flutter Application. User interacting via Aura Screen.',
+              'Well-Check  Flutter Application. User interacting via Aura Screen.',
         },
       );
 

@@ -14,6 +14,8 @@ class ShieldColors {
   static const Color textBody = Color(0xFF1F2937);
   static const Color textLabel = Color(0xFF374151);
   static const Color tealWash = Color(0x11007F80);
+  static const Color pink = Colors.pink;
+  static const Color purple = Colors.purple;
 }
 
 class ShieldDesign {
@@ -24,6 +26,7 @@ class ShieldDesign {
 
   static final ThemeData lightTheme = ThemeData(
     useMaterial3: true,
+    // fontFamily: 'Poppins',
     colorScheme: ColorScheme.fromSeed(
       seedColor: ShieldColors.activeTeal,
       primary: ShieldColors.activeTeal,

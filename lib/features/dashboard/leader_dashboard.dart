@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:well_check_v3/core/data/auth_repository.dart';
@@ -31,6 +32,7 @@ import 'package:well_check_v3/features/tools/safe_zone_config_screen.dart';
 import '../../core/data/health_repository.dart';
 import '../../core/navigation/shield_router.dart';
 import '../../core/notifications/push_notification_service.dart';
+import '../../services/referral_service.dart';
 import '../command_center/check_in_sheet.dart';
 import '../command_center/medications_sheet.dart';
 import '../safety/services/location_service.dart';
@@ -200,6 +202,8 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
     if (!mounted) return;
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // final status = await Permission.activityRecognition.request(); //
+      // print("statusstatus$status");
       try {
         final profile = await ref.read(currentUserProfileProvider.future);
         if (profile == null) return;
@@ -289,6 +293,8 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
     }
   }
 
+  bool isClicked = false;
+
   Future<void> _showGuidedSetupSheet(BuildContext context, profile) async {
     await showModalBottomSheet(
       context: context,
@@ -298,16 +304,19 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
       isDismissible: false,
       builder: (_) => _GuidedSetupSheet(
         onInviteMembers: () {
-          Navigator.pop(context);
+          // Navigator.pop(context);
           showDialog(
             context: context,
             builder: (context) => const InviteMemberDialog(),
           );
         },
         onAddMedication: () {
-          Navigator.pop(context);
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            showModalBottomSheet(
+          if (isClicked) return;
+          //Navigator.pop(context);
+          isClicked = true;
+          //Navigator.pop(context);
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            await showModalBottomSheet(
               context: context,
               useSafeArea: true,
               isScrollControlled: true,
@@ -318,14 +327,17 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                 },
               ),
             );
-
+            isClicked = false;
             //  Navigator.push(context, MaterialPageRoute(builder: (context)=>sheet));
           });
         },
         onScheduleCheckIn: () {
-          Navigator.pop(context);
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            showModalBottomSheet(
+          if (isClicked) return;
+          //  Navigator.pop(context);
+          isClicked = true;
+
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            await showModalBottomSheet(
               context: context,
               useSafeArea: true,
               isScrollControlled: true,
@@ -336,12 +348,12 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
                 },
               ),
             );
-
+            isClicked = false;
             //  Navigator.push(context, MaterialPageRoute(builder: (context)=>sheet));
           });
         },
         onOpenCommandCenter: () {
-          Navigator.pop(context);
+          //Navigator.pop(context);
           showModalBottomSheet(
             context: context,
             isScrollControlled: true,
@@ -608,1331 +620,1349 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
     final profileAsync = ref.watch(currentUserProfileProvider);
     final medicationsAsync = ref.watch(familyMedicationsProvider);
 
-    return isLoad
+    return /*isLoad
         ? Scaffold(
             backgroundColor: Colors.white,
             body: Center(child: CircularProgressIndicator()),
           )
-        : Scaffold(
-            backgroundColor: ShieldColors.activeTeal,
-            body: SafeArea(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        :*/ Scaffold(
+      backgroundColor: ShieldColors.activeTeal,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(height: 8),
+
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
                 children: [
-                  SizedBox(height: 8),
-
-                  Container(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Row(
-                      children: [
-                        Image.asset('assets/logo.png', height: 40, width: 40),
-                        SizedBox(width: 6),
-                        Text(
-                          "Well-Check",
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(
-                                color: ShieldColors.backgroundWhite,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                        ),
-                        Spacer(),
-                        Container(
-                          padding: EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.grey.shade200),
-                          ),
-                          child: GestureDetector(
-                            onTap: () {
-                              // showModalBottomSheet(
-                              //   context: context,
-                              //   isScrollControlled: true,
-                              //   backgroundColor: Colors.transparent,
-                              //   builder: (_) => const ProfileSettingsView(),
-                              // );
-                              showModalBottomSheet(
-                                context: context,
-                                isScrollControlled: true,
-                                backgroundColor: Colors.transparent,
-                                builder: (_) {
-                                  return DraggableScrollableSheet(
-                                    initialChildSize: 0.85,
-                                    minChildSize: 0.5,
-                                    maxChildSize: 0.95,
-                                    expand: false,
-                                    builder: (_, controller) {
-                                      return SingleChildScrollView(
-                                        controller: controller,
-                                        child: const ProfileSettingsView(),
-                                      );
-                                    },
-                                  );
-                                },
-                              );
-                            },
-                            child: Icon(
-                              Icons.menu,
-                              color: Colors.white,
-                              size: 18,
-                            ),
-                          ),
-                        ),
-                      ],
+                  Image.asset('assets/logo.png', height: 40, width: 40),
+                  SizedBox(width: 6),
+                  Text(
+                    "Well-Check",
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: ShieldColors.backgroundWhite,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
                     ),
                   ),
-                  SizedBox(height: 12),
-                  // Header — Bug 1: Responsive scaling, Bug 2: Working notification bell
+                  Spacer(),
                   Container(
+                    padding: EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(24),
-                        topRight: Radius.circular(24),
-                      ),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.grey.shade200),
                     ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24.0,
-                      vertical: 16.0,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              profileAsync.when(
-                                data: (profile) {
-                                  final firstName =
-                                      profile?.fullName?.split(' ').first ??
-                                      'Leader';
-                                  return Text(
-                                    'Welcome, $firstName.',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          color: ShieldColors.textBody,
-                                        ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  );
-                                },
-                                loading: () => Text(
-                                  'Welcome back...',
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.bold,
-                                        color: ShieldColors.textBody,
-                                      ),
-                                ),
-                                error: (e, st) => Text(
-                                  'Welcome, Leader.',
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.bold,
-                                        color: ShieldColors.textBody,
-                                      ),
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.privacy_tip,
-                                    color: ShieldColors.activeTeal,
-                                    size: 22,
-                                  ),
-                                  SizedBox(width: 5),
-                                  Text(
-                                    'The Shield is active',
-                                    style: Theme.of(context).textTheme.bodySmall
-                                        ?.copyWith(
-                                          color: ShieldColors.textLabel,
-                                        ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            profileAsync.when(
-                              data: (profile) {
-                                print(profile!.avatarUrl);
-                                print("avatarUrl");
-                                return profile != null &&
-                                        profile!.avatarUrl != null
-                                    ? CircleAvatar(
-                                        radius: 35,
-                                        backgroundColor:
-                                            ShieldColors.activeTeal,
-
-                                        backgroundImage: CachedNetworkImageProvider(
-                                          '${profile!.avatarUrl}?t=${DateTime.now().millisecondsSinceEpoch}',
-                                        ),
-                                      )
-                                    : CircleAvatar(
-                                        backgroundColor:
-                                            ShieldColors.activeTeal,
-
-                                        radius: 35,
-                                        child: Icon(
-                                          size: 35,
-                                          Icons.person,
-                                          color: Colors.white,
-                                        ),
-                                      );
+                    child: GestureDetector(
+                      onTap: () {
+                        // showModalBottomSheet(
+                        //   context: context,
+                        //   isScrollControlled: true,
+                        //   backgroundColor: Colors.transparent,
+                        //   builder: (_) => const ProfileSettingsView(),
+                        // );
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          backgroundColor: Colors.transparent,
+                          builder: (_) {
+                            return DraggableScrollableSheet(
+                              initialChildSize: 0.85,
+                              minChildSize: 0.5,
+                              maxChildSize: 0.95,
+                              expand: false,
+                              builder: (_, controller) {
+                                return SingleChildScrollView(
+                                  controller: controller,
+                                  child: const ProfileSettingsView(),
+                                );
                               },
-                              loading: () => SizedBox.shrink(),
-                              error: (e, st) => SizedBox.shrink(),
-                            ),
-                            SizedBox(width: 10),
-                            Container(
-                              padding: EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: ShieldDesign.roundedTwelve,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.05),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: GestureDetector(
-                                child: const Icon(
-                                  size: 20,
-                                  Icons.person_add_alt_1,
-                                  color: ShieldColors.activeTeal,
-                                ),
-                                onTap: () {
-                                  showDialog(
-                                    context: context,
-                                    builder: (context) =>
-                                        const InviteMemberDialog(),
-                                  );
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            // Bug 2: Notification bell now shows recent events
-                            Container(
-                              padding: EdgeInsets.all(10),
-
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: ShieldDesign.roundedTwelve,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.05),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: profileAsync.value == null
-                                  ? GestureDetector(
-                                      child: const Icon(
-                                        size: 20,
-
-                                        Icons.notifications_none,
-                                        color: ShieldColors.textBody,
-                                      ),
-                                      onTap: () {},
-                                    )
-                                  : StreamBuilder<List<Map<String, dynamic>>>(
-                                      stream: ref
-                                          .watch(safetyRepositoryProvider)
-                                          .streamFamilyEvents(
-                                            profileAsync.value!.familyId,
-                                          ),
-                                      builder: (context, snapshot) {
-                                        return FutureBuilder(
-                                          future: SharedPreferences.getInstance()
-                                              .then(
-                                                (p) => p.getString(
-                                                  'last_notification_opened',
-                                                ),
-                                              ),
-                                          builder: (context, prefSnap) {
-                                            final lastSeen = DateTime.tryParse(
-                                              prefSnap.data ?? '',
-                                            );
-                                            final events = snapshot.data ?? [];
-                                            final hasUnread = events.any((e) {
-                                              final dt = DateTime.tryParse(
-                                                e['created_at'] ?? '',
-                                              );
-
-                                              if (dt == null) return false;
-
-                                              if (lastSeen == null) return true;
-
-                                              return dt.isAfter(lastSeen);
-                                            });
-                                            return Stack(
-                                              alignment: Alignment.topRight,
-                                              children: [
-                                                GestureDetector(
-                                                  child: const Icon(
-                                                    size: 20,
-                                                    Icons.notifications_none,
-                                                    color:
-                                                        ShieldColors.textBody,
-                                                  ),
-                                                  onTap: () async {
-                                                    final prefs =
-                                                        await SharedPreferences.getInstance();
-
-                                                    await prefs.setString(
-                                                      'last_notification_opened',
-                                                      DateTime.now()
-                                                          .toIso8601String(),
-                                                    );
-                                                    setState(() {});
-
-                                                    showModalBottomSheet(
-                                                      context: context,
-                                                      isScrollControlled: true,
-                                                      backgroundColor:
-                                                          Colors.transparent,
-                                                      builder: (ctx) =>
-                                                          _NotificationsSheet(
-                                                            familyId:
-                                                                profileAsync
-                                                                    .value!
-                                                                    .familyId,
-                                                            safetyRepo: ref.read(
-                                                              safetyRepositoryProvider,
-                                                            ),
-                                                          ),
-                                                    );
-                                                  },
-                                                ),
-
-                                                if (hasUnread)
-                                                  Positioned(
-                                                    right: 3,
-                                                    top: 0,
-                                                    child: Container(
-                                                      width: 6,
-                                                      height: 6,
-                                                      decoration:
-                                                          const BoxDecoration(
-                                                            color: ShieldColors
-                                                                .urgentRed,
-                                                            shape:
-                                                                BoxShape.circle,
-                                                          ),
-                                                    ),
-                                                  ),
-                                              ],
-                                            );
-                                          },
-                                        );
-                                      },
-                                    ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Leader Dashboard Content
-                  Expanded(
-                    child: profileAsync.when(
-                      data: (profile) {
-                        if (profile == null) {
-                          return const Center(
-                            child: Text('No profile found. Please register.'),
-                          );
-                        }
-
-                        final safetyRepo = ref.watch(safetyRepositoryProvider);
-
-                        return Container(
-                          decoration: BoxDecoration(color: Colors.grey.shade50),
-                          child: RefreshIndicator(
-                            onRefresh: () async {
-                              final safetyRepo = ref.invalidate(
-                                safetyRepositoryProvider,
-                              );
-                            },
-                            child: SingleChildScrollView(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24.0,
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const PendingActionsCard(),
-                                  const SizedBox(height: 16),
-                                  if (_locationStream == null)
-                                    Center(child: CircularProgressIndicator()),
-
-                                  StreamBuilder<List<Map<String, dynamic>>>(
-                                    stream: _locationStream,
-                                    builder: (context, eventSnapshot) {
-                                      // if (eventSnapshot.connectionState ==
-                                      //     ConnectionState.waiting) {
-                                      //   return const Center(
-                                      //     child: CircularProgressIndicator(),
-                                      //   );
-                                      // }
-
-                                      final events = eventSnapshot.data ?? [];
-
-                                      if (events.isEmpty) {
-                                        return const SizedBox();
-                                      }
-
-                                      return LiveMembersMap(events: events);
-                                    },
-                                  ),
-                                  const SizedBox(height: 16),
-
-                                  // Pending Members List
-                                  StreamBuilder<List<Map<String, dynamic>>>(
-                                    stream: safetyRepo.streamPendingMembers(
-                                      profile.familyId,
-                                    ),
-                                    builder: (context, snapshot) {
-                                      final pending = snapshot.data ?? [];
-                                      if (pending.isEmpty) {
-                                        return const SizedBox.shrink();
-                                      }
-
-                                      return Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            'Pending Approvals (${pending.length})',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .titleMedium
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.bold,
-                                                  color: ShieldColors.urgentRed,
-                                                ),
-                                          ),
-                                          const SizedBox(height: 12),
-                                          ...pending.map(
-                                            (member) => Card(
-                                              margin: const EdgeInsets.only(
-                                                bottom: 8,
-                                              ),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    ShieldDesign.roundedTwelve,
-                                                side: const BorderSide(
-                                                  color: ShieldColors.urgentRed,
-                                                  width: 1,
-                                                ),
-                                              ),
-                                              child: ListTile(
-                                                leading: const Icon(
-                                                  Icons.person_add_alt_1,
-                                                  color: ShieldColors.urgentRed,
-                                                ),
-                                                title: Text(
-                                                  member['full_name'] != null
-                                                      ? '${member['full_name']} (${member['role']})'
-                                                      : 'New ${member['role'] ?? 'Member'} Request',
-                                                ),
-                                                subtitle: Text(
-                                                  'User ID: ${member['id'].toString().substring(0, 8)}...',
-                                                ),
-                                                trailing: Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    IconButton(
-                                                      icon: const Icon(
-                                                        Icons.check_circle,
-                                                        color: ShieldColors
-                                                            .safeZoneGreen,
-                                                      ),
-                                                      onPressed: () =>
-                                                          safetyRepo
-                                                              .approveMember(
-                                                                member['id'],
-                                                              ),
-                                                    ),
-                                                    IconButton(
-                                                      icon: const Icon(
-                                                        Icons.cancel,
-                                                        color: Colors.grey,
-                                                      ),
-                                                      onPressed: () =>
-                                                          safetyRepo
-                                                              .rejectMember(
-                                                                member['id'],
-                                                              ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(height: 24),
-                                        ],
-                                      );
-                                    },
-                                  ),
-                                  const SizedBox(height: 16),
-
-                                  StreamBuilder<List<Map<String, dynamic>>>(
-                                    stream: safetyRepo.streamLeaderSchedules(
-                                      profile.familyId,
-                                    ),
-                                    builder: (context, snapshot) {
-                                      final schedules = snapshot.data ?? [];
-                                      print("schedules");
-                                      print(schedules);
-                                      if (schedules.isEmpty) {
-                                        return const SizedBox.shrink();
-                                      }
-
-                                      // Get next upcoming checkin
-                                      DateTime? nextCheckin;
-                                      Map<String, dynamic>? selectedSchedule;
-                                      String assignedUser = '';
-                                      for (final s in schedules) {
-                                        print(s);
-                                        print('checkin_time');
-                                        final time = s['checkin_time'];
-                                        final name = s['assigned_user_name'];
-
-                                        final next = _getNextCheckinTime(s);
-                                        print(
-                                          'ID=${s['id']} '
-                                          'recurrence=${s['recurrence']} '
-                                          'scheduled_at=${s['scheduled_at']} '
-                                          'next=$next',
-                                        );
-
-                                        if (next == null) continue;
-                                        if (nextCheckin == null ||
-                                            next.isBefore(nextCheckin)) {
-                                          nextCheckin = next;
-                                          selectedSchedule = s;
-                                          assignedUser = name;
-                                        }
-                                      }
-                                      print(
-                                        'SELECTED: ${selectedSchedule?['id']} '
-                                        '${selectedSchedule?['recurrence']} '
-                                        '$nextCheckin',
-                                      );
-                                      if (nextCheckin == null ||
-                                          selectedSchedule == null) {
-                                        return const SizedBox.shrink();
-                                      }
-
-                                      final scheduleId = selectedSchedule['id'];
-                                      final assignedUserId =
-                                          selectedSchedule['assigned_user_id'];
-                                      print("nextCheckin$nextCheckin");
-                                      return _NextCheckinCard(
-                                        nextCheckin: nextCheckin,
-                                        profile: profileAsync.value,
-                                        scheduleId: scheduleId,
-                                        assignedUser: assignedUser,
-                                        assignedUserId: assignedUserId,
-                                      );
-                                    },
-                                  ),
-                                  SizedBox(height: 10),
-                                  medicationsAsync.when(
-                                    data: (medications) {
-                                      final activeMeds = medications
-                                          .where((m) => m.isActive)
-                                          .toList();
-
-                                      if (activeMeds.isEmpty) {
-                                        return const SizedBox.shrink();
-                                      }
-
-                                      return Container(
-                                        margin: const EdgeInsets.only(
-                                          bottom: 18,
-                                        ),
-                                        padding: const EdgeInsets.all(16),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white,
-                                          borderRadius: BorderRadius.circular(
-                                            20,
-                                          ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black.withValues(
-                                                alpha: 0.04,
-                                              ),
-                                              blurRadius: 10,
-                                              offset: const Offset(0, 4),
-                                            ),
-                                          ],
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              'MEDICATION MONITOR',
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .labelMedium
-                                                  ?.copyWith(
-                                                    color:
-                                                        ShieldColors.textLabel,
-                                                    fontWeight: FontWeight.bold,
-                                                    letterSpacing: 1.2,
-                                                  ),
-                                            ),
-
-                                            const SizedBox(height: 14),
-
-                                            ...activeMeds.map((med) {
-                                              // final nextDose = med.nextDoseToday;
-                                              DateTime? nextDose;
-
-                                              if (med
-                                                  .scheduleTimes
-                                                  .isNotEmpty) {
-                                                final now = DateTime.now();
-
-                                                final upcomingDoses =
-                                                    <DateTime>[];
-
-                                                final startDate =
-                                                    med.startDate ?? now;
-
-                                                for (final time
-                                                    in med.scheduleTimes) {
-                                                  try {
-                                                    final parts = time.split(
-                                                      ':',
-                                                    );
-
-                                                    final hour = int.parse(
-                                                      parts[0],
-                                                    );
-                                                    final minute = int.parse(
-                                                      parts[1],
-                                                    );
-
-                                                    DateTime doseTime =
-                                                        DateTime(
-                                                          now.year,
-                                                          now.month,
-                                                          now.day,
-                                                          hour,
-                                                          minute,
-                                                        );
-
-                                                    final frequency = med
-                                                        .frequency
-                                                        .toLowerCase();
-
-                                                    // DAILY
-                                                    if (frequency.contains(
-                                                      'daily',
-                                                    )) {
-                                                      if (doseTime.isBefore(
-                                                        now,
-                                                      )) {
-                                                        doseTime = doseTime.add(
-                                                          const Duration(
-                                                            days: 1,
-                                                          ),
-                                                        );
-                                                      }
-                                                    }
-                                                    // EVERY OTHER DAY
-                                                    else if (frequency.contains(
-                                                      'every other',
-                                                    )) {
-                                                      final daysSinceStart = now
-                                                          .difference(startDate)
-                                                          .inDays;
-
-                                                      final shouldTakeToday =
-                                                          daysSinceStart % 2 ==
-                                                          0;
-
-                                                      if (!shouldTakeToday ||
-                                                          doseTime.isBefore(
-                                                            now,
-                                                          )) {
-                                                        doseTime = doseTime.add(
-                                                          const Duration(
-                                                            days: 1,
-                                                          ),
-                                                        );
-
-                                                        while (doseTime
-                                                                    .difference(
-                                                                      startDate,
-                                                                    )
-                                                                    .inDays %
-                                                                2 !=
-                                                            0) {
-                                                          doseTime = doseTime
-                                                              .add(
-                                                                const Duration(
-                                                                  days: 1,
-                                                                ),
-                                                              );
-                                                        }
-                                                      }
-                                                    }
-                                                    // WEEKLY
-                                                    else if (frequency.contains(
-                                                      'weekly',
-                                                    )) {
-                                                      doseTime = DateTime(
-                                                        now.year,
-                                                        now.month,
-                                                        now.day,
-                                                        hour,
-                                                        minute,
-                                                      );
-
-                                                      while (doseTime.weekday !=
-                                                              startDate
-                                                                  .weekday ||
-                                                          doseTime.isBefore(
-                                                            now,
-                                                          )) {
-                                                        doseTime = doseTime.add(
-                                                          const Duration(
-                                                            days: 1,
-                                                          ),
-                                                        );
-                                                      }
-                                                    }
-                                                    // MONTHLY
-                                                    else if (frequency.contains(
-                                                      'monthly',
-                                                    )) {
-                                                      doseTime = DateTime(
-                                                        now.year,
-                                                        now.month,
-                                                        startDate.day,
-                                                        hour,
-                                                        minute,
-                                                      );
-
-                                                      if (doseTime.isBefore(
-                                                        now,
-                                                      )) {
-                                                        doseTime = DateTime(
-                                                          now.year,
-                                                          now.month + 1,
-                                                          startDate.day,
-                                                          hour,
-                                                          minute,
-                                                        );
-                                                      }
-                                                    }
-                                                    // AS NEEDED
-                                                    else if (frequency.contains(
-                                                      'as needed',
-                                                    )) {
-                                                      continue;
-                                                    }
-
-                                                    upcomingDoses.add(doseTime);
-                                                  } catch (e) {
-                                                    debugPrint(
-                                                      "Dose parse error: $e",
-                                                    );
-                                                  }
-                                                }
-
-                                                upcomingDoses.sort();
-
-                                                if (upcomingDoses.isNotEmpty) {
-                                                  nextDose =
-                                                      upcomingDoses.first;
-                                                }
-                                              }
-                                              String countdownText =
-                                                  'No upcoming dose';
-                                              Color statusColor = Colors.grey;
-
-                                              Duration? diff;
-
-                                              if (nextDose != null) {
-                                                diff = nextDose.difference(
-                                                  DateTime.now(),
-                                                );
-                                              }
-                                              countdownText =
-                                                  '${diff?.inHours}h ${diff?.inMinutes.remainder(60)}m ${diff?.inSeconds.remainder(60)}s';
-                                              return Container(
-                                                margin: const EdgeInsets.only(
-                                                  bottom: 12,
-                                                ),
-                                                padding: const EdgeInsets.all(
-                                                  14,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.grey.shade50,
-                                                  borderRadius:
-                                                      BorderRadius.circular(16),
-                                                  border: Border.all(
-                                                    color: statusColor
-                                                        .withValues(alpha: 0.2),
-                                                  ),
-                                                ),
-                                                child: Row(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment
-                                                          .spaceBetween,
-                                                  children: [
-                                                    Icon(
-                                                      Icons.local_hospital,
-                                                      color: Colors.purple,
-                                                      size: 26,
-                                                    ),
-
-                                                    const SizedBox(width: 7),
-
-                                                    Expanded(
-                                                      child: Row(
-                                                        children: [
-                                                          Expanded(
-                                                            child: Column(
-                                                              crossAxisAlignment:
-                                                                  CrossAxisAlignment
-                                                                      .start,
-                                                              children: [
-                                                                Text(
-                                                                  med.medicationName,
-                                                                  style: const TextStyle(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .bold,
-                                                                    fontSize:
-                                                                        15,
-                                                                  ),
-                                                                ),
-
-                                                                const SizedBox(
-                                                                  height: 4,
-                                                                ),
-
-                                                                Text(
-                                                                  '${med.dosage} • ${med.scheduleSummary}',
-                                                                  style: TextStyle(
-                                                                    color: Colors
-                                                                        .grey
-                                                                        .shade700,
-                                                                    fontSize:
-                                                                        12,
-                                                                  ),
-                                                                ),
-
-                                                                //
-                                                                if (med.assignedName !=
-                                                                    null) ...[
-                                                                  const SizedBox(
-                                                                    height: 4,
-                                                                  ),
-
-                                                                  Text(
-                                                                    'Assigned to: ${med.assignedName}',
-                                                                    style: TextStyle(
-                                                                      color: Colors
-                                                                          .blueGrey,
-                                                                      fontSize:
-                                                                          12,
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w500,
-                                                                    ),
-                                                                  ),
-                                                                ],
-
-                                                                if (med.doctor !=
-                                                                    null) ...[
-                                                                  SizedBox(
-                                                                    height: 5,
-                                                                  ),
-
-                                                                  RichText(
-                                                                    text: TextSpan(
-                                                                      style: TextStyle(
-                                                                        color: Colors
-                                                                            .blueGrey,
-                                                                        fontSize:
-                                                                            12,
-                                                                        fontWeight:
-                                                                            FontWeight.w500,
-                                                                      ),
-                                                                      children: [
-                                                                        TextSpan(
-                                                                          text:
-                                                                              'Prescribing doctor: ',
-                                                                        ),
-                                                                        TextSpan(
-                                                                          text:
-                                                                              med.doctor,
-                                                                          style: TextStyle(
-                                                                            fontWeight:
-                                                                                FontWeight.bold,
-                                                                          ),
-                                                                        ),
-                                                                      ],
-                                                                    ),
-                                                                  ),
-                                                                ],
-                                                                if (med.instructions !=
-                                                                    null) ...[
-                                                                  SizedBox(
-                                                                    height: 5,
-                                                                  ),
-                                                                  RichText(
-                                                                    text: TextSpan(
-                                                                      style: TextStyle(
-                                                                        color: Colors
-                                                                            .blueGrey,
-                                                                        fontSize:
-                                                                            12,
-                                                                        fontWeight:
-                                                                            FontWeight.w500,
-                                                                      ),
-                                                                      children: [
-                                                                        TextSpan(
-                                                                          text:
-                                                                              'Instruction: ',
-                                                                        ),
-                                                                        TextSpan(
-                                                                          text:
-                                                                              med.instructions,
-                                                                          style: TextStyle(
-                                                                            fontWeight:
-                                                                                FontWeight.bold,
-                                                                          ),
-                                                                        ),
-                                                                      ],
-                                                                    ),
-                                                                  ),
-                                                                ],
-                                                                SizedBox(
-                                                                  height: 5,
-                                                                ),
-
-                                                                // if (nextDose !=
-                                                                //     null) ...[
-                                                                //   const SizedBox(
-                                                                //     height: 4,
-                                                                //   ),
-                                                                //
-                                                                //   Text(
-                                                                //     'At ${DateFormat.jm().format(nextDose)}',
-                                                                //     style: TextStyle(
-                                                                //       color: Colors
-                                                                //           .grey
-                                                                //           .shade600,
-                                                                //       fontSize: 11,
-                                                                //     ),
-                                                                //   ),
-                                                                // ],
-                                                              ],
-                                                            ),
-                                                          ),
-                                                          Expanded(
-                                                            child: Column(
-                                                              crossAxisAlignment:
-                                                                  CrossAxisAlignment
-                                                                      .end,
-                                                              mainAxisAlignment:
-                                                                  MainAxisAlignment
-                                                                      .end,
-                                                              children: [
-                                                                Row(
-                                                                  mainAxisAlignment:
-                                                                      MainAxisAlignment
-                                                                          .end,
-                                                                  children: [
-                                                                    if (nextDose !=
-                                                                        null)
-                                                                      StreamBuilder(
-                                                                        stream: Stream.periodic(
-                                                                          const Duration(
-                                                                            seconds:
-                                                                                1,
-                                                                          ),
-                                                                        ),
-                                                                        builder:
-                                                                            (
-                                                                              context,
-                                                                              snapshot,
-                                                                            ) {
-                                                                              final diff =
-                                                                                  nextDose?.difference(
-                                                                                    DateTime.now(),
-                                                                                  ) ??
-                                                                                  Duration.zero;
-
-                                                                              // Prevent negative values
-                                                                              final safeDiff = diff.isNegative
-                                                                                  ? Duration.zero
-                                                                                  : diff;
-
-                                                                              final text =
-                                                                                  '${safeDiff.inHours.toString().padLeft(2, '0')}h '
-                                                                                  '${safeDiff.inMinutes.remainder(60).toString().padLeft(2, '0')}m '
-                                                                                  '${safeDiff.inSeconds.remainder(60).toString().padLeft(2, '0')}s';
-
-                                                                              return Text(
-                                                                                text,
-                                                                                style: TextStyle(
-                                                                                  color: ShieldColors.activeTeal,
-                                                                                  fontWeight: FontWeight.w600,
-                                                                                  fontSize: 12,
-                                                                                ),
-                                                                              );
-                                                                            },
-                                                                      ),
-                                                                  ],
-                                                                ),
-                                                                Text(
-                                                                  "Until Next Dose",
-                                                                  style: TextStyle(
-                                                                    fontSize:
-                                                                        12,
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .bold,
-                                                                    color: ShieldColors
-                                                                        .activeTeal,
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              );
-                                            }),
-                                          ],
-                                        ),
-                                      );
-                                    },
-                                    loading: () => const Center(
-                                      child: Padding(
-                                        padding: EdgeInsets.all(20),
-                                        child: CircularProgressIndicator(),
-                                      ),
-                                    ),
-                                    error: (e, st) => const SizedBox.shrink(),
-                                  ),
-                                  // Active Members Stream
-                                  Text(
-                                    'Shield Members',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleLarge
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          color: ShieldColors.textBody,
-                                        ),
-                                  ),
-                                  const SizedBox(height: 16),
-
-                                  StreamBuilder<List<Map<String, dynamic>>>(
-                                    stream: safetyRepo.streamActiveMembers(
-                                      profile.familyId,
-                                    ),
-                                    builder: (context, memberSnapshot) {
-                                      if (memberSnapshot.connectionState ==
-                                              ConnectionState.waiting &&
-                                          !_sosCountdownActive) {
-                                        return const Center(
-                                          child: CircularPulseIndicator(),
-                                        );
-                                      }
-
-                                      final members = memberSnapshot.data ?? [];
-
-                                      if (members.isEmpty) {
-                                        return const Text(
-                                          'No members found. Invite some!',
-                                        );
-                                      }
-
-                                      return Column(
-                                        children: members.map((member) {
-                                          return _MemberStatusCard(
-                                            member: member,
-                                            safetyRepo: safetyRepo,
-                                            currentUserId: profile.userId,
-                                          );
-                                        }).toList(),
-                                      );
-                                    },
-                                  ),
-
-                                  // Recent Events Stream — Bug 3: Improved formatting
-                                  const SizedBox(height: 20),
-                                  // Text(
-                                  //   'Recent Activity',
-                                  //   style: Theme.of(context).textTheme.titleLarge
-                                  //       ?.copyWith(
-                                  //         fontWeight: FontWeight.bold,
-                                  //         color: ShieldColors.textBody,
-                                  //       ),
-                                  // ),
-                                  // const SizedBox(height: 16),
-
-                                  // StreamBuilder<List<Map<String, dynamic>>>(
-                                  //   stream: safetyRepo.streamFamilyEvents(
-                                  //     profile.familyId,
-                                  //   ),
-                                  //   builder: (context, eventSnapshot) {
-                                  //     if (eventSnapshot.connectionState ==
-                                  //         ConnectionState.waiting) {
-                                  //       return const Center(
-                                  //         child: CircularProgressIndicator(),
-                                  //       );
-                                  //     }
-                                  //
-                                  //     final events = eventSnapshot.data ?? [];
-                                  //     if (events.isEmpty) {
-                                  //       return const Padding(
-                                  //         padding: EdgeInsets.symmetric(vertical: 32),
-                                  //         child: Center(
-                                  //           child: Column(
-                                  //             children: [
-                                  //               Icon(
-                                  //                 Icons.history,
-                                  //                 size: 48,
-                                  //                 color: Colors.grey,
-                                  //               ),
-                                  //               SizedBox(height: 8),
-                                  //               Text(
-                                  //                 'No recent activity yet.\nCheck-ins, SOS events, and status updates will appear here.',
-                                  //                 textAlign: TextAlign.center,
-                                  //                 style: TextStyle(
-                                  //                   color: ShieldColors.textLabel,
-                                  //                 ),
-                                  //               ),
-                                  //             ],
-                                  //           ),
-                                  //         ),
-                                  //       );
-                                  //     }
-                                  //
-                                  //     return Container(
-                                  //       decoration: BoxDecoration(
-                                  //         color: Colors.white,
-                                  //         borderRadius: ShieldDesign.roundedTwelve,
-                                  //       ),
-                                  //       child: ListView.separated(
-                                  //         shrinkWrap: true,
-                                  //         physics: const NeverScrollableScrollPhysics(),
-                                  //         itemCount: events.length > 10
-                                  //             ? 10
-                                  //             : events.length,
-                                  //         separatorBuilder: (context, index) =>
-                                  //             const Divider(height: 1),
-                                  //         itemBuilder: (context, index) {
-                                  //           final evt = events[index];
-                                  //           return _buildEventTile(evt);
-                                  //         },
-                                  //       ),
-                                  //     );
-                                  //   },
-                                  // ),
-                                  _buildRecentActivity(
-                                    context,
-                                    safetyRepo,
-                                    profile.familyId,
-                                  ),
-
-                                  const SizedBox(height: 20),
-                                  const AiWellnessCard(),
-                                  const SizedBox(height: 100),
-                                  // Space for bottom nav
-                                ],
-                              ),
-                            ),
-                          ),
+                            );
+                          },
                         );
                       },
-                      loading: () =>
-                          const Center(child: CircularProgressIndicator()),
-                      error: (e, st) => Center(child: Text('Error: $e')),
+                      child: Icon(Icons.menu, color: Colors.white, size: 18),
                     ),
                   ),
                 ],
               ),
             ),
-            bottomNavigationBar: Container(
-              color: Colors.white,
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  child: Row(
-                    children: [
-                      // Large EMERGENCY button
-                      Expanded(
-                        flex: 2,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          height: 60,
-                          child: ElevatedButton(
-                            onPressed: _startSosCountdown,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _sosCountdownActive
-                                  ? Colors.orange
-                                  : ShieldColors.urgentRed,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: ShieldDesign.roundedTwelve,
-                              ),
-                              elevation: 6,
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.warning_rounded, size: 24),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    _sosCountdownActive
-                                        ? 'CANCEL ($_sosCountdown)'
-                                        : 'EMERGENCY',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13,
-                                      letterSpacing: 1,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // COMMAND CENTER button
-                      Expanded(
-                        flex: 2,
-                        child: SizedBox(
-                          height: 60,
-                          child: ElevatedButton(
-                            onPressed: () async {
-                              await showModalBottomSheet(
-                                context: context,
-
-                                isScrollControlled: true,
-                                backgroundColor: Colors.transparent,
-                                builder: (context) =>
-                                    CommandCenterSheet(fromLeader: true),
-                              );
-                              //  profileAsync = ref.watch(currentUserProfileProvider);
-                              //  ref.invalidate(currentUserProfileProvider);
-                              //   ref.invalidate(safetyRepositoryProvider);
-                              //  ref.invalidate(userRoleProvider);
-                              //  ref.invalidate(currentUserProfileProvider);
-                              // ref.invalidate(shieldRouterProvider);
-                              // ref.invalidate(allDoseLogsProvider);
-                              // ref.invalidate(familySafeZonesProvider);
-                              // ref.invalidate(familyMedicationsProvider);
-                              // ref.invalidate(toolsRepositoryProvider);
-                              //   ref.invalidate(authRepositoryProvider);
-                              //  ref.invalidate(safeZonesStreamProvider);
-                              //  Navigator.push(context, MaterialPageRoute(builder: (context)=>CommandCenterSheet()));
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: ShieldColors.activeTeal,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: ShieldDesign.roundedTwelve,
-                              ),
-                              elevation: 4,
-                            ),
-                            child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.grid_view_rounded, size: 22),
-                                SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    'MENU',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13,
-                                      letterSpacing: 1,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      // const SizedBox(width: 8),
-                      // // Profile icon button
-                      // Container(
-                      //   decoration: BoxDecoration(
-                      //     borderRadius: BorderRadius.circular(30),
-                      //     color: Colors.white,
-                      //   ),
-                      //   height: 60,
-                      //   width: 60,
-                      //   child: GestureDetector(
-                      //     onTap: () {
-                      //       showModalBottomSheet(
-                      //         context: context,
-                      //         isScrollControlled: true,
-                      //         backgroundColor: Colors.transparent,
-                      //         builder: (_) => const ProfileSettingsView(),
-                      //       );
-                      //     },
-                      //
-                      //     child: profileAsync.value?.avatarUrl != null
-                      //         ? Container(
-                      //             padding: EdgeInsets.all(10),
-                      //             clipBehavior: Clip.antiAlias,
-                      //             decoration: BoxDecoration(),
-                      //             child: ClipRRect(
-                      //               borderRadius: BorderRadius.circular(30),
-                      //               //  borderRadius: ShieldDesign.roundedTwelve,
-                      //               child: Image.network(
-                      //                 profileAsync.value!.avatarUrl!,
-                      //                 fit: BoxFit.cover,
-                      //               ),
-                      //             ),
-                      //           )
-                      //         : const Icon(Icons.person_outline, size: 26),
-                      //   ),
-                      // ),
-                    ],
+            SizedBox(height: 12),
+            if (!isLoad) ...[
+              // Header — Bug 1: Responsive scaling, Bug 2: Working notification bell
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(24),
+                    topRight: Radius.circular(24),
                   ),
                 ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24.0,
+                  vertical: 16.0,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          profileAsync.when(
+                            data: (profile) {
+                              final firstName =
+                                  profile?.fullName?.split(' ').first ??
+                                  'Leader';
+                              return Text(
+                                'Welcome, $firstName.',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      color: ShieldColors.textBody,
+                                    ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              );
+                            },
+                            loading: () => Text(
+                              'Welcome back...',
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: ShieldColors.textBody,
+                                  ),
+                            ),
+                            error: (e, st) => Text(
+                              'Welcome, Leader.',
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: ShieldColors.textBody,
+                                  ),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.privacy_tip,
+                                color: ShieldColors.activeTeal,
+                                size: 22,
+                              ),
+                              SizedBox(width: 5),
+                              Text(
+                                'The Shield is active',
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: ShieldColors.textLabel),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        profileAsync.when(
+                          data: (profile) {
+                            print(profile!.avatarUrl);
+                            print("avatarUrl");
+                            return profile != null && profile!.avatarUrl != null
+                                ? CircleAvatar(
+                                    radius: 35,
+                                    backgroundColor: ShieldColors.activeTeal,
+
+                                    backgroundImage: CachedNetworkImageProvider(
+                                      '${profile!.avatarUrl}?t=${DateTime.now().millisecondsSinceEpoch}',
+                                    ),
+                                  )
+                                : CircleAvatar(
+                                    backgroundColor: ShieldColors.activeTeal,
+
+                                    radius: 35,
+                                    child: Icon(
+                                      size: 35,
+                                      Icons.person,
+                                      color: Colors.white,
+                                    ),
+                                  );
+                          },
+                          loading: () => SizedBox.shrink(),
+                          error: (e, st) => SizedBox.shrink(),
+                        ),
+                        SizedBox(width: 10),
+                        Container(
+                          padding: EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: ShieldDesign.roundedTwelve,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: GestureDetector(
+                            child: const Icon(
+                              size: 20,
+                              Icons.person_add_alt_1,
+                              color: ShieldColors.activeTeal,
+                            ),
+                            onTap: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) =>
+                                    const InviteMemberDialog(),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // Bug 2: Notification bell now shows recent events
+                        Container(
+                          padding: EdgeInsets.all(10),
+
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: ShieldDesign.roundedTwelve,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: profileAsync.value == null
+                              ? GestureDetector(
+                                  child: const Icon(
+                                    size: 20,
+
+                                    Icons.notifications_none,
+                                    color: ShieldColors.textBody,
+                                  ),
+                                  onTap: () {},
+                                )
+                              : StreamBuilder<List<Map<String, dynamic>>>(
+                                  stream: ref
+                                      .watch(safetyRepositoryProvider)
+                                      .streamFamilyEvents(
+                                        profileAsync.value!.familyId,
+                                      ),
+                                  builder: (context, snapshot) {
+                                    return FutureBuilder(
+                                      future: SharedPreferences.getInstance()
+                                          .then(
+                                            (p) => p.getString(
+                                              'last_notification_opened',
+                                            ),
+                                          ),
+                                      builder: (context, prefSnap) {
+                                        final lastSeen = DateTime.tryParse(
+                                          prefSnap.data ?? '',
+                                        );
+                                        final events = snapshot.data ?? [];
+                                        final hasUnread = events.any((e) {
+                                          final dt = DateTime.tryParse(
+                                            e['created_at'] ?? '',
+                                          );
+
+                                          if (dt == null) return false;
+
+                                          if (lastSeen == null) return true;
+
+                                          return dt.isAfter(lastSeen);
+                                        });
+                                        return Stack(
+                                          alignment: Alignment.topRight,
+                                          children: [
+                                            GestureDetector(
+                                              child: const Icon(
+                                                size: 20,
+                                                Icons.notifications_none,
+                                                color: ShieldColors.textBody,
+                                              ),
+                                              onTap: () async {
+                                                final prefs =
+                                                    await SharedPreferences.getInstance();
+
+                                                await prefs.setString(
+                                                  'last_notification_opened',
+                                                  DateTime.now()
+                                                      .toIso8601String(),
+                                                );
+                                                setState(() {});
+
+                                                showModalBottomSheet(
+                                                  context: context,
+                                                  isScrollControlled: true,
+                                                  backgroundColor:
+                                                      Colors.transparent,
+                                                  builder: (ctx) =>
+                                                      _NotificationsSheet(
+                                                        familyId: profileAsync
+                                                            .value!
+                                                            .familyId,
+                                                        safetyRepo: ref.read(
+                                                          safetyRepositoryProvider,
+                                                        ),
+                                                      ),
+                                                );
+                                              },
+                                            ),
+
+                                            if (hasUnread)
+                                              Positioned(
+                                                right: 3,
+                                                top: 0,
+                                                child: Container(
+                                                  width: 6,
+                                                  height: 6,
+                                                  decoration:
+                                                      const BoxDecoration(
+                                                        color: ShieldColors
+                                                            .urgentRed,
+                                                        shape: BoxShape.circle,
+                                                      ),
+                                                ),
+                                              ),
+                                          ],
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
+
+              // Leader Dashboard Content
+              Expanded(
+                child: profileAsync.when(
+                  data: (profile) {
+                    if (profile == null) {
+                      return const Center(
+                        child: Text('No profile found. Please register.'),
+                      );
+                    }
+
+                    final safetyRepo = ref.watch(safetyRepositoryProvider);
+
+                    return Container(
+                      decoration: BoxDecoration(color: Colors.grey.shade50),
+                      child: RefreshIndicator(
+                        onRefresh: () async {
+                          final safetyRepo = ref.invalidate(
+                            safetyRepositoryProvider,
+                          );
+                        },
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const PendingActionsCard(),
+                              const SizedBox(height: 16),
+                              if (_locationStream == null)
+                                Center(child: CircularProgressIndicator()),
+
+                              StreamBuilder<List<Map<String, dynamic>>>(
+                                stream: _locationStream,
+                                builder: (context, eventSnapshot) {
+                                  // if (eventSnapshot.connectionState ==
+                                  //     ConnectionState.waiting) {
+                                  //   return const Center(
+                                  //     child: CircularProgressIndicator(),
+                                  //   );
+                                  // }
+
+                                  final events = eventSnapshot.data ?? [];
+
+                                  if (events.isEmpty) {
+                                    return const SizedBox();
+                                  }
+
+                                  return LiveMembersMap(events: events);
+                                },
+                              ),
+                              const SizedBox(height: 16),
+
+                              // Pending Members List
+                              StreamBuilder<List<Map<String, dynamic>>>(
+                                stream: safetyRepo.streamPendingMembers(
+                                  profile.familyId,
+                                ),
+                                builder: (context, snapshot) {
+                                  final pending = snapshot.data ?? [];
+                                  if (pending.isEmpty) {
+                                    return const SizedBox.shrink();
+                                  }
+
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Pending Approvals (${pending.length})',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.bold,
+                                              color: ShieldColors.urgentRed,
+                                            ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      ...pending.map(
+                                        (member) => Card(
+                                          margin: const EdgeInsets.only(
+                                            bottom: 8,
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                ShieldDesign.roundedTwelve,
+                                            side: const BorderSide(
+                                              color: ShieldColors.urgentRed,
+                                              width: 1,
+                                            ),
+                                          ),
+                                          child: ListTile(
+                                            leading: const Icon(
+                                              Icons.person_add_alt_1,
+                                              color: ShieldColors.urgentRed,
+                                            ),
+                                            title: Text(
+                                              member['full_name'] != null
+                                                  ? '${member['full_name']} (${member['role']})'
+                                                  : 'New ${member['role'] ?? 'Member'} Request',
+                                            ),
+                                            subtitle: Text(
+                                              'User ID: ${member['id'].toString().substring(0, 8)}...',
+                                            ),
+                                            trailing: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                IconButton(
+                                                  icon: const Icon(
+                                                    Icons.check_circle,
+                                                    color: ShieldColors
+                                                        .safeZoneGreen,
+                                                  ),
+                                                  onPressed: () =>
+                                                      safetyRepo.approveMember(
+                                                        member['id'],
+                                                      ),
+                                                ),
+                                                IconButton(
+                                                  icon: const Icon(
+                                                    Icons.cancel,
+                                                    color: Colors.grey,
+                                                  ),
+                                                  onPressed: () =>
+                                                      safetyRepo.rejectMember(
+                                                        member['id'],
+                                                      ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 24),
+                                    ],
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 16),
+                              const NotTakenAcknowledgeCard(),
+
+                              StreamBuilder<List<Map<String, dynamic>>>(
+                                stream: safetyRepo.streamLeaderSchedules(
+                                  profile.familyId,
+                                ),
+                                builder: (context, snapshot) {
+                                  final schedules = snapshot.data ?? [];
+                                  // print("schedules");
+                                  // print(schedules);
+                                  if (schedules.isEmpty) {
+                                    return const SizedBox.shrink();
+                                  }
+
+                                  // Get next upcoming checkin
+                                  DateTime? nextCheckin;
+                                  Map<String, dynamic>? selectedSchedule;
+                                  String assignedUser = '';
+                                  for (final s in schedules) {
+                                    print(s);
+                                    print('checkin_time');
+                                    final time = s['checkin_time'];
+                                    final name = s['assigned_user_name'];
+
+                                    final next = _getNextCheckinTime(s);
+                                    print(
+                                      'ID=${s['id']} '
+                                      'recurrence=${s['recurrence']} '
+                                      'scheduled_at=${s['scheduled_at']} '
+                                      'next=$next',
+                                    );
+
+                                    if (next == null) continue;
+                                    if (nextCheckin == null ||
+                                        next.isBefore(nextCheckin)) {
+                                      nextCheckin = next;
+                                      selectedSchedule = s;
+                                      assignedUser = name;
+                                    }
+                                  }
+                                  print(
+                                    'SELECTED: ${selectedSchedule?['id']} '
+                                    '${selectedSchedule?['recurrence']} '
+                                    '$nextCheckin',
+                                  );
+                                  if (nextCheckin == null ||
+                                      selectedSchedule == null) {
+                                    return const SizedBox.shrink();
+                                  }
+
+                                  final scheduleId = selectedSchedule['id'];
+                                  final assignedUserId =
+                                      selectedSchedule['assigned_user_id'];
+                                  print("nextCheckin$nextCheckin");
+                                  return _NextCheckinCard(
+                                    nextCheckin: nextCheckin,
+                                    profile: profileAsync.value,
+                                    scheduleId: scheduleId,
+                                    assignedUser: assignedUser,
+                                    assignedUserId: assignedUserId,
+                                  );
+                                },
+                              ),
+                              SizedBox(height: 10),
+                              medicationsAsync.when(
+                                data: (medications) {
+                                  final activeMeds = medications
+                                      .where((m) => m.isActive)
+                                      .toList();
+
+                                  if (activeMeds.isEmpty) {
+                                    return const SizedBox.shrink();
+                                  }
+
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 18),
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(20),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.04,
+                                          ),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'MEDICATION MONITOR',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .labelMedium
+                                              ?.copyWith(
+                                                color: ShieldColors.textLabel,
+                                                fontWeight: FontWeight.bold,
+                                                letterSpacing: 1.2,
+                                              ),
+                                        ),
+
+                                        const SizedBox(height: 14),
+
+                                        ...activeMeds.map((med) {
+                                          // final nextDose = med.nextDoseToday;
+                                          DateTime? nextDose;
+
+                                          if (med.scheduleTimes.isNotEmpty) {
+                                            final now = DateTime.now();
+
+                                            final upcomingDoses = <DateTime>[];
+
+                                            final startDate =
+                                                med.startDate ?? now;
+
+                                            for (final time
+                                                in med.scheduleTimes) {
+                                              try {
+                                                final parts = time.split(':');
+
+                                                final hour = int.parse(
+                                                  parts[0],
+                                                );
+                                                final minute = int.parse(
+                                                  parts[1],
+                                                );
+
+                                                DateTime doseTime = DateTime(
+                                                  now.year,
+                                                  now.month,
+                                                  now.day,
+                                                  hour,
+                                                  minute,
+                                                );
+
+                                                final frequency = med.frequency
+                                                    .toLowerCase();
+
+                                                // DAILY
+                                                if (frequency.contains(
+                                                  'daily',
+                                                )) {
+                                                  if (doseTime.isBefore(now)) {
+                                                    doseTime = doseTime.add(
+                                                      const Duration(days: 1),
+                                                    );
+                                                  }
+                                                }
+                                                // WEEKLY
+                                                else if (frequency.contains(
+                                                  'weekly',
+                                                )) {
+                                                  // Sunday = 0 ... Saturday = 6 (same numbering the cron uses)
+                                                  final days = List<int>.from(
+                                                    med.daysOfWeek ?? <int>[],
+                                                  )..sort();
+                                                  if (days.isEmpty)
+                                                    days.add(
+                                                      startDate.weekday % 7,
+                                                    );
+
+                                                  // Don't count down to a date before the start date
+                                                  final from =
+                                                      startDate.isAfter(now)
+                                                      ? startDate
+                                                      : now;
+                                                  final baseDay = DateTime(
+                                                    from.year,
+                                                    from.month,
+                                                    from.day,
+                                                    hour,
+                                                    minute,
+                                                  );
+
+                                                  DateTime? best;
+                                                  for (final d in days) {
+                                                    final add =
+                                                        (d -
+                                                            (baseDay.weekday %
+                                                                7)) %
+                                                        7; // always 0..6 in Dart
+                                                    var candidate = baseDay.add(
+                                                      Duration(days: add),
+                                                    );
+                                                    if (candidate.isBefore(
+                                                      now,
+                                                    )) {
+                                                      candidate = candidate.add(
+                                                        const Duration(days: 7),
+                                                      );
+                                                    }
+                                                    if (best == null ||
+                                                        candidate.isBefore(
+                                                          best,
+                                                        ))
+                                                      best = candidate;
+                                                  }
+                                                  doseTime = best!;
+                                                }
+                                                // EVERY OTHER DAY
+                                                else if (frequency.contains(
+                                                  'every other',
+                                                )) {
+                                                  final daysSinceStart = now
+                                                      .difference(startDate)
+                                                      .inDays;
+
+                                                  final shouldTakeToday =
+                                                      daysSinceStart % 2 == 0;
+
+                                                  if (!shouldTakeToday ||
+                                                      doseTime.isBefore(now)) {
+                                                    doseTime = doseTime.add(
+                                                      const Duration(days: 1),
+                                                    );
+
+                                                    while (doseTime
+                                                                .difference(
+                                                                  startDate,
+                                                                )
+                                                                .inDays %
+                                                            2 !=
+                                                        0) {
+                                                      doseTime = doseTime.add(
+                                                        const Duration(days: 1),
+                                                      );
+                                                    }
+                                                  }
+                                                }
+                                                // WEEKLY
+                                                else if (frequency.contains(
+                                                  'weekly',
+                                                )) {
+                                                  doseTime = DateTime(
+                                                    now.year,
+                                                    now.month,
+                                                    now.day,
+                                                    hour,
+                                                    minute,
+                                                  );
+
+                                                  while (doseTime.weekday !=
+                                                          startDate.weekday ||
+                                                      doseTime.isBefore(now)) {
+                                                    doseTime = doseTime.add(
+                                                      const Duration(days: 1),
+                                                    );
+                                                  }
+                                                }
+                                                // MONTHLY
+                                                else if (frequency.contains(
+                                                  'monthly',
+                                                )) {
+                                                  doseTime = DateTime(
+                                                    now.year,
+                                                    now.month,
+                                                    startDate.day,
+                                                    hour,
+                                                    minute,
+                                                  );
+
+                                                  if (doseTime.isBefore(now)) {
+                                                    doseTime = DateTime(
+                                                      now.year,
+                                                      now.month + 1,
+                                                      startDate.day,
+                                                      hour,
+                                                      minute,
+                                                    );
+                                                  }
+                                                }
+                                                // AS NEEDED
+                                                else if (frequency.contains(
+                                                  'as needed',
+                                                )) {
+                                                  continue;
+                                                }
+
+                                                upcomingDoses.add(doseTime);
+                                              } catch (e) {
+                                                debugPrint(
+                                                  "Dose parse error: $e",
+                                                );
+                                              }
+                                            }
+
+                                            upcomingDoses.sort();
+
+                                            if (upcomingDoses.isNotEmpty) {
+                                              nextDose = upcomingDoses.first;
+                                            }
+                                          }
+                                          String countdownText =
+                                              'No upcoming dose';
+                                          Color statusColor = Colors.grey;
+
+                                          Duration? diff;
+
+                                          if (nextDose != null) {
+                                            diff = nextDose.difference(
+                                              DateTime.now(),
+                                            );
+                                          }
+                                          countdownText =
+                                              '${diff?.inHours}h ${diff?.inMinutes.remainder(60)}m ${diff?.inSeconds.remainder(60)}s';
+                                          return Container(
+                                            margin: const EdgeInsets.only(
+                                              bottom: 12,
+                                            ),
+                                            padding: const EdgeInsets.all(14),
+                                            decoration: BoxDecoration(
+                                              color: Colors.grey.shade50,
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                              border: Border.all(
+                                                color: statusColor.withValues(
+                                                  alpha: 0.2,
+                                                ),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                Icon(
+                                                  Icons.local_hospital,
+                                                  color: Colors.purple,
+                                                  size: 26,
+                                                ),
+
+                                                const SizedBox(width: 7),
+
+                                                Expanded(
+                                                  child: Row(
+                                                    children: [
+                                                      Expanded(
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            Text(
+                                                              med.medicationName,
+                                                              style: const TextStyle(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                                fontSize: 15,
+                                                              ),
+                                                            ),
+
+                                                            const SizedBox(
+                                                              height: 4,
+                                                            ),
+
+                                                            Text(
+                                                              '${med.dosage} • ${med.scheduleSummary}',
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .grey
+                                                                    .shade700,
+                                                                fontSize: 12,
+                                                              ),
+                                                            ),
+
+                                                            //
+                                                            if (med.assignedName !=
+                                                                null) ...[
+                                                              const SizedBox(
+                                                                height: 4,
+                                                              ),
+
+                                                              Text(
+                                                                'Assigned to: ${med.assignedName}',
+                                                                style: TextStyle(
+                                                                  color: Colors
+                                                                      .blueGrey,
+                                                                  fontSize: 12,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w500,
+                                                                ),
+                                                              ),
+                                                            ],
+
+                                                            if (med.doctor !=
+                                                                null) ...[
+                                                              SizedBox(
+                                                                height: 5,
+                                                              ),
+
+                                                              RichText(
+                                                                text: TextSpan(
+                                                                  style: TextStyle(
+                                                                    color: Colors
+                                                                        .blueGrey,
+                                                                    fontSize:
+                                                                        12,
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w500,
+                                                                  ),
+                                                                  children: [
+                                                                    TextSpan(
+                                                                      text:
+                                                                          'Prescribing doctor: ',
+                                                                    ),
+                                                                    TextSpan(
+                                                                      text: med
+                                                                          .doctor,
+                                                                      style: TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold,
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                ),
+                                                              ),
+                                                            ],
+                                                            if (med.instructions !=
+                                                                null) ...[
+                                                              SizedBox(
+                                                                height: 5,
+                                                              ),
+                                                              RichText(
+                                                                text: TextSpan(
+                                                                  style: TextStyle(
+                                                                    color: Colors
+                                                                        .blueGrey,
+                                                                    fontSize:
+                                                                        12,
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w500,
+                                                                  ),
+                                                                  children: [
+                                                                    TextSpan(
+                                                                      text:
+                                                                          'Instruction: ',
+                                                                    ),
+                                                                    TextSpan(
+                                                                      text: med
+                                                                          .instructions,
+                                                                      style: TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold,
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                ),
+                                                              ),
+                                                            ],
+                                                            SizedBox(height: 5),
+
+                                                            // if (nextDose !=
+                                                            //     null) ...[
+                                                            //   const SizedBox(
+                                                            //     height: 4,
+                                                            //   ),
+                                                            //
+                                                            //   Text(
+                                                            //     'At ${DateFormat.jm().format(nextDose)}',
+                                                            //     style: TextStyle(
+                                                            //       color: Colors
+                                                            //           .grey
+                                                            //           .shade600,
+                                                            //       fontSize: 11,
+                                                            //     ),
+                                                            //   ),
+                                                            // ],
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      Expanded(
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .end,
+                                                          mainAxisAlignment:
+                                                              MainAxisAlignment
+                                                                  .end,
+                                                          children: [
+                                                            Row(
+                                                              mainAxisAlignment:
+                                                                  MainAxisAlignment
+                                                                      .end,
+                                                              children: [
+                                                                if (nextDose !=
+                                                                    null)
+                                                                  StreamBuilder(
+                                                                    stream: Stream.periodic(
+                                                                      const Duration(
+                                                                        seconds:
+                                                                            1,
+                                                                      ),
+                                                                    ),
+                                                                    builder:
+                                                                        (
+                                                                          context,
+                                                                          snapshot,
+                                                                        ) {
+                                                                          final diff =
+                                                                              nextDose?.difference(
+                                                                                DateTime.now(),
+                                                                              ) ??
+                                                                              Duration.zero;
+
+                                                                          // Prevent negative values
+                                                                          final safeDiff =
+                                                                              diff.isNegative
+                                                                              ? Duration.zero
+                                                                              : diff;
+
+                                                                          final text =
+                                                                              '${safeDiff.inHours.toString().padLeft(2, '0')}h '
+                                                                              '${safeDiff.inMinutes.remainder(60).toString().padLeft(2, '0')}m '
+                                                                              '${safeDiff.inSeconds.remainder(60).toString().padLeft(2, '0')}s';
+
+                                                                          return Text(
+                                                                            text,
+                                                                            style: TextStyle(
+                                                                              color: ShieldColors.activeTeal,
+                                                                              fontWeight: FontWeight.w600,
+                                                                              fontSize: 12,
+                                                                            ),
+                                                                          );
+                                                                        },
+                                                                  ),
+                                                              ],
+                                                            ),
+                                                            Text(
+                                                              "Until Next Dose",
+                                                              style: TextStyle(
+                                                                fontSize: 12,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                                color: ShieldColors
+                                                                    .activeTeal,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        }),
+                                      ],
+                                    ),
+                                  );
+                                },
+                                // loading: () => const Center(
+                                //   child: Padding(
+                                //     padding: EdgeInsets.all(20),
+                                //     child: CircularProgressIndicator(),
+                                //   ),
+                                // ),
+                                loading: () => Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade50,
+                                  ),
+                                  child: const ShieldLoader(
+                                    message: 'Loading your family...',
+                                  ),
+                                ),
+                                error: (e, st) => const SizedBox.shrink(),
+                              ),
+                              // Active Members Stream
+                              Text(
+                                'Shield Members',
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      color: ShieldColors.textBody,
+                                    ),
+                              ),
+                              const SizedBox(height: 16),
+
+                              StreamBuilder<List<Map<String, dynamic>>>(
+                                stream: safetyRepo.streamActiveMembers(
+                                  profile.familyId,
+                                ),
+                                builder: (context, memberSnapshot) {
+                                  if (memberSnapshot.connectionState ==
+                                          ConnectionState.waiting &&
+                                      !_sosCountdownActive) {
+                                    return const Center(
+                                      child: CircularPulseIndicator(),
+                                    );
+                                  }
+
+                                  final members = memberSnapshot.data ?? [];
+
+                                  if (members.isEmpty) {
+                                    return const Text(
+                                      'No members found. Invite some!',
+                                    );
+                                  }
+
+                                  return Column(
+                                    children: members.map((member) {
+                                      return _MemberStatusCard(
+                                        member: member,
+                                        safetyRepo: safetyRepo,
+                                        currentUserId: profile.userId,
+                                      );
+                                    }).toList(),
+                                  );
+                                },
+                              ),
+
+                              // Recent Events Stream — Bug 3: Improved formatting
+                              const SizedBox(height: 20),
+                              // Text(
+                              //   'Recent Activity',
+                              //   style: Theme.of(context).textTheme.titleLarge
+                              //       ?.copyWith(
+                              //         fontWeight: FontWeight.bold,
+                              //         color: ShieldColors.textBody,
+                              //       ),
+                              // ),
+                              // const SizedBox(height: 16),
+
+                              // StreamBuilder<List<Map<String, dynamic>>>(
+                              //   stream: safetyRepo.streamFamilyEvents(
+                              //     profile.familyId,
+                              //   ),
+                              //   builder: (context, eventSnapshot) {
+                              //     if (eventSnapshot.connectionState ==
+                              //         ConnectionState.waiting) {
+                              //       return const Center(
+                              //         child: CircularProgressIndicator(),
+                              //       );
+                              //     }
+                              //
+                              //     final events = eventSnapshot.data ?? [];
+                              //     if (events.isEmpty) {
+                              //       return const Padding(
+                              //         padding: EdgeInsets.symmetric(vertical: 32),
+                              //         child: Center(
+                              //           child: Column(
+                              //             children: [
+                              //               Icon(
+                              //                 Icons.history,
+                              //                 size: 48,
+                              //                 color: Colors.grey,
+                              //               ),
+                              //               SizedBox(height: 8),
+                              //               Text(
+                              //                 'No recent activity yet.\nCheck-ins, SOS events, and status updates will appear here.',
+                              //                 textAlign: TextAlign.center,
+                              //                 style: TextStyle(
+                              //                   color: ShieldColors.textLabel,
+                              //                 ),
+                              //               ),
+                              //             ],
+                              //           ),
+                              //         ),
+                              //       );
+                              //     }
+                              //
+                              //     return Container(
+                              //       decoration: BoxDecoration(
+                              //         color: Colors.white,
+                              //         borderRadius: ShieldDesign.roundedTwelve,
+                              //       ),
+                              //       child: ListView.separated(
+                              //         shrinkWrap: true,
+                              //         physics: const NeverScrollableScrollPhysics(),
+                              //         itemCount: events.length > 10
+                              //             ? 10
+                              //             : events.length,
+                              //         separatorBuilder: (context, index) =>
+                              //             const Divider(height: 1),
+                              //         itemBuilder: (context, index) {
+                              //           final evt = events[index];
+                              //           return _buildEventTile(evt);
+                              //         },
+                              //       ),
+                              //     );
+                              //   },
+                              // ),
+                              _buildRecentActivity(
+                                context,
+                                safetyRepo,
+                                profile.familyId,
+                              ),
+
+                              const SizedBox(height: 20),
+                              const AiWellnessCard(),
+                              const SizedBox(height: 100),
+                              // Space for bottom nav
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (e, st) => Center(child: Text('Error: $e')),
+                ),
+              ),
+            ] else ...[
+              Expanded(
+                child: Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(24),
+                      topRight: Radius.circular(24),
+                    ),
+                  ),
+                  child: const ShieldLoader(),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      bottomNavigationBar: Container(
+        color: Colors.white,
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Row(
+              children: [
+                // Large EMERGENCY button
+                Expanded(
+                  flex: 2,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    height: 60,
+                    child: ElevatedButton(
+                      onPressed: _startSosCountdown,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _sosCountdownActive
+                            ? Colors.orange
+                            : ShieldColors.urgentRed,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: ShieldDesign.roundedTwelve,
+                        ),
+                        elevation: 6,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.warning_rounded, size: 24),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              _sosCountdownActive
+                                  ? 'CANCEL ($_sosCountdown)'
+                                  : 'EMERGENCY',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                letterSpacing: 1,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // COMMAND CENTER button
+                Expanded(
+                  flex: 2,
+                  child: SizedBox(
+                    height: 60,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        await showModalBottomSheet(
+                          context: context,
+
+                          isScrollControlled: true,
+                          backgroundColor: Colors.transparent,
+                          builder: (context) =>
+                              CommandCenterSheet(fromLeader: true),
+                        );
+                        //  profileAsync = ref.watch(currentUserProfileProvider);
+                        //  ref.invalidate(currentUserProfileProvider);
+                        //   ref.invalidate(safetyRepositoryProvider);
+                        //  ref.invalidate(userRoleProvider);
+                        //  ref.invalidate(currentUserProfileProvider);
+                        // ref.invalidate(shieldRouterProvider);
+                        // ref.invalidate(allDoseLogsProvider);
+                        // ref.invalidate(familySafeZonesProvider);
+                        // ref.invalidate(familyMedicationsProvider);
+                        // ref.invalidate(toolsRepositoryProvider);
+                        //   ref.invalidate(authRepositoryProvider);
+                        //  ref.invalidate(safeZonesStreamProvider);
+                        //  Navigator.push(context, MaterialPageRoute(builder: (context)=>CommandCenterSheet()));
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: ShieldColors.activeTeal,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: ShieldDesign.roundedTwelve,
+                        ),
+                        elevation: 4,
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.grid_view_rounded, size: 22),
+                          SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              'MENU',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                letterSpacing: 1,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                // const SizedBox(width: 8),
+                // // Profile icon button
+                // Container(
+                //   decoration: BoxDecoration(
+                //     borderRadius: BorderRadius.circular(30),
+                //     color: Colors.white,
+                //   ),
+                //   height: 60,
+                //   width: 60,
+                //   child: GestureDetector(
+                //     onTap: () {
+                //       showModalBottomSheet(
+                //         context: context,
+                //         isScrollControlled: true,
+                //         backgroundColor: Colors.transparent,
+                //         builder: (_) => const ProfileSettingsView(),
+                //       );
+                //     },
+                //
+                //     child: profileAsync.value?.avatarUrl != null
+                //         ? Container(
+                //             padding: EdgeInsets.all(10),
+                //             clipBehavior: Clip.antiAlias,
+                //             decoration: BoxDecoration(),
+                //             child: ClipRRect(
+                //               borderRadius: BorderRadius.circular(30),
+                //               //  borderRadius: ShieldDesign.roundedTwelve,
+                //               child: Image.network(
+                //                 profileAsync.value!.avatarUrl!,
+                //                 fit: BoxFit.cover,
+                //               ),
+                //             ),
+                //           )
+                //         : const Icon(Icons.person_outline, size: 26),
+                //   ),
+                // ),
+              ],
             ),
-          );
+          ),
+        ),
+      ),
+    );
   }
 
   DateTime? _getNextCheckinTime(Map<String, dynamic> schedule) {
@@ -2155,6 +2185,8 @@ class _LeaderDashboardState extends ConsumerState<LeaderDashboard> {
         break;
       case 'driving':
       case 'driving_alert':
+      case 'driving_start':
+      case 'biking_start':
         icon = Icons.directions_car;
         color = Colors.orange;
         break;
@@ -2541,8 +2573,7 @@ class _NotificationsSheet extends StatelessWidget {
                     final desc = evt['description'] as String? ?? '';
                     final userName = evt['user_name'] as String? ?? '';
                     final createdAt = evt['created_at'] as String?;
-                    print(evt);
-                    print("evtevt");
+
                     String dateStr = '';
                     String timeStr = '';
 
@@ -2557,7 +2588,9 @@ class _NotificationsSheet extends StatelessWidget {
                     if (type == 'sos') icon = Icons.warning;
                     if (type == 'check_in') icon = Icons.how_to_reg;
                     if (type.contains('driving')) icon = Icons.directions_car;
-
+                    final displayName = userName.length > 20
+                        ? '${userName.substring(0, 20)}…'
+                        : userName;
                     return ListTile(
                       leading: Icon(
                         icon,
@@ -2567,9 +2600,10 @@ class _NotificationsSheet extends StatelessWidget {
                       title: Text.rich(
                         TextSpan(
                           children: [
-                            if (userName.isNotEmpty)
+                            if (displayName.isNotEmpty)
                               TextSpan(
-                                text: userName,
+                                text: displayName,
+
                                 style: const TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
@@ -2594,6 +2628,7 @@ class _NotificationsSheet extends StatelessWidget {
                             )
                           : null,
                       trailing: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
                             dateStr,
@@ -2897,7 +2932,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
       //       });
       //
       //       // Also register this as a well_event to ensure it shows up securely on the stream!
-      //       await Supabase.instance.client.from('well_events').insert({
+      //       await logWellEvent(Supabase.instance.client,{
       //         'family_id': widget.profile?.familyId,
       //         'user_id': widget.profile?.userId,
       //         'user_name': widget.profile?.fullName,
@@ -4052,6 +4087,329 @@ class _SetupStepCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class NotTakenAcknowledgeCard extends ConsumerWidget {
+  const NotTakenAcknowledgeCard({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final profile = ref.watch(currentUserProfileProvider).value;
+    // Replace with your existing leader check
+    if (profile == null) return const SizedBox.shrink();
+
+    final logsAsync = ref.watch(allDoseLogsProvider);
+    final meds = ref.watch(familyMedicationsProvider).value ?? [];
+
+    return logsAsync.when(
+      data: (logs) {
+        final pending = logs
+            .where(
+              (l) =>
+                  l.status == 'not_taken' &&
+                  l.acknowledgedAt == null &&
+                  !(profile.role == 'leader' && l.userId == profile.userId),
+            )
+            .toList();
+        if (pending.isEmpty) return const SizedBox.shrink();
+
+        return Column(
+          children: pending.map((log) {
+            final medName =
+                meds
+                    .where((m) => m.id == log.medicationId)
+                    .map((m) => m.medicationName)
+                    .firstOrNull ??
+                'Medication';
+            return _NotTakenAckItem(
+              key: ValueKey(log.id),
+              log: log,
+              medName: medName,
+              leaderId: profile.userId,
+            );
+          }).toList(),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _NotTakenAckItem extends ConsumerStatefulWidget {
+  final DoseLog log;
+  final String medName;
+  final String leaderId;
+
+  const _NotTakenAckItem({
+    super.key,
+    required this.log,
+    required this.medName,
+    required this.leaderId,
+  });
+
+  @override
+  ConsumerState<_NotTakenAckItem> createState() => _NotTakenAckItemState();
+}
+
+class _NotTakenAckItemState extends ConsumerState<_NotTakenAckItem> {
+  bool _isAcknowledging = false;
+
+  Future<void> _acknowledge() async {
+    if (_isAcknowledging) return;
+    setState(() => _isAcknowledging = true);
+
+    try {
+      final supabase = Supabase.instance.client;
+
+      await supabase
+          .from('dose_logs')
+          .update({
+            'acknowledged_at': DateTime.now().toUtc().toIso8601String(),
+            'acknowledged_by': widget.leaderId,
+          })
+          .eq('id', widget.log.id);
+
+      ref.invalidate(allDoseLogsProvider);
+
+      // Let the member know it was seen
+      try {
+        await supabase.functions.invoke(
+          'push-router',
+          body: {
+            "target_user_id": widget.log.userId,
+            "title": "Medications",
+            "body": "Your ${widget.medName} update was acknowledged",
+            "action": "not_taken_ack",
+          },
+        );
+      } catch (e) {
+        debugPrint("Push failed: $e");
+      }
+    } catch (e) {
+      debugPrint('[Medication] Error acknowledging: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to acknowledge'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isAcknowledging = false);
+    }
+  }
+
+  final memberNameProvider = FutureProvider.family<String?, String>((
+    ref,
+    userId,
+  ) async {
+    try {
+      final row = await Supabase.instance.client
+          .from('profiles')
+          .select('full_name')
+          .eq('id', userId)
+          .maybeSingle();
+      debugPrint('[MemberName] $userId -> $row');
+      return row?['full_name'] as String?;
+    } catch (e) {
+      debugPrint('[MemberName] error for $userId: $e');
+      rethrow;
+    }
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final log = widget.log;
+    final name = ref.watch(memberNameProvider(log.userId)).value ?? 'Someone';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50,
+        border: Border.all(color: Colors.amber, width: 1.5),
+        borderRadius: ShieldDesign.roundedTwelve,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.amber.shade700),
+              const SizedBox(width: 8),
+              Text(
+                'MEDICATION NOT TAKEN',
+                style: TextStyle(
+                  color: Colors.amber.shade800,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '$name did not take ${widget.medName}',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: ShieldColors.textBody,
+            ),
+          ),
+          if (log.scheduledAt != null)
+            Text(
+              'Scheduled for ${DateFormat.jm().format(log.scheduledAt!.toLocal())}',
+              style: const TextStyle(color: Colors.black87),
+            ),
+          if (log.reason?.isNotEmpty == true)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Reason: ${log.reason}',
+                style: const TextStyle(
+                  fontStyle: FontStyle.italic,
+                  color: Colors.black54,
+                ),
+              ),
+            ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _isAcknowledging ? null : _acknowledge,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: ShieldColors.activeTeal,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: ShieldColors.activeTeal.withValues(
+                  alpha: 0.7,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: ShieldDesign.roundedTwelve,
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              icon: _isAcknowledging
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.check, size: 20),
+              label: Text(
+                _isAcknowledging ? 'Saving...' : 'Acknowledge',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ShieldLoader extends StatefulWidget {
+  final String message;
+
+  const ShieldLoader({super.key, this.message = 'Securing your Shield...'});
+
+  @override
+  State<ShieldLoader> createState() => _ShieldLoaderState();
+}
+
+class _ShieldLoaderState extends State<ShieldLoader>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, _) {
+          final t = Curves.easeInOut.transform(_c.value);
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  // soft pulsing halo
+                  Container(
+                    width: 90 + 26 * t,
+                    height: 90 + 26 * t,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: ShieldColors.activeTeal.withValues(
+                        alpha: 0.12 * (1 - t) + 0.04,
+                      ),
+                    ),
+                  ),
+                  // logo card
+                  Container(
+                    width: 76,
+                    height: 76,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: ShieldColors.activeTeal.withValues(
+                            alpha: 0.25,
+                          ),
+                          blurRadius: 18,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Image.asset('assets/logo.png'),
+                  ),
+                  // spinning ring
+                  SizedBox(
+                    width: 84,
+                    height: 84,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      valueColor: AlwaysStoppedAnimation(
+                        ShieldColors.activeTeal.withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 22),
+              Opacity(
+                opacity: 0.6 + 0.4 * t,
+                child: Text(
+                  widget.message,
+                  style: TextStyle(
+                    color: ShieldColors.textLabel,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

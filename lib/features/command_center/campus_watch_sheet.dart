@@ -9,6 +9,8 @@ import 'package:well_check_v3/core/data/user_profile_provider.dart';
 import 'package:well_check_v3/core/data/safety_repository.dart';
 import 'package:well_check_v3/core/data/safe_zone_provider.dart';
 
+import '../../main.dart';
+
 class CampusWatchSheet extends ConsumerStatefulWidget {
   final bool fromLeader;
 
@@ -336,7 +338,9 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Could not get location: $e. Using default.'),
+            content: const Text(
+              'Could not get your location. Please enable location services and allow permission. Using default location.',
+            ),
             backgroundColor: Colors.orange,
           ),
         );
@@ -374,7 +378,7 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
           'Battery info not available over isolate, using default: $e',
         );
       }
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'event_type': 'campus_added',
@@ -466,16 +470,16 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
                 ],
               ),
               Spacer(),
-              if (widget.fromLeader == true)
-                IconButton(
-                  onPressed: _showAddCampusDialog,
-                  icon: const Icon(
-                    Icons.add_location_alt,
-                    color: ShieldColors.activeTeal,
-                    size: 28,
-                  ),
-                  tooltip: 'Add Campus',
-                ),
+              // if (widget.fromLeader == true)
+              //   IconButton(
+              //     onPressed: _showAddCampusDialog,
+              //     icon: const Icon(
+              //       Icons.add_location_alt,
+              //       color: ShieldColors.activeTeal,
+              //       size: 28,
+              //     ),
+              //     tooltip: 'Add Campus',
+              //   ),
               GestureDetector(
                 onTap: () async {
                   Navigator.of(context).pop();
@@ -856,7 +860,9 @@ class _CampusWatchSheetState extends ConsumerState<CampusWatchSheet> {
                           try {
                             final dt = DateTime.parse(createdAt);
                             final diff = DateTime.now().difference(dt);
-                            if (diff.inMinutes < 60) {
+                            if (diff.inMinutes < 1) {
+                              timeStr = 'Just now';
+                            } else if (diff.inMinutes < 60) {
                               timeStr = '${diff.inMinutes}m ago';
                             } else if (diff.inHours < 24) {
                               timeStr = '${diff.inHours}h ago';

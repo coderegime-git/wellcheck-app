@@ -10,6 +10,8 @@ import 'package:well_check_v3/core/security/vault_crypto_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../main.dart';
+
 class VaultSheet extends ConsumerStatefulWidget {
   final bool isMedical;
   final bool fromLeader;
@@ -59,7 +61,7 @@ class _VaultSheetState extends ConsumerState<VaultSheet> {
           'Battery info not available over isolate, using default: $e',
         );
       }
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'event_type': 'status_update',

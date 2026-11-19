@@ -165,7 +165,7 @@ class SafeZoneConfigScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profileAsync = ref.watch(currentUserProfileProvider);
-
+    print("asdfghjk");
     return Scaffold(
       appBar: AppBar(
         title: const Text('Safety Fences'),

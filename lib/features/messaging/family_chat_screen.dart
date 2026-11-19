@@ -412,7 +412,12 @@ class _ChatBubble extends StatelessWidget {
                   ),
                   if (!isMe)
                     if (senderName != "")
-                      Text(senderName ?? "", style: TextStyle(fontSize: 10)),
+                      Text(
+                        senderName ?? "",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 10),
+                      ),
                 ],
               ),
             ),

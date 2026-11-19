@@ -103,6 +103,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../services/dose_notification_service.dart';
 import 'checkin_service.dart';
 
 @pragma('vm:entry-point')
@@ -215,26 +216,27 @@ class PushNotificationService extends ConsumerStatefulWidget {
 
   static Future<void> _setupLocalNotifications() async {
     // Android initialization
-    const androidSettings = AndroidInitializationSettings(
-      //  '@mipmap/launcher_icon',
-      '@drawable/ic_stat_notification',
-    );
-
-    // iOS initialization
-    const iosSettings = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
-
-    const initSettings = InitializationSettings(
-      android: androidSettings,
-      iOS: iosSettings,
-    );
-    await _localNotifications.initialize(
-      initSettings,
-      onDidReceiveNotificationResponse: _onNotificationTapped,
-    );
+    // const androidSettings = AndroidInitializationSettings(
+    //   //  '@mipmap/launcher_icon',
+    //   '@drawable/ic_stat_notification',
+    // );
+    //
+    // // iOS initialization
+    // const iosSettings = DarwinInitializationSettings(
+    //   requestAlertPermission: true,
+    //   requestBadgePermission: true,
+    //   requestSoundPermission: true,
+    // );
+    //
+    // const initSettings = InitializationSettings(
+    //   android: androidSettings,
+    //   iOS: iosSettings,
+    // );
+    // await _localNotifications.initialize(
+    //   initSettings,
+    //   onDidReceiveNotificationResponse: _onNotificationTapped,
+    // );
+    await DoseNotificationService.instance.reinit();
 
     // Create Android notification channels
     final androidPlugin = _localNotifications
@@ -273,13 +275,9 @@ class PushNotificationService extends ConsumerStatefulWidget {
     final notification = message.notification;
     if (notification == null) return;
     final action = message.data['action'];
-    print("cccc");
-    print(action);
+
     print(message.data);
     if (message.notification != null) {
-      print("cccc111");
-      print("cccc111");
-
       // print(message.notification!.android!.channelId);
     }
 
@@ -321,15 +319,21 @@ class PushNotificationService extends ConsumerStatefulWidget {
       if (isMedicationNotification && !medicationReminders) {
         return;
       }
-      //if (!Platform.isIOS) {
-      showNotification(
-        title: notification.title ?? 'Well-Check',
-        body: notification.body ?? '',
-        payload: message.data.toString(),
-        isSos: isSos,
-        sound: sound,
-      );
-      // }
+      bool drivingAlerts = prefs.getBool('notif_driving') ?? false;
+      print("ggggggggg");
+
+      if (!drivingAlerts && message.data['action'] == "driving_alert") {
+        return;
+      }
+      if (!Platform.isIOS) {
+        showNotification(
+          title: notification.title ?? 'Well-Check',
+          body: notification.body ?? '',
+          payload: message.data.toString(),
+          isSos: isSos,
+          sound: sound,
+        );
+      }
     }
   }
 
@@ -413,7 +417,12 @@ class PushNotificationService extends ConsumerStatefulWidget {
 
       // ✅ Don't save FCM token if user is logged out
       final prefs = await SharedPreferences.getInstance();
-      final isLoggedIn = prefs.getBool('is_logged_in') ?? false;
+      //   final isLoggedIn = prefs.getBool('is_logged_in') ?? false;
+      final supabase = Supabase.instance.client;
+      final session = supabase.auth.currentSession;
+      // final user = session?.user;
+      // final isLoggedIn = user != null;
+      final isLoggedIn = session != null;
       if (!isLoggedIn) {
         debugPrint('[FCM] Skipping token save — user logged out');
         return;

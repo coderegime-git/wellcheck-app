@@ -123,8 +123,7 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
   }
 
   String _formatTime(TimeOfDay t) =>
-      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(
-          2, '0')}';
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
   String _formatTimeDisplay(TimeOfDay t) {
     final period = t.hour >= 12 ? 'PM' : 'AM';
@@ -133,23 +132,22 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
   }
 
   Future<void> _pickStartDate() async {
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+
     final picked = await showDatePicker(
       context: context,
-      initialDate: _startDate,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      initialDate: _startDate.isBefore(todayDate) ? todayDate : _startDate,
+      firstDate: todayDate,
       lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
-      builder: (ctx, child) =>
-          Theme(
-            data: Theme.of(ctx).copyWith(
-              colorScheme: Theme
-                  .of(
-                ctx,
-              )
-                  .colorScheme
-                  .copyWith(primary: ShieldColors.activeTeal),
-            ),
-            child: child!,
-          ),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: Theme.of(
+            ctx,
+          ).colorScheme.copyWith(primary: ShieldColors.activeTeal),
+        ),
+        child: child!,
+      ),
     );
     if (picked != null && mounted) setState(() => _startDate = picked);
   }
@@ -160,18 +158,14 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
       initialDate: _endDate ?? _startDate.add(const Duration(days: 30)),
       firstDate: _startDate,
       lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
-      builder: (ctx, child) =>
-          Theme(
-            data: Theme.of(ctx).copyWith(
-              colorScheme: Theme
-                  .of(
-                ctx,
-              )
-                  .colorScheme
-                  .copyWith(primary: ShieldColors.activeTeal),
-            ),
-            child: child!,
-          ),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: Theme.of(
+            ctx,
+          ).colorScheme.copyWith(primary: ShieldColors.activeTeal),
+        ),
+        child: child!,
+      ),
     );
     if (picked != null && mounted) setState(() => _endDate = picked);
   }
@@ -180,34 +174,31 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
     final picked = await showTimePicker(
       context: context,
       initialTime: const TimeOfDay(hour: 12, minute: 0),
-      builder: (ctx, child) =>
-          Theme(
-            data: Theme.of(ctx).copyWith(
-              colorScheme: Theme
-                  .of(
-                ctx,
-              )
-                  .colorScheme
-                  .copyWith(primary: ShieldColors.activeTeal),
-            ),
-            child: child!,
-          ),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: Theme.of(
+            ctx,
+          ).colorScheme.copyWith(primary: ShieldColors.activeTeal),
+        ),
+        child: child!,
+      ),
     );
     if (picked != null && mounted) {
       setState(() {
         _scheduleTimes.add(picked);
         _scheduleTimes.sort(
-              (a, b) =>
-              (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute),
+          (a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute),
         );
       });
     }
   }
 
-  DateTime _calculateFirstScheduleDate(DateTime startDate,
-      TimeOfDay time,
-      String recurrence,
-      List<int> selectedDays,) {
+  DateTime _calculateFirstScheduleDate(
+    DateTime startDate,
+    TimeOfDay time,
+    String recurrence,
+    List<int> selectedDays,
+  ) {
     var date = DateTime(
       startDate.year,
       startDate.month,
@@ -274,11 +265,14 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
       return;
     }
 
-// --- New: validate start date isn't in the past ---
+    // --- New: validate start date isn't in the past ---
     final today = DateTime.now();
     final todayDateOnly = DateTime(today.year, today.month, today.day);
     final startDateOnly = DateTime(
-        _startDate.year, _startDate.month, _startDate.day);
+      _startDate.year,
+      _startDate.month,
+      _startDate.day,
+    );
 
     if (startDateOnly.isBefore(todayDateOnly)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -286,8 +280,17 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
       );
       return;
     }
-
-// If start date is today, make sure at least one schedule time is still upcoming
+    if (_scheduleTimes.length != _scheduleTimes.toSet().length) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The same schedule time cannot be selected more than once.',
+          ),
+        ),
+      );
+      return;
+    }
+    // If start date is today, make sure at least one schedule time is still upcoming
     if (startDateOnly.isAtSameMomentAs(todayDateOnly) &&
         _scheduleTimes.isNotEmpty &&
         _recurrence != 'as_needed') {
@@ -347,8 +350,8 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
       final freqLabel = _recurrenceOptions
           .firstWhere(
             (r) => r.$1 == _recurrence,
-        orElse: () => ('daily', 'Daily'),
-      )
+            orElse: () => ('daily', 'Daily'),
+          )
           .$2;
       final freqStr = _scheduleTimes.isNotEmpty
           ? '${_scheduleTimes.length}x $freqLabel'
@@ -359,36 +362,32 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
         await Supabase.instance.client
             .from('medications')
             .update({
-          'family_id': profile.familyId,
-          'assigned_to': _selectedUserId,
-          'assigned_name': _selectedUserName,
+              'family_id': profile.familyId,
+              'assigned_to': _selectedUserId,
+              'assigned_name': _selectedUserName,
 
-          'medication_name': _nameController.text.trim(),
-          'dosage': _dosageController.text.trim(),
-          'frequency': freqStr,
-          'instructions': _instructionsController.text
-              .trim()
-              .isEmpty
-              ? null
-              : _instructionsController.text.trim(),
-          'doctor': _doctorController.text
-              .trim()
-              .isEmpty
-              ? null
-              : _doctorController.text.trim(),
-          'schedule_times': timeStrings,
-          'start_date': DateFormat('yyyy-MM-dd').format(_startDate),
-          'end_date': _isOngoing
-              ? null
-              : (_endDate != null
-              ? DateFormat('yyyy-MM-dd').format(_endDate!)
-              : null),
-          'recurrence': _recurrence,
-          'days_of_week': _selectedDays,
-          'is_active': true,
-          'scheduled_at': utcDateTime?.toIso8601String(),
-          'reminder_sent': false,
-        })
+              'medication_name': _nameController.text.trim(),
+              'dosage': _dosageController.text.trim(),
+              'frequency': freqStr,
+              'instructions': _instructionsController.text.trim().isEmpty
+                  ? null
+                  : _instructionsController.text.trim(),
+              'doctor': _doctorController.text.trim().isEmpty
+                  ? null
+                  : _doctorController.text.trim(),
+              'schedule_times': timeStrings,
+              'start_date': DateFormat('yyyy-MM-dd').format(_startDate),
+              'end_date': _isOngoing
+                  ? null
+                  : (_endDate != null
+                        ? DateFormat('yyyy-MM-dd').format(_endDate!)
+                        : null),
+              'recurrence': _recurrence,
+              'days_of_week': _selectedDays,
+              'is_active': true,
+              'scheduled_at': utcDateTime?.toIso8601String(),
+              'reminder_sent': false,
+            })
             .eq('id', widget.existingMedication!.id);
         // final response = await Supabase.instance.client.functions.invoke(
         //   'medication-reminder-cron',
@@ -401,35 +400,31 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
         final medication = await Supabase.instance.client
             .from('medications')
             .insert({
-          'family_id': profile.familyId,
-          'assigned_to': _selectedUserId,
-          'assigned_name': _selectedUserName,
-          'medication_name': _nameController.text.trim(),
-          'dosage': _dosageController.text.trim(),
-          'frequency': freqStr,
-          'instructions': _instructionsController.text
-              .trim()
-              .isEmpty
-              ? null
-              : _instructionsController.text.trim(),
-          'doctor': _doctorController.text
-              .trim()
-              .isEmpty
-              ? null
-              : _doctorController.text.trim(),
-          'schedule_times': timeStrings,
-          'start_date': DateFormat('yyyy-MM-dd').format(_startDate),
-          'end_date': _isOngoing
-              ? null
-              : (_endDate != null
-              ? DateFormat('yyyy-MM-dd').format(_endDate!)
-              : null),
-          'recurrence': _recurrence,
-          'days_of_week': _selectedDays,
-          'is_active': true,
-          'scheduled_at': utcDateTime?.toIso8601String(),
-          'reminder_sent': false,
-        })
+              'family_id': profile.familyId,
+              'assigned_to': _selectedUserId,
+              'assigned_name': _selectedUserName,
+              'medication_name': _nameController.text.trim(),
+              'dosage': _dosageController.text.trim(),
+              'frequency': freqStr,
+              'instructions': _instructionsController.text.trim().isEmpty
+                  ? null
+                  : _instructionsController.text.trim(),
+              'doctor': _doctorController.text.trim().isEmpty
+                  ? null
+                  : _doctorController.text.trim(),
+              'schedule_times': timeStrings,
+              'start_date': DateFormat('yyyy-MM-dd').format(_startDate),
+              'end_date': _isOngoing
+                  ? null
+                  : (_endDate != null
+                        ? DateFormat('yyyy-MM-dd').format(_endDate!)
+                        : null),
+              'recurrence': _recurrence,
+              'days_of_week': _selectedDays,
+              'is_active': true,
+              'scheduled_at': utcDateTime?.toIso8601String(),
+              'reminder_sent': false,
+            })
             .select()
             .single();
         // final response = await Supabase.instance.client.functions.invoke(
@@ -462,10 +457,9 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
               .eq('family_id', profile.familyId)
               .eq('is_active', true);
           final medList = allMeds.map((e) => Medication.fromJson(e)).toList();
-          await MedicationNotificationService.scheduleForMedications(medList);
+          // await MedicationNotificationService.scheduleForMedications(medList);
           debugPrint(
-            '[Medication] Notifications scheduled locally for ${medList
-                .length} active medications',
+            '[Medication] Notifications scheduled locally for ${medList.length} active medications',
           );
         } catch (e) {
           debugPrint('[Medication] Local Notification scheduling failed: $e');
@@ -479,9 +473,7 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
               'target_user_id': _selectedUserId,
               'title': 'New Medication Scheduled',
               'body':
-              '${profile.fullName ??
-                  'Someone'} assigned you $freqStr of ${_nameController.text
-                  .trim()}',
+                  '${profile.fullName ?? 'Someone'} assigned you $freqStr of ${_nameController.text.trim()}',
               'action': 'new_assignment',
             },
           );
@@ -542,11 +534,7 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
 
         title: Text(
           'Add Medication',
-          style: Theme
-              .of(context)
-              .textTheme
-              .titleLarge
-              ?.copyWith(
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.bold,
             color: ShieldColors.textBody,
           ),
@@ -582,42 +570,47 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
                 _sectionLabel('Assign To'),
                 if (_isLoadingMembers)
                   const Center(child: CircularProgressIndicator())
-                else
-                  if (_familyMembers.isNotEmpty)
-                    DropdownButtonFormField<String>(
-                      value: _selectedUserId,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(
-                          borderRadius: ShieldDesign.roundedTwelve,
-                        ),
-                        prefixIcon: const Icon(Icons.person),
+                else if (_familyMembers.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    value: _selectedUserId,
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                        borderRadius: ShieldDesign.roundedTwelve,
                       ),
-
-                      items: _familyMembers.map((m) {
-                        final name = m['profiles']?['full_name'] ?? 'Unknown';
-
-                        final role = m['role'];
-
-                        return DropdownMenuItem<String>(
-                          value: m['user_id'] as String,
-                          child: Text('$name ($role)'),
-                        );
-                      }).toList(),
-
-                      onChanged: (val) {
-                        final member = _familyMembers.firstWhere(
-                              (m) => m['user_id'] == val,
-                        );
-
-                        setState(() {
-                          _selectedUserId = val;
-
-                          _selectedUserName = member['profiles']?['full_name'];
-                        });
-                      },
-
-                      validator: (val) => val == null ? 'Required' : null,
+                      prefixIcon: const Icon(Icons.person),
                     ),
+
+                    items: _familyMembers.map((m) {
+                      final name = m['profiles']?['full_name'] ?? 'Unknown';
+
+                      final role = m['role'];
+
+                      return DropdownMenuItem<String>(
+                        value: m['user_id'] as String,
+                        child: Text(
+                          '$name ($role)',
+                          overflow: TextOverflow.ellipsis,
+                          // add this
+                          maxLines: 1,
+                        ),
+                      );
+                    }).toList(),
+
+                    onChanged: (val) {
+                      final member = _familyMembers.firstWhere(
+                        (m) => m['user_id'] == val,
+                      );
+
+                      setState(() {
+                        _selectedUserId = val;
+
+                        _selectedUserName = member['profiles']?['full_name'];
+                      });
+                    },
+
+                    validator: (val) => val == null ? 'Required' : null,
+                  ),
 
                 const SizedBox(height: 16),
 
@@ -633,7 +626,7 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
                     prefixIcon: const Icon(Icons.medical_services),
                   ),
                   validator: (val) =>
-                  val == null || val.isEmpty ? 'Required' : null,
+                      val == null || val.trim().isEmpty ? 'Required' : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -646,11 +639,11 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
                     prefixIcon: const Icon(Icons.science),
                   ),
                   validator: (val) =>
-                  val == null || val.isEmpty ? 'Required' : null,
+                      val == null || val.trim().isEmpty ? 'Required' : null,
                 ),
 
                 const SizedBox(height: 20),
-
+                //
                 // ── SCHEDULE ──
                 _sectionLabel('Schedule'),
 
@@ -741,10 +734,7 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: _scheduleTimes
-                          .asMap()
-                          .entries
-                          .map((entry) {
+                      children: _scheduleTimes.asMap().entries.map((entry) {
                         final i = entry.key;
                         final t = entry.value;
                         return Chip(
@@ -785,10 +775,10 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
                       child: _isOngoing
                           ? _ongoingToggle()
                           : _dateButton(
-                        label: 'End Date',
-                        date: _endDate,
-                        onTap: _pickEndDate,
-                      ),
+                              label: 'End Date',
+                              date: _endDate,
+                              onTap: _pickEndDate,
+                            ),
                     ),
                   ],
                 ),
@@ -850,13 +840,13 @@ class _AddMedicationSheetState extends ConsumerState<AddMedicationSheet> {
                     onPressed: _isLoading ? null : _saveMedication,
                     icon: _isLoading
                         ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
                         : const Icon(Icons.check_circle),
                     label: const Text(
                       'Save Medication',

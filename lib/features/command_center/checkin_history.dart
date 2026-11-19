@@ -5,37 +5,94 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/data/user_profile_provider.dart';
 
+// final checkInHistoryProvider =
+//     FutureProvider.family<List<Map<String, dynamic>>, String>((
+//       ref,
+//       familyId,
+//     ) async {
+//       final supabase = Supabase.instance.client;
+//
+//       final checkIns = await supabase
+//           .from('check_ins')
+//           .select()
+//           .eq('family_id', familyId)
+//           .order('created_at', ascending: false);
+//
+//       // Profiles
+//       final profiles = await supabase.from('profiles').select('id, full_name');
+//
+//       final profileMap = {
+//         for (final p in profiles)
+//           p['id'].toString(): p['full_name'] ?? 'Unknown',
+//       };
+//
+//       return List<Map<String, dynamic>>.from(checkIns).map((item) {
+//         return {
+//           ...item,
+//           'profiles': {
+//             'id': item['user_id'],
+//             'full_name': profileMap[item['user_id'].toString()] ?? 'Unknown',
+//           },
+//         };
+//       }).toList();
+//     });
 final checkInHistoryProvider =
     FutureProvider.family<List<Map<String, dynamic>>, String>((
       ref,
       familyId,
     ) async {
       final supabase = Supabase.instance.client;
-      // await generateMissedCheckIns(familyId);
-      // Check-ins
+
+      debugPrint('Fetching check-in history for: $familyId');
+
+      // 1. Fetch family check-ins
       final checkIns = await supabase
           .from('check_ins')
           .select()
           .eq('family_id', familyId)
           .order('created_at', ascending: false);
 
-      // Profiles
-      final profiles = await supabase.from('profiles').select('id, full_name');
+      debugPrint('Check-ins fetched: ${checkIns.length}');
 
+      if (checkIns.isEmpty) {
+        return [];
+      }
+
+      // 2. Get unique user IDs from check-ins
+      final userIds = checkIns
+          .map((item) => item['user_id'].toString())
+          .toSet()
+          .toList();
+
+      // 3. Fetch only relevant profiles
+      final profiles = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .inFilter('id', userIds);
+
+      debugPrint('Profiles fetched: ${profiles.length}');
+
+      // 4. Create profile lookup
       final profileMap = {
         for (final p in profiles)
           p['id'].toString(): p['full_name'] ?? 'Unknown',
       };
 
-      return List<Map<String, dynamic>>.from(checkIns).map((item) {
+      // 5. Attach profile information
+      final result = checkIns.map((item) {
         return {
           ...item,
           'profiles': {
             'id': item['user_id'],
-            'full_name': profileMap[item['user_id'].toString()] ?? 'Unknown',
+            'full_name':
+                profileMap[item['user_id'].toString()] ?? 'Unknown User',
           },
         };
       }).toList();
+
+      debugPrint('Final history count: ${result.length}');
+
+      return result;
     });
 
 Future<void> generateMissedCheckIns(String familyId) async {

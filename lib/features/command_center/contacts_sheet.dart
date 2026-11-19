@@ -31,7 +31,7 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
 
       final res = await Supabase.instance.client
           .from('family_members')
-          .select('user_id, role, profiles(full_name, phone)')
+          .select('user_id, role, profiles(full_name, phone,age)')
           .eq('family_id', profile.familyId);
 
       // find current logged-in user role
@@ -97,6 +97,7 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
   Widget _buildContactRow(
     String memberId,
     String name,
+    int age,
     String relation,
     String? phone,
     bool isMe,
@@ -113,7 +114,9 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
         ),
 
         title: Text(
-          name + (isMe ? ' (Me)' : ''),
+          name + (isMe ? ' (Me)${age != 0 ? ' ($age)' : ''}' : ''),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
 
@@ -244,16 +247,16 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
                 ),
               ),
               Spacer(),
-              if (currentUserRole == "leader")
-                IconButton(
-                  icon: const Icon(
-                    Icons.person_add,
-                    color: ShieldColors.activeTeal,
-                  ),
-                  onPressed: _showAddContactInfo,
-                  tooltip: 'Add Contact',
-                ),
-              SizedBox(width: 10),
+              // if (currentUserRole == "leader")
+              //   IconButton(
+              //     icon: const Icon(
+              //       Icons.person_add,
+              //       color: ShieldColors.activeTeal,
+              //     ),
+              //     onPressed: _showAddContactInfo,
+              //     tooltip: 'Add Contact',
+              //   ),
+              //  SizedBox(width: 10),
               GestureDetector(
                 onTap: () async {
                   Navigator.of(context).pop();
@@ -306,12 +309,14 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
                       final contact = _contacts[index];
                       final profileData =
                           contact['profiles'] as Map<String, dynamic>?;
+                      print("profileDataprofileData");
                       print(profileData);
                       final name =
                           profileData?['full_name'] ??
                           profileData?['email'] ??
                           'Member';
                       final phone = contact['profiles']?['phone'] as String?;
+                      int? age = contact['profiles']?['age'] as int?;
                       final role = contact['role'] as String;
                       final isMe =
                           contact['user_id'] ==
@@ -321,6 +326,7 @@ class _ContactsSheetState extends ConsumerState<ContactsSheet> {
                       return _buildContactRow(
                         contact['user_id'],
                         name,
+                        age ?? 0,
                         role,
                         phone,
                         isMe,

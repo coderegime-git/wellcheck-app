@@ -11,6 +11,7 @@ class CalendarEvent {
   final String? location;
   final List<String> participants;
   final String? notes;
+  final String? eventType;
 
   CalendarEvent({
     required this.id,
@@ -19,6 +20,7 @@ class CalendarEvent {
     this.location,
     required this.participants,
     this.notes,
+    this.eventType,
   });
 
   factory CalendarEvent.fromJson(Map<String, dynamic> json) {
@@ -29,6 +31,7 @@ class CalendarEvent {
       location: json['location'] as String?,
       participants: List<String>.from(json['participants'] ?? []),
       notes: json['notes'] as String?,
+      eventType: json['event_type'] as String?,
     );
   }
 }

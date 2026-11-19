@@ -17,6 +17,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:intl/intl.dart';
 
+import '../../main.dart';
 import '../safety/services/location_service.dart';
 import '../safety/services/pulse_service.dart';
 
@@ -897,7 +898,7 @@ class _PetDashboardState extends ConsumerState<PetDashboard> {
     //  setState(() => _isLoggingOut = true);
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('priv_biometric', false);
+      //    await prefs.setBool('priv_biometric', false);
       FlutterBackgroundService().invoke('stopService');
 
       await Supabase.instance.client.auth.signOut();
@@ -1170,7 +1171,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
       //       });
       //
       //       // Also register this as a well_event to ensure it shows up securely on the stream!
-      //       await Supabase.instance.client.from('well_events').insert({
+      //       await logWellEvent(Supabase.instance.client,{
       //         'family_id': widget.profile.familyId,
       //         'user_id': widget.profile.userId,
       //         'user_name': widget.profile.fullName,
@@ -1635,7 +1636,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
                     });
 
                     // ── Insert well_event ────────────────────────────────────────────
-                    await Supabase.instance.client.from('well_events').insert({
+                    await logWellEvent(Supabase.instance.client, {
                       'family_id': widget.profile.familyId,
                       'user_id': widget.profile.userId,
                       'user_name': widget.profile.fullName,

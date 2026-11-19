@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:math';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
@@ -11,7 +13,15 @@ import 'package:well_check_v3/core/data/stitch_queue.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../config/constants.dart';
+import '../../../services/driving_detection_motion.dart';
+import '../../../services/life360_location_service.dart';
+import '../../driving_detection/activity_recognition_service.dart';
+
+@pragma('vm:entry-point')
 class PulseService {
+  final TripDetector _tripDetector = TripDetector();
+
   static Future<void> initializeBackgroundService() async {
     final service = FlutterBackgroundService();
 
@@ -24,6 +34,7 @@ class PulseService {
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
         autoStart: true,
+
         isForegroundMode: true,
       ),
     );
@@ -32,11 +43,31 @@ class PulseService {
   @pragma('vm:entry-point')
   static Future<bool> onIosBackground(ServiceInstance service) async {
     try {
-      await dotenv.load(fileName: ".env");
+      // await dotenv.load(fileName: ".env");
+      // await Supabase.initialize(
+      //   url: dotenv.env['SUPABASE_URL'] ?? '',
+      //   anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+      // );
+      if (Constants.kSupabaseUrl.isEmpty || Constants.kSupabaseUrl.isEmpty) {
+        debugPrint('❌ Supabase environment variables missing');
+        service.stopSelf();
+        return false;
+      }
       await Supabase.initialize(
-        url: dotenv.env['SUPABASE_URL'] ?? '',
-        anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+        url: Constants.kSupabaseUrl,
+        anonKey: Constants.kSupabaseAnonKey,
       );
+      // final pulseService = PulseService();
+      // StreamSubscription<Position>? positionSub;
+      // positionSub =
+      //     Geolocator.getPositionStream(
+      //       locationSettings: const LocationSettings(
+      //         accuracy: LocationAccuracy.high,
+      //         distanceFilter: 15, // meters between updates
+      //       ),
+      //     ).listen((position) async {
+      //       pulseService.handlePositionUpdate(position);
+      //     });
       await PulseService().broadcastPulse(null);
     } catch (e) {
       debugPrint('[iOS Background] Headless fetch failed: $e');
@@ -44,24 +75,253 @@ class PulseService {
     return true;
   }
 
+  //late final Life360LocationService locationService;
   @pragma('vm:entry-point')
   static void onStart(ServiceInstance service) async {
-    // Load env for headless isolate
-    await dotenv.load(fileName: ".env");
+    DartPluginRegistrant.ensureInitialized();
 
-    // Initialize headless Supabase Client
-    await Supabase.initialize(
-      url: dotenv.env['SUPABASE_URL'] ?? '',
-      anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+    // ---------------------------------------------------------
+    // 1. Load environment first
+    // ---------------------------------------------------------
+    await dotenv.load(fileName: '.env');
+
+    // final supabaseUrl = dotenv.env['SUPABASE_URL'];
+    // final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
+    final supabaseUrl = Constants.kSupabaseUrl;
+    final supabaseAnonKey = Constants.kSupabaseAnonKey;
+    if (supabaseUrl == null || supabaseAnonKey == null) {
+      print('Supabase environment variables are missing');
+      return;
+    }
+
+    // ---------------------------------------------------------
+    // 2. Initialize Supabase in this background isolate
+    // ---------------------------------------------------------
+    await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
+
+    print('Background Supabase initialized');
+
+    // ---------------------------------------------------------
+    // 3. Now it is safe to use Supabase.instance
+    // ---------------------------------------------------------
+    final supabase = Supabase.instance.client;
+    final prefs = await SharedPreferences.getInstance();
+
+    final userId = prefs.getString('last_user_id');
+    final userName = prefs.getString('last_user_name') ?? 'Unknown';
+    final familyId = prefs.getString('last_family_id');
+    late final DrivingDetector drivingDetector;
+
+    drivingDetector = DrivingDetector(
+      supabase,
+      onDrivingEvent:
+          ({
+            required String type,
+            required String title,
+            required String body,
+          }) async {
+            try {
+              await supabase.functions.invoke(
+                'driving-alert',
+                body: {
+                  'family_id': familyId,
+                  'driver_user_id': userId,
+                  'event_type': type,
+                  'title': title,
+                  'message': body,
+                  'trip_id': drivingDetector.currentTripId,
+                },
+              );
+
+              debugPrint('🔔 Driving alert sent: $type');
+            } catch (e, stackTrace) {
+              debugPrint('❌ Driving alert failed: $e');
+              debugPrint('$stackTrace');
+            }
+          },
     );
 
-    // Run continuous background ping for foreground tracking models
+    final pulseService = PulseService();
+
+    final locationService = Life360LocationService(supabase);
+    final activityService = ActivityRecognitionService();
+
+    // ---------------------------------------------------------
+    // 4. Load SharedPreferences
+    // ---------------------------------------------------------
+
+    final persistentUserRole = prefs.getString('last_user_role');
+
+    if (familyId == null || userId == null) {
+      print('Missing userId or familyId');
+      return;
+    }
+
+    // ---------------------------------------------------------
+    // 5. Don't start location sharing for leader
+    // ---------------------------------------------------------
+    // if (persistentUserRole == 'leader') {
+    //   print('User is leader - background location sharing skipped');
+    //   return;
+    // }
+    // await activityService.initialize(
+    //   onActivityChanged: (activity, confidence) {
+    //     drivingDetector.updateActivity(
+    //       activity: activity,
+    //       confidence: confidence,
+    //     );
+    //   },
+    // );
+    // ---------------------------------------------------------
+    // 6. Start Life360 location sharing
+    // ---------------------------------------------------------
+    //  await locationService.startSharingMyLocation(name: userName);
+
+    // ---------------------------------------------------------
+    // 7. Start GPS stream AFTER Supabase is initialized
+    // ---------------------------------------------------------
+    // StreamSubscription<Position>? positionSub;
+    //
+    // positionSub =
+    //     Geolocator.getPositionStream(
+    //       locationSettings: const LocationSettings(
+    //         accuracy: LocationAccuracy.high,
+    //         distanceFilter: 50,
+    //       ),
+    //     ).listen(
+    //       (position) async {
+    //         try {
+    //           print(
+    //             'Background location: '
+    //             '${position.latitude}, ${position.longitude}',
+    //           );
+    //
+    //           // Pulse/location handling
+    //           await pulseService.handlePositionUpdate(position);
+    //
+    //           // Update location
+    //           await pulseService.updateLocation(userId);
+    //
+    //           // Driving detection
+    //           await drivingDetector.feed(
+    //             position,
+    //             userId: userId,
+    //             familyId: familyId,
+    //           );
+    //         } catch (e, stackTrace) {
+    //           print('Background location error: $e');
+    //           print(stackTrace);
+    //         }
+    //       },
+    //       onError: (error) {
+    //         print('Location stream error: $error');
+    //       },
+    //     );
+    // await locationService.startSharingMyLocation(
+    //   name: userName,
+    //   onPosition: (position) async {
+    //     // Pulse
+    //     await pulseService.handlePositionUpdate(position);
+    //     await pulseService.updateLocation(userId);
+    //
+    //     // Driving detection
+    //     await drivingDetector.feed(
+    //       position,
+    //       userId: userId,
+    //       familyId: familyId,
+    //     );
+    //   },
+    // );
+    // ---------------------------------------------------------
+    // 8. Existing 15-minute heartbeat
+    // ---------------------------------------------------------
     Timer.periodic(const Duration(minutes: 15), (timer) async {
-      await PulseService().broadcastPulse(null);
+      try {
+        await PulseService().broadcastPulse(null);
+      } catch (e) {
+        print('Pulse error: $e');
+      }
+    });
+
+    // ---------------------------------------------------------
+    // 9. Stop service handler
+    // ---------------------------------------------------------
+    service.on('stopService').listen((event) async {
+      //  await positionSub?.cancel();
+      service.stopSelf();
     });
   }
 
+  // @pragma('vm:entry-point')
+  // static void onStart(ServiceInstance service) async {
+  //   // Load env for headless isolate
+  //   DartPluginRegistrant.ensureInitialized();
+  //   final drivingDetector = DrivingDetector(Supabase.instance.client);
+  //
+  //   final pulseService = PulseService();
+  //   StreamSubscription<Position>? positionSub;
+  //   positionSub =
+  //       Geolocator.getPositionStream(
+  //         locationSettings: const LocationSettings(
+  //           accuracy: LocationAccuracy.high,
+  //           distanceFilter: 50, // meters between updates
+  //         ),
+  //       ).listen((position) async {
+  //         print("bakground");
+  //         await pulseService.handlePositionUpdate(position);
+  //         final prefs = await SharedPreferences.getInstance();
+  //         final userId = prefs.getString('last_user_id');
+  //         await pulseService.updateLocation(userId);
+  //
+  //         final familyId = prefs.getString('last_family_id');
+  //         if (userId != null && familyId != null) {
+  //           await drivingDetector.feed(
+  //             position,
+  //             userId: userId,
+  //             familyId: familyId,
+  //           );
+  //         }
+  //       });
+  //
+  //   await dotenv.load(fileName: ".env");
+  //   print("sasasasas");
+  //   //
+  //
+  //   // Initialize headless Supabase Client
+  //   await Supabase.initialize(
+  //     url: dotenv.env['SUPABASE_URL'] ?? '',
+  //     anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+  //   );
+  //   final locationService = Life360LocationService(
+  //     Supabase.instance.client,
+  //   ); // ← local var
+  //
+  //   final prefs = await SharedPreferences.getInstance();
+  //   final userName = prefs.getString('last_user_name') ?? 'Unknown';
+  //   final familyId = prefs.getString('last_family_id');
+  //
+  //   if (familyId == null) return;
+  //   final persistentUserRole = prefs.getString('last_user_role');
+  //   if (persistentUserRole == "leader") return;
+  //   // ← don't hardcodep
+  //     await locationService.startSharingMyLocation(name: userName);
+  //   // Keep your existing 15-min heartbeat for battery/vitals/geofence sync
+  //   Timer.periodic(const Duration(minutes: 15), (timer) async {
+  //     await PulseService().broadcastPulse(null);
+  //   });
+  //   // Run continuous background ping for foreground tracking models
+  //   // Timer.periodic(const Duration(minutes: 15), (timer) async {
+  //   //   await PulseService().broadcastPulse(null);
+  //   // });
+  //   service.on('stopService').listen((event) {
+  //     positionSub?.cancel();
+  //     service.stopSelf();
+  //   });
+  // }
+
   final Map<String, bool> _lastZoneInsideStatus = {};
+  Position? _lastPulsePosition;
+  DateTime? _lastPulseTime;
 
   Future<void> broadcastPulse(String? fallbackUserId) async {
     try {
@@ -326,7 +586,17 @@ class PulseService {
 
   Future<void> updateLocation(String? fallbackUserId) async {
     final prefs = await SharedPreferences.getInstance();
-    final isLoggedIn = prefs.getBool('is_logged_in') ?? false;
+    // final isLoggedIn = prefs.getBool('is_logged_in') ?? false;
+    // if (!isLoggedIn) {
+    //   debugPrint('[Location] Skipping update — user logged out');
+    //   return;
+    // }
+    final supabase = Supabase.instance.client;
+
+    final session = supabase.auth.currentSession;
+    final user = session?.user;
+    // final isLoggedIn = user != null;
+    final isLoggedIn = session != null;
     if (!isLoggedIn) {
       debugPrint('[Location] Skipping update — user logged out');
       return;
@@ -360,6 +630,7 @@ class PulseService {
         position = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.high,
+            distanceFilter: 10,
           ),
         );
       }
@@ -407,6 +678,68 @@ class PulseService {
       debugPrint("updateLocation error: $e");
     }
   }
+
+  Future<void> handlePositionUpdate(Position position) async {
+    final speedKmh = (position.speedAccuracy <= 5 && position.speed >= 0)
+        ? position.speed * 3.6
+        : 0.0; // ignore unreliable stream readings; getPositionStream is usually accurate
+    print(speedKmh);
+    print("hhghghgh");
+    final event = _tripDetector.update(position, speedKmh);
+    print(event);
+
+    if (event == null) return;
+    print(event);
+    print("hhghghgh11");
+    final prefs = await SharedPreferences.getInstance();
+    final familyId = prefs.getString('last_family_id');
+    final userId = prefs.getString('last_user_id');
+    if (familyId == null || userId == null) return;
+
+    final repo = SafetyRepository(Supabase.instance.client);
+    int level = 100;
+    try {
+      level = await Battery().batteryLevel;
+    } catch (_) {}
+    print(event.type);
+    print("event.type");
+    switch (event.type) {
+      case TripEventType.start:
+        await repo.submitPulse(
+          familyId: familyId,
+          latitude: position.latitude,
+          longitude: position.longitude,
+          batteryLevel: level,
+          type: event.mode == TripMode.driving
+              ? 'driving_start'
+              : 'biking_start',
+        );
+        break;
+      case TripEventType.end:
+        await repo.submitPulse(
+          familyId: familyId,
+          latitude: position.latitude,
+          longitude: position.longitude,
+          batteryLevel: level,
+          type: event.mode == TripMode.driving ? 'driving_end' : 'biking_end',
+          // if submitPulse doesn't accept extra metadata, route these through StitchQueue's payload map instead
+        );
+        debugPrint(
+          'Trip ended: mode=${event.mode}, duration=${event.durationSeconds}s, '
+          'distance=${event.distanceMeters?.toStringAsFixed(0)}m, maxSpeed=${event.maxSpeedKmh?.toStringAsFixed(1)}km/h',
+        );
+        break;
+      case TripEventType.modeChange:
+        await repo.submitPulse(
+          familyId: familyId,
+          latitude: position.latitude,
+          longitude: position.longitude,
+          batteryLevel: level,
+          type: event.mode == TripMode.driving ? 'driving' : 'biking',
+        );
+        break;
+    }
+  }
 }
 
 class SafeZoneService {
@@ -431,4 +764,128 @@ class SafeZoneService {
       await prefs.remove(key);
     }
   }
+}
+
+enum TripMode { still, walking, biking, driving }
+
+class TripDetector {
+  static const double _walkingKmh = 7.0;
+  static const double _bikingKmh = 25.0;
+  static const int _hysteresisCount =
+      3; // consecutive readings to confirm a switch
+
+  TripMode _currentMode = TripMode.still;
+  TripMode? _pendingMode;
+  int _pendingCount = 0;
+
+  DateTime? _tripStartTime;
+  Position? _tripStartPosition;
+  double _tripMaxSpeedKmh = 0;
+
+  TripMode get currentMode => _currentMode;
+
+  bool get isInTrip =>
+      _currentMode == TripMode.biking || _currentMode == TripMode.driving;
+
+  TripMode _classify(double speedKmh) {
+    if (speedKmh < 1.5) return TripMode.still;
+    if (speedKmh < _walkingKmh) return TripMode.walking;
+    if (speedKmh < _bikingKmh) return TripMode.biking;
+    return TripMode.driving;
+  }
+
+  /// Returns a TripEvent if a confirmed state change happened, else null.
+  TripEvent? update(Position position, double speedKmh) {
+    final classified = _classify(speedKmh);
+
+    if (classified == _currentMode) {
+      _pendingMode = null;
+      _pendingCount = 0;
+      if (isInTrip && speedKmh > _tripMaxSpeedKmh) _tripMaxSpeedKmh = speedKmh;
+      return null;
+    }
+
+    if (_pendingMode == classified) {
+      _pendingCount++;
+    } else {
+      _pendingMode = classified;
+      _pendingCount = 1;
+    }
+
+    if (_pendingCount < _hysteresisCount) {
+      print('pending: $classified count: $_pendingCount');
+      return null;
+    }
+    // Confirmed state change
+    final previousMode = _currentMode;
+    _currentMode = classified;
+    _pendingMode = null;
+    _pendingCount = 0;
+
+    final wasInTrip =
+        previousMode == TripMode.biking || previousMode == TripMode.driving;
+    final nowInTrip = isInTrip;
+
+    if (!wasInTrip && nowInTrip) {
+      _tripStartTime = DateTime.now();
+      _tripStartPosition = position;
+      _tripMaxSpeedKmh = speedKmh;
+      return TripEvent(
+        type: TripEventType.start,
+        mode: _currentMode,
+        position: position,
+      );
+    }
+
+    if (wasInTrip && !nowInTrip) {
+      final event = TripEvent(
+        type: TripEventType.end,
+        mode: previousMode,
+        position: position,
+        durationSeconds: _tripStartTime != null
+            ? DateTime.now().difference(_tripStartTime!).inSeconds
+            : null,
+        distanceMeters: (_tripStartPosition != null)
+            ? Geolocator.distanceBetween(
+                _tripStartPosition!.latitude,
+                _tripStartPosition!.longitude,
+                position.latitude,
+                position.longitude,
+              )
+            : null,
+        maxSpeedKmh: _tripMaxSpeedKmh,
+      );
+      _tripStartTime = null;
+      _tripStartPosition = null;
+      _tripMaxSpeedKmh = 0;
+      return event;
+    }
+
+    // Mode changed but stayed "in trip" (e.g. biking -> driving)
+    return TripEvent(
+      type: TripEventType.modeChange,
+      mode: _currentMode,
+      position: position,
+    );
+  }
+}
+
+enum TripEventType { start, end, modeChange }
+
+class TripEvent {
+  final TripEventType type;
+  final TripMode mode;
+  final Position position;
+  final int? durationSeconds;
+  final double? distanceMeters;
+  final double? maxSpeedKmh;
+
+  TripEvent({
+    required this.type,
+    required this.mode,
+    required this.position,
+    this.durationSeconds,
+    this.distanceMeters,
+    this.maxSpeedKmh,
+  });
 }

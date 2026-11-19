@@ -78,14 +78,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   // Future<void> _loginWithBiometrics() async {
-  //   final refreshToken = await _secureStorage.read(
-  //     key: 'supabase_refresh_token',
-  //   );
-  //   final accessToken = await _secureStorage.read(key: 'supabase_access_token');
-  //
-  //   debugPrint('=== BIOMETRIC LOGIN ===');
-  //   debugPrint('refreshToken: $refreshToken');
-  //   debugPrint('accessToken: $accessToken');
   //   try {
   //     final authenticated = await _localAuth.authenticate(
   //       localizedReason: 'Sign in to Well-Check',
@@ -97,92 +89,95 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   //
   //     if (!authenticated) return;
   //
-  //     final accessToken = await _secureStorage.read(
-  //       key: 'supabase_access_token',
-  //     );
-  //     final refreshToken = await _secureStorage.read(
-  //       key: 'supabase_refresh_token',
+  //     // ✅ Check if SharedPreferences is fresh (reinstall)
+  //     final prefs = await SharedPreferences.getInstance();
+  //     final wasLoggedIn = prefs.getBool('is_logged_in') ?? false;
+  //
+  //     // SharedPreferences clears on reinstall but Keychain doesn't
+  //     // If is_logged_in was never set, this is a reinstall
+  //     final biometricEnabled = await sharedSecureStorage.read(
+  //       key: 'biometric_login_enabled',
   //     );
   //
-  //     if (accessToken == null || refreshToken == null) {
-  //       _showTokenExpiredError();
-  //       return;
+  //     if (biometricEnabled == 'true' && !wasLoggedIn) {
+  //       // Could be reinstall — check if Supabase session exists
+  //       final session = Supabase.instance.client.auth.currentSession;
+  //       if (session == null) {
+  //         // Reinstall detected — clear keychain and ask to login
+  //         await sharedSecureStorage.delete(key: 'biometric_login_enabled');
+  //         await sharedSecureStorage.delete(key: 'supabase_refresh_token');
+  //         await sharedSecureStorage.delete(key: 'supabase_access_token');
+  //         setState(() => _biometricLoginAvailable = false);
+  //
+  //         if (mounted) {
+  //           ScaffoldMessenger.of(context).showSnackBar(
+  //             const SnackBar(
+  //               content: Text('Please sign in again after reinstall.'),
+  //             ),
+  //           );
+  //         }
+  //         return;
+  //       }
   //     }
   //
-  //     setState(() => _isLoading = true);
-  //
-  //     final response = await Supabase.instance.client.auth.setSession(
-  //       accessToken,
-  //     ); // Supabase auto-uses refresh token internally
-  //
-  //     if (response.session != null) {
-  //       // Refresh stored tokens
-  //       await _secureStorage.write(
-  //         key: 'supabase_access_token',
-  //         value: response.session!.accessToken,
-  //       );
-  //       await _secureStorage.write(
-  //         key: 'supabase_refresh_token',
-  //         value: response.session!.refreshToken ?? '',
-  //       );
-  //       debugPrint('BIOMETRIC LOGIN — refreshToken: $refreshToken');
-  //       debugPrint('BIOMETRIC LOGIN — accessToken: $accessToken');
-  //       if (mounted) context.go('/dashboard');
-  //     } else {
-  //       _showTokenExpiredError();
-  //     }
+  //     await prefs.setBool('is_logged_in', true);
+  //     if (mounted) context.go('/dashboard');
   //   } catch (e) {
-  //     debugPrint('Biometric login error: $e');
-  //     if (mounted) setState(() => _isLoading = false);
+  //     debugPrint('Biometric error: $e');
   //   }
   // }
-  Future<void> _loginWithBiometrics() async {
+
+  Future<bool> _loginWithBiometrics() async {
     try {
       final authenticated = await _localAuth.authenticate(
-        localizedReason: 'Sign in to Well-Check',
+        localizedReason: 'Authenticate to sign in to WellCheck',
+        // biometricOnly: true,
         options: const AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: false,
         ),
       );
 
-      if (!authenticated) return;
+      if (!authenticated) return false;
 
-      // ✅ Check if SharedPreferences is fresh (reinstall)
-      final prefs = await SharedPreferences.getInstance();
-      final wasLoggedIn = prefs.getBool('is_logged_in') ?? false;
+      final email = await sharedSecureStorage.read(key: 'biometric_email');
 
-      // SharedPreferences clears on reinstall but Keychain doesn't
-      // If is_logged_in was never set, this is a reinstall
-      final biometricEnabled = await sharedSecureStorage.read(
-        key: 'biometric_login_enabled',
+      final password = await sharedSecureStorage.read(
+        key: 'biometric_password',
       );
 
-      if (biometricEnabled == 'true' && !wasLoggedIn) {
-        // Could be reinstall — check if Supabase session exists
-        final session = Supabase.instance.client.auth.currentSession;
-        if (session == null) {
-          // Reinstall detected — clear keychain and ask to login
-          await sharedSecureStorage.delete(key: 'biometric_login_enabled');
-          await sharedSecureStorage.delete(key: 'supabase_refresh_token');
-          await sharedSecureStorage.delete(key: 'supabase_access_token');
-          setState(() => _biometricLoginAvailable = false);
+      if (email == null || password == null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Session expired please login")));
 
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Please sign in again after reinstall.'),
-              ),
-            );
-          }
-          return;
-        }
+        return false;
       }
 
-      await prefs.setBool('is_logged_in', true);
-      if (mounted) context.go('/dashboard');
+      final response = await Supabase.instance.client.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+
+      if (response.user == null) {
+        print("ddadadad");
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Session expired please login")));
+
+        return false;
+      }
+
+      // final prefs = await SharedPreferences.getInstance();
+      // await prefs.setBool('is_logged_in', true);
+
+      return true;
     } catch (e) {
-      debugPrint('Biometric error: $e');
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Session expired please login")));
+      debugPrint('Biometric login error: $e');
+      return false;
     }
   }
 
@@ -218,7 +213,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _isLoading = true);
     try {
       if (_formKey.currentState!.validate()) {
-        if (_emailController.text != "reviewer@wellcheck.com") {
+        if (_emailController.text != "reviewer@wellcheck.com" &&
+            _emailController.text != "admin@wellcheck.com") {
           final authRepo = ref.read(authRepositoryProvider);
           await authRepo.signInWithMagicLink(_emailController.text.trim(), '');
           if (mounted) {
@@ -279,7 +275,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       );
       final prefs = await SharedPreferences.getInstance();
 
-      await prefs.setBool('is_logged_in', true);
+      //await prefs.setBool('is_logged_in', true);
       // final storage = const FlutterSecureStorage();
       final storage = const FlutterSecureStorage(
         aOptions: AndroidOptions(encryptedSharedPreferences: true),

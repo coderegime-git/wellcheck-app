@@ -4,6 +4,8 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../main.dart';
+
 class StitchQueue {
   static Database? _db;
 
@@ -51,16 +53,32 @@ class StitchQueue {
 
       try {
         if (type == 'pulse') {
-          await client.from('well_events').insert(payload);
+          await logWellEvent(client, payload);
         } else if (type == 'medication_log') {
-          await client.from('well_events').insert(payload);
+          await logWellEvent(client, payload);
+          //   await client.from('well_events').insert(payload);
         }
-        
+
         // Success: remove from local queue
-        await db.delete('offline_queue', where: 'id = ?', whereArgs: [item['id']]);
+        await db.delete(
+          'offline_queue',
+          where: 'id = ?',
+          whereArgs: [item['id']],
+        );
       } catch (e) {
-        // Still offline or failed: keep in queue for next run
-        debugPrint('Queue processing failed for item ${item['id']}: $e');
+        if (e is PostgrestException && e.code == '23503') {
+          debugPrint(
+            '[StitchQueue] Dropping stale item ${item['id']} — FK violation: $e',
+          );
+          await db.delete(
+            'offline_queue',
+            where: 'id = ?',
+            whereArgs: [item['id']],
+          );
+        } else {
+          // Still offline or other failure: keep in queue for next run
+          debugPrint('Queue processing failed for item ${item['id']}: $e');
+        }
       }
     }
   }

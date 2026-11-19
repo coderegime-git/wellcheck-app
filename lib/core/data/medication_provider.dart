@@ -21,6 +21,7 @@ class Medication {
   final String recurrence; // daily, every_other_day, weekly, monthly, as_needed
   final List<int> daysOfWeek; // 0=Sun..6=Sat (for weekly)
   final bool isActive;
+  final DateTime? scheduledAt;
 
   Medication({
     required this.id,
@@ -37,6 +38,7 @@ class Medication {
     this.recurrence = 'daily',
     this.daysOfWeek = const [],
     this.isActive = true,
+    this.scheduledAt,
   });
 
   factory Medication.fromJson(Map<String, dynamic> json) {
@@ -59,6 +61,9 @@ class Medication {
       recurrence: json['recurrence'] as String? ?? 'daily',
       daysOfWeek: _parseIntList(json['days_of_week']),
       isActive: json['is_active'] as bool? ?? true,
+      scheduledAt: json['scheduled_at'] != null
+          ? DateTime.tryParse(json['scheduled_at'].toString())
+          : null,
     );
   }
 
@@ -94,7 +99,9 @@ class Medication {
     if (scheduleTimes.isEmpty) return frequency;
     final times = scheduleTimes.map(_formatTimeString).join(', ');
     final recurrenceLabel = _recurrenceLabel;
-    return '$recurrenceLabel at $times';
+    return _recurrenceLabel == "As Needed"
+        ? recurrenceLabel
+        : '$recurrenceLabel at $times';
   }
 
   String get _recurrenceLabel {
@@ -130,20 +137,25 @@ class DoseLog {
   final String medicationId;
   final String userId;
   final String familyId;
-  final DateTime scheduledAt;
+  final DateTime? scheduledAt;
   final DateTime? takenAt;
   final String status; // pending, taken, missed, skipped
   final String? notes;
+  final String? reason;
+
+  final DateTime? acknowledgedAt;
 
   DoseLog({
     required this.id,
     required this.medicationId,
     required this.userId,
     required this.familyId,
-    required this.scheduledAt,
+    this.scheduledAt,
     this.takenAt,
     required this.status,
     this.notes,
+    this.reason,
+    this.acknowledgedAt,
   });
 
   factory DoseLog.fromJson(Map<String, dynamic> json) {
@@ -153,11 +165,18 @@ class DoseLog {
       userId: json['user_id'] as String,
       familyId: json['family_id'] as String,
       scheduledAt: DateTime.parse(json['scheduled_at'] as String),
+      // scheduledAt: json['scheduled_at'] == null
+      //     ? null
+      //     : DateTime.parse(json['scheduled_at'].toString()),
       takenAt: json['taken_at'] != null
           ? DateTime.parse(json['taken_at'] as String)
           : null,
       status: json['status'] as String,
       notes: json['notes'] as String?,
+      reason: json['reason'] as String?,
+      acknowledgedAt: json['acknowledged_at'] == null
+          ? null
+          : DateTime.parse(json['acknowledged_at'].toString()).toLocal(),
     );
   }
 }
@@ -225,6 +244,7 @@ final allMedicationHistoryProvider =
       scheduled_at,
       taken_at,
       status,
+      reason,
       medications!inner(
         medication_name,
         dosage,

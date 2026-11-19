@@ -4,6 +4,9 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_generative_ai/google_generative_ai.dart' as gemini;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../config/constants.dart';
+import '../../main.dart';
+
 /// Gemini-powered family wellness AI service.
 /// Analyzes well_events, medications, check_ins to provide
 /// intelligent wellness summaries and conversational assistance.
@@ -14,7 +17,9 @@ class WellnessAiService {
 
   /// Initialize the Gemini model with active agent tools.
   void initialize() {
-    final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
+    //  final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
+    final apiKey = Constants.geminiApiKey;
+
     if (apiKey.isEmpty || apiKey == 'YOUR_GEMINI_API_KEY_HERE') {
       _initialized = false;
       return;
@@ -65,11 +70,11 @@ class WellnessAiService {
       tools: tools,
       systemInstruction: gemini.Content.system(
         'You are a warm, caring wellness assistant for an elderly portal in a family safety app called Well-Check. '
-        'You monitor medication adherence, check-in patterns, and safety events. '
-        'If the user says they took a medication, you MUST call the log_medication_taken tool. '
-        'If the user asks you to tell or alert their family, or if they sound in danger, you MUST call the send_family_update tool. '
-        'Keep verbal responses concise (1-2 sentences max) and reassuring as they will be spoken aloud via text-to-speech. '
-        'Always confirm out loud when you have successfully logged a pill or sent a message.',
+            'You monitor medication adherence, check-in patterns, and safety events. '
+            'If the user says they took a medication, you MUST call the log_medication_taken tool. '
+            'If the user asks you to tell or alert their family, or if they sound in danger, you MUST call the send_family_update tool. '
+            'Keep verbal responses concise (1-2 sentences max) and reassuring as they will be spoken aloud via text-to-speech. '
+            'Always confirm out loud when you have successfully logged a pill or sent a message.',
       ),
     );
     _initialized = true;
@@ -93,7 +98,8 @@ class WellnessAiService {
       sb.writeln('=== RECENT EVENTS (last 20) ===');
       for (final e in events) {
         sb.writeln(
-          '- [${e['event_type']}] ${e['title']}: ${e['description'] ?? 'N/A'} (at ${e['created_at']})',
+          '- [${e['event_type']}] ${e['title']}: ${e['description'] ??
+              'N/A'} (at ${e['created_at']})',
         );
       }
 
@@ -139,11 +145,9 @@ class WellnessAiService {
       final battery = Battery();
       batteryLevel = await battery.batteryLevel;
     } catch (e) {
-      debugPrint(
-        'Battery info not available over isolate, using default: $e',
-      );
+      debugPrint('Battery info not available over isolate, using default: $e');
     }
-    await supabase.from('well_events').insert({
+    await logWellEvent(supabase, {
       'family_id': familyId,
       'user_id': userId,
       'event_type': 'status_change', // Using an existing enum mapping
@@ -151,15 +155,12 @@ class WellnessAiService {
       'description': 'Verbally confirmed taking: $medName',
       'created_by': userId,
       'battery_level': batteryLevel,
-
     });
   }
 
-  Future<void> _sendFamilyUpdate(
-    String familyId,
-    String? message,
-    bool isUrgent,
-  ) async {
+  Future<void> _sendFamilyUpdate(String familyId,
+      String? message,
+      bool isUrgent,) async {
     if (message == null) return;
     final supabase = Supabase.instance.client;
     final userId = supabase.auth.currentUser?.id;
@@ -169,11 +170,9 @@ class WellnessAiService {
       final battery = Battery();
       batteryLevel = await battery.batteryLevel;
     } catch (e) {
-      debugPrint(
-        'Battery info not available over isolate, using default: $e',
-      );
+      debugPrint('Battery info not available over isolate, using default: $e');
     }
-    await supabase.from('well_events').insert({
+    await logWellEvent(supabase, {
       'family_id': familyId,
       'user_id': userId,
       'event_type': isUrgent ? 'sos' : 'check_in',
@@ -181,7 +180,6 @@ class WellnessAiService {
       'description': message,
       'created_by': userId,
       'battery_level': batteryLevel,
-
     });
   }
 

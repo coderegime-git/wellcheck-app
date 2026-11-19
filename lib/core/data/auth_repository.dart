@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../services/referral_service.dart';
+
 part 'auth_repository.g.dart';
 
 class AuthRepository {
@@ -14,15 +16,32 @@ class AuthRepository {
   // Magic Link Registration / Login
   Future<void> signInWithMagicLink(String email, String password) async {
     //
+    final referralCode = await ReferralService.instance.getReferralCode();
     await _supabase.auth.signInWithOtp(
       email: email,
       //  password: password,
       emailRedirectTo: 'io.supabase.wellcheck://login-callback/',
+      data: {'referral_code': referralCode},
     );
   }
 
+  // Future<void> signInWithMagicLink(
+  //   String email,
+  //   String password,
+  //   bool isSms,
+  //   String phone,
+  // ) async {
+  //   final referralCode = await ReferralService.instance.getReferralCode();
+  //   await _supabase.auth.signInWithOtp(
+  //     email: isSms ? null : email,
+  //     phone: isSms ? phone : null,
+  //     //  password: password,
+  //     emailRedirectTo: 'io.supabase.wellcheck://login-callback/',
+  //     data: {'referral_code': referralCode},
+  //   );
+  // }
+
   Future<void> signInWithPassword(String email, String password) async {
-    print("passwordpassword");
     await _supabase.auth.signInWithPassword(
       email: email,
       password: password,
@@ -38,6 +57,21 @@ class AuthRepository {
       token: token,
     );
   }
+
+  // Future<void> verifyOTP({
+  //   required String email,
+  //   required String phone,
+  //   required String token,
+  //   required bool isSms,
+  // }) async {
+  //   print("hhjhj");
+  //   await _supabase.auth.verifyOTP(
+  //     type: isSms ? OtpType.sms : OtpType.email,
+  //     email: isSms ? null : email,
+  //     phone: isSms ? phone : null,
+  //     token: token,
+  //   );
+  // }
 
   Future<void> createFamilyWithRole(
     String familyName,

@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+7
+version: 1.0.0+24
 
 environment:
   sdk: ^3.11.0
@@ -41,6 +41,8 @@ dependencies:
   supabase_flutter: ^2.12.4
   flutter_dotenv: ^6.0.0
   geolocator: ^14.0.2
+  geolocator_android: ^5.1.1
+  geolocator_apple: ^2.3.14
   battery_plus: ^7.0.0
   background_fetch: ^1.5.0
   flutter_background_service: ^5.1.0
@@ -79,6 +81,13 @@ dependencies:
   purchases_ui_flutter: ^10.0.4
   app_settings: ^7.0.0
   cached_network_image: ^3.4.1
+  qr_flutter: ^4.1.0
+  app_links: ^7.2.1
+  share_plus:
+  screenshot: ^3.0.0
+  flutter_branch_sdk:
+  google_maps_flutter: ^2.18.0
+  activity_recognition_flutter:
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -91,7 +100,14 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   riverpod_generator: ^4.0.3
   build_runner: ^2.12.2
-  flutter_launcher_icons: ^0.14.4
+  geocoding: ^5.0.0
+  flutter_native_splash: ^2.4.8
+  connectivity_plus:
+  live_activities:
+
+dependency_overrides:
+  archive: ^4.5.2 # Or another version compatible with your project's tree
+  image: ^4.12.0
   # timezone: ^0.11.0
 flutter_launcher_icons:
   android: "launcher_icon"
@@ -99,8 +115,15 @@ flutter_launcher_icons:
   image_path: "assets/logo.png"
   min_sdk_android: 21
   remove_alpha_ios: true
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: assets/logo_splash_android12.png  # smaller version of your logo, see below
+  fullscreen: true
 
-# For information on the generic Dart part of this file, see the
+  android_12:
+    color: "#FFFFFF"
+    image: assets/logo_splash_android12.png
+    icon_background_color: "#FFFFFF"# For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
@@ -110,11 +133,24 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
-
+  fonts:
+    - family: Poppins
+      fonts:
+        - asset: assets/font/Poppins-Regular.ttf
+          weight: 400
+        - asset: assets/font/Poppins-Medium.ttf
+          weight: 500
+        - asset: assets/font/Poppins-SemiBold.ttf
+          weight: 600
+        - asset: assets/font/Poppins-Bold.ttf
+          weight: 700
   # To add assets to your application, add an assets section, like this:
   assets:
     - .env
     - assets/logo.png
+    - assets/logo_splash_android12.png
+    - assets/logo_splash.png
+    - assets/font/
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

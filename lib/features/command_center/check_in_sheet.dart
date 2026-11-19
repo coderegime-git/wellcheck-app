@@ -13,6 +13,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../../core/data/safety_repository.dart';
 import '../../core/notifications/checkin_service.dart';
+import '../../main.dart';
 
 class CheckInSheet extends ConsumerStatefulWidget {
   const CheckInSheet({super.key});
@@ -163,7 +164,7 @@ class _CheckInSheetState extends ConsumerState<CheckInSheet> {
       });
 
       // Also register this as a well_event to ensure it shows up securely on the stream!
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'user_name': profile.fullName,
@@ -671,7 +672,7 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
       });
 
       // Also register this as a well_event to ensure it shows up securely on the stream!
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'user_name': profile.fullName,
@@ -883,7 +884,7 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
           'Battery info not available over isolate, using default: $e',
         );
       }
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'user_name': profile.fullName,
@@ -1039,6 +1040,7 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
                     Text("No Family member")
                   else if (_familyMembers.isNotEmpty)
                     DropdownButtonFormField<String>(
+                      isExpanded: true,
                       value: _selectedUserId,
                       decoration: InputDecoration(
                         border: OutlineInputBorder(
@@ -1053,7 +1055,12 @@ class _ScheduleCheckInSheetState extends ConsumerState<ScheduleCheckInSheet> {
 
                         return DropdownMenuItem<String>(
                           value: m['user_id'] as String,
-                          child: Text('$name ($role)'),
+                          child: Text(
+                            '$name ($role)',
+                            overflow: TextOverflow.ellipsis,
+                            // add this
+                            maxLines: 1,
+                          ),
                         );
                       }).toList(),
 

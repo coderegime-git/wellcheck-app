@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import '../../../config/constants.dart';
 import 'location_service.dart';
 
 // Future<void> initializeBackgroundService() async {
@@ -79,6 +80,13 @@ Future<void> initializeBackgroundService() async {
 Future<bool> onIosBackground(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
+  // final pulseService = PulseService();
+  //
+  // LocationService.getPositionStream().listen((position) async {
+  //   // print("Background location ${position.latitude}  ${position.longitude}");
+  //   // await pulseService.updateLocation(userId);
+  //   await pulseService.handlePositionUpdate(position);
+  // });
   return true;
 }
 
@@ -87,12 +95,20 @@ void onStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
 
   // Re-initialize Supabase for background isolate
-  await dotenv.load(fileName: ".env");
+  // await dotenv.load(fileName: ".env");
+  // await Supabase.initialize(
+  //   url: dotenv.env['SUPABASE_URL'] ?? '',
+  //   anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+  // );
+  if (Constants.kSupabaseUrl.isEmpty || Constants.kSupabaseAnonKey.isEmpty) {
+    debugPrint('❌ Supabase environment variables missing');
+    service.stopSelf();
+    return;
+  }
   await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL'] ?? '',
-    anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+    url: Constants.kSupabaseUrl,
+    anonKey: Constants.kSupabaseAnonKey,
   );
-
   if (service is AndroidServiceInstance) {
     service.on('setAsForeground').listen((event) {
       service.setAsForegroundService();
@@ -147,10 +163,11 @@ void onStart(ServiceInstance service) async {
   final userId = prefs.getString('last_user_id');
   Position? _lastPosition;
 
-  LocationService.getPositionStream().listen((position) async {
-    // print("Background location ${position.latitude}  ${position.longitude}");
-    await pulseService.updateLocation(userId);
-  });
+  // LocationService.getPositionStream().listen((position) async {
+  //   // print("Background location ${position.latitude}  ${position.longitude}");
+  //   await pulseService.updateLocation(userId);
+  //   await pulseService.handlePositionUpdate(position);
+  // });
 }
 
 // Timer.periodic(const Duration(seconds: 20), (timer) async {

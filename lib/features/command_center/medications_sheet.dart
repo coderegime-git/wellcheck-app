@@ -10,6 +10,8 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 
+import '../../main.dart';
+
 class MedicationsSheet extends ConsumerStatefulWidget {
   bool? fromLeader = false;
 
@@ -79,7 +81,7 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
   //     });
   //
   //     // Also log to well_events for the family feed
-  //     await Supabase.instance.client.from('well_events').insert({
+  //     await logWellEvent(Supabase.instance.client,{
   //       'family_id': profile.familyId,
   //       'user_id': profile.userId,
   //       'event_type': 'medication_logged',
@@ -258,7 +260,7 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
             'reminder_sent_at': null,
           })
           .eq('id', med.id);
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(Supabase.instance.client, {
         'family_id': profile.familyId,
         'user_id': profile.userId,
         'event_type': 'medication_logged',
@@ -437,6 +439,7 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
               if (widget.fromLeader == true)
                 IconButton(
                   onPressed: () async {
+                    Navigator.of(context).pop();
                     await showModalBottomSheet(
                       context: context,
                       isScrollControlled: true,
@@ -617,7 +620,7 @@ class _MedicationsSheetState extends ConsumerState<MedicationsSheet> {
                 );
               },
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (err, _) => Center(child: Text('Error: $err')),
+              error: (err, _) => Center(child: Text('Fetching...')),
             ),
           ),
         ],

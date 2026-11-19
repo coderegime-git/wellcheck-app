@@ -5,6 +5,8 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../main.dart';
+
 part 'safety_repository.g.dart';
 
 class SafetyRepository {
@@ -18,11 +20,13 @@ class SafetyRepository {
     required double latitude,
     required double longitude,
     required int batteryLevel,
-    String type = 'heartbeat',
+    String? type,
     String? safeZoneName,
   }) async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
+    if (type == null) return;
+
     final prefs = await SharedPreferences.getInstance();
     final profileRes = await Supabase.instance.client
         .from('profiles')
@@ -31,43 +35,56 @@ class SafetyRepository {
         .single();
     final fullName = profileRes['full_name'];
     final heartRateEnabled = prefs.getBool('priv_heartbeat') ?? true;
+    print(userId);
+
     print(type);
+    print(familyId);
     print("typetype");
     if (type == "heartbeat" && !heartRateEnabled) return;
+    if (type == "heartbeat") return;
     print(safeZoneName);
-    await _supabase.from('well_events').insert({
-      'user_id': userId,
-      'family_id': familyId,
-      'event_type': type,
-      "title": type == "safe_zone_enter"
-          ? "Entered Safe Zone"
-          : type == "safe_zone_exit"
-          ? "Exited Safe Zone"
-          : type == "heartbeat"
-          ? "Heartbeat Alert"
-          : type == "driving"
-          ? "Driving Detected"
-          : "Activity Update",
-      "description": type == "safe_zone_enter"
-          ? (safeZoneName != null && safeZoneName.isNotEmpty
-                ? "Has entered the safe zone\nSafe Area: $safeZoneName"
-                : "Has entered the safe zone")
-          : type == "safe_zone_exit"
-          ? (safeZoneName != null && safeZoneName.isNotEmpty
-                ? "Has exited the safe zone\nSafe Area: $safeZoneName"
-                : "Has exited the safe zone")
-          : type == "heartbeat"
-          ? "Heartbeat event recorded"
-          : type == "driving"
-          ? "$fullName is currently driving"
-          : "Activity recorded",
-      'latitude': latitude,
-      'longitude': longitude,
-      'user_name': fullName,
-      'battery_level': batteryLevel,
-      'verification_source': 'app_foreground', // or 'background_service'
-    });
-
+    if (type != 'check_in') {
+      await logWellEvent(_supabase, {
+        'user_id': userId,
+        'family_id': familyId,
+        'event_type': type,
+        "title": type == "safe_zone_enter"
+            ? "Entered Safe Zone"
+            : type == "safe_zone_exit"
+            ? "Exited Safe Zone"
+            // : type == "heartbeat"
+            // ? "Heartbeat Alert"
+            : type == "driving"
+            ? "Driving Detected"
+            : type == "driving_start"
+            ? "Driving Started"
+            : type == "biking_start"
+            ? "Biking Started"
+            : "Activity Update",
+        "description": type == "safe_zone_enter"
+            ? (safeZoneName != null && safeZoneName.isNotEmpty
+                  ? "Has entered the safe zone\nSafe Area: $safeZoneName"
+                  : "Has entered the safe zone")
+            : type == "safe_zone_exit"
+            ? (safeZoneName != null && safeZoneName.isNotEmpty
+                  ? "Has exited the safe zone\nSafe Area: $safeZoneName"
+                  : "Has exited the safe zone")
+            // : type == "heartbeat"
+            // ? "Heartbeat event recorded"
+            : type == "driving"
+            ? "$fullName is currently driving"
+            : type == "driving_start"
+            ? "$fullName is currently driving"
+            : type == "biking_start"
+            ? "$fullName is currently biking"
+            : "Activity recorded",
+        'latitude': latitude,
+        'longitude': longitude,
+        'user_name': fullName,
+        'battery_level': batteryLevel,
+        'verification_source': 'app_foreground', // or 'background_service'
+      });
+    }
     // if (type != 'check_in') {
     //   await _supabase.from('well_events').insert({
     //     'user_id': userId,
@@ -89,7 +106,7 @@ class SafetyRepository {
         .select('user_id, role')
         .eq('family_id', familyId);
     if (type == 'check_in') {
-      await Supabase.instance.client.from('well_events').insert({
+      await logWellEvent(_supabase, {
         'family_id': familyId,
         'user_id': userId,
         'user_name': fullName,
@@ -167,7 +184,7 @@ class SafetyRepository {
     } catch (e) {
       debugPrint('Battery info not available over isolate, using default: $e');
     }
-    await _supabase.from('well_events').insert({
+    await logWellEvent(_supabase, {
       'user_id': userId,
       'family_id': familyId,
       'user_name': fullName,
@@ -189,7 +206,7 @@ class SafetyRepository {
           'created_at',
           ascending: false,
         ) // Corrected from timestamp to created_at
-        .limit(50);
+        .limit(30);
   }
 
   Stream<List<Map<String, dynamic>>> streamFamilyLocation(String familyId) {
@@ -361,6 +378,7 @@ class SafetyRepository {
   }
 
   Stream<Map<String, dynamic>?> streamMemberLatestEvent(String userId) async* {
+    print(userId);
     while (true) {
       try {
         final data = await _supabase

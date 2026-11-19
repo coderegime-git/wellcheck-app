@@ -8,6 +8,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
@@ -526,53 +527,96 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                                           .inHours <
                                                       24;
                                             });
-                                            return Stack(
-                                              alignment: Alignment.topRight,
-                                              children: [
-                                                GestureDetector(
-                                                  child: const Icon(
-                                                    size: 20,
 
-                                                    Icons.notifications_none,
-                                                    color:
-                                                        ShieldColors.textBody,
-                                                  ),
-                                                  onTap: () {
-                                                    showModalBottomSheet(
-                                                      context: context,
-                                                      isScrollControlled: true,
-                                                      backgroundColor:
-                                                          Colors.transparent,
-                                                      builder: (ctx) =>
-                                                          _MonitorNotificationsSheet(
-                                                            familyId:
-                                                                profileAsync
-                                                                    .value!
-                                                                    .familyId,
-                                                            safetyRepo: ref.read(
-                                                              safetyRepositoryProvider,
-                                                            ),
-                                                          ),
-                                                    );
-                                                  },
-                                                ),
-                                                if (hasRecent)
-                                                  Positioned(
-                                                    right: 3,
-                                                    top: 0,
-                                                    child: Container(
-                                                      width: 6,
-                                                      height: 6,
-                                                      decoration:
-                                                          const BoxDecoration(
-                                                            color: ShieldColors
-                                                                .urgentRed,
-                                                            shape:
-                                                                BoxShape.circle,
-                                                          ),
+                                            return FutureBuilder(
+                                              future: SharedPreferences.getInstance()
+                                                  .then(
+                                                    (p) => p.getString(
+                                                      'last_notification_opened',
                                                     ),
                                                   ),
-                                              ],
+                                              builder: (context, prefSnap) {
+                                                final lastSeen =
+                                                    DateTime.tryParse(
+                                                      prefSnap.data ?? '',
+                                                    );
+
+                                                final hasUnread = events.any((
+                                                  e,
+                                                ) {
+                                                  final dt = DateTime.tryParse(
+                                                    e['created_at'] ?? '',
+                                                  );
+
+                                                  if (dt == null) return false;
+
+                                                  if (lastSeen == null)
+                                                    return true;
+
+                                                  return dt.isAfter(lastSeen);
+                                                });
+                                                return Stack(
+                                                  alignment: Alignment.topRight,
+                                                  children: [
+                                                    GestureDetector(
+                                                      child: const Icon(
+                                                        size: 20,
+
+                                                        Icons
+                                                            .notifications_none,
+                                                        color: ShieldColors
+                                                            .textBody,
+                                                      ),
+                                                      onTap: () async {
+                                                        final prefs =
+                                                            await SharedPreferences.getInstance();
+
+                                                        await prefs.setString(
+                                                          'last_notification_opened',
+                                                          DateTime.now()
+                                                              .toIso8601String(),
+                                                        );
+                                                        setState(() {});
+                                                        showModalBottomSheet(
+                                                          context: context,
+                                                          isScrollControlled:
+                                                              true,
+                                                          backgroundColor:
+                                                              Colors
+                                                                  .transparent,
+                                                          builder: (ctx) =>
+                                                              _MonitorNotificationsSheet(
+                                                                familyId:
+                                                                    profileAsync
+                                                                        .value!
+                                                                        .familyId,
+                                                                safetyRepo: ref
+                                                                    .read(
+                                                                      safetyRepositoryProvider,
+                                                                    ),
+                                                              ),
+                                                        );
+                                                      },
+                                                    ),
+                                                    if (hasUnread)
+                                                      Positioned(
+                                                        right: 3,
+                                                        top: 0,
+                                                        child: Container(
+                                                          width: 6,
+                                                          height: 6,
+                                                          decoration:
+                                                              const BoxDecoration(
+                                                                color: ShieldColors
+                                                                    .urgentRed,
+                                                                shape: BoxShape
+                                                                    .circle,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                  ],
+                                                );
+                                              },
                                             );
                                           },
                                         ),
@@ -881,6 +925,65 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                                                           ),
                                                         );
                                                       }
+                                                    }
+                                                    // WEEKLY
+                                                    else if (frequency.contains(
+                                                      'weekly',
+                                                    )) {
+                                                      // Sunday = 0 ... Saturday = 6 (same numbering the cron uses)
+                                                      final days =
+                                                          List<int>.from(
+                                                            med.daysOfWeek ??
+                                                                <int>[],
+                                                          )..sort();
+                                                      if (days.isEmpty)
+                                                        days.add(
+                                                          startDate.weekday % 7,
+                                                        );
+
+                                                      // Don't count down to a date before the start date
+                                                      final from =
+                                                          startDate.isAfter(now)
+                                                          ? startDate
+                                                          : now;
+                                                      final baseDay = DateTime(
+                                                        from.year,
+                                                        from.month,
+                                                        from.day,
+                                                        hour,
+                                                        minute,
+                                                      );
+
+                                                      DateTime? best;
+                                                      for (final d in days) {
+                                                        final add =
+                                                            (d -
+                                                                (baseDay.weekday %
+                                                                    7)) %
+                                                            7; // always 0..6 in Dart
+                                                        var candidate = baseDay
+                                                            .add(
+                                                              Duration(
+                                                                days: add,
+                                                              ),
+                                                            );
+                                                        if (candidate.isBefore(
+                                                          now,
+                                                        )) {
+                                                          candidate = candidate
+                                                              .add(
+                                                                const Duration(
+                                                                  days: 7,
+                                                                ),
+                                                              );
+                                                        }
+                                                        if (best == null ||
+                                                            candidate.isBefore(
+                                                              best,
+                                                            ))
+                                                          best = candidate;
+                                                      }
+                                                      doseTime = best!;
                                                     }
                                                     // EVERY OTHER DAY
                                                     else if (frequency.contains(
@@ -1375,7 +1478,10 @@ class _MonitorDashboardState extends ConsumerState<MonitorDashboard> {
                           context: context,
                           isScrollControlled: true,
                           backgroundColor: Colors.transparent,
-                          builder: (_) => CommandCenterSheet(fromLeader: false),
+                          builder: (_) => CommandCenterSheet(
+                            fromLeader: false,
+                            fromMonitor: true,
+                          ),
                         );
                       },
                       style: ElevatedButton.styleFrom(
@@ -2250,7 +2356,7 @@ class _NextCheckinCardState extends ConsumerState<_NextCheckinCard> {
       //       });
       //
       //       // Also register this as a well_event to ensure it shows up securely on the stream!
-      //       await Supabase.instance.client.from('well_events').insert({
+      //       await logWellEvent(Supabase.instance.client,{
       //         'family_id': widget.profile?.familyId,
       //         'user_id': widget.profile?.userId,
       //         'user_name': widget.profile?.fullName,

@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -12,13 +15,18 @@ import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:well_check_v3/config/constants.dart';
 import 'package:well_check_v3/core/design/shield_theme.dart';
 import 'package:well_check_v3/core/data/user_profile_provider.dart';
+import 'package:well_check_v3/features/profile/referral_detail.dart';
+import 'package:well_check_v3/features/profile/sales_person_qr_code.dart';
+import 'package:well_check_v3/services/referral_service.dart';
 
 import '../../core/data/health_repository.dart';
 import '../../core/data/subscription_provider.dart';
 import '../../core/navigation/shield_router.dart';
 import '../../core/notifications/push_notification_service.dart';
+import '../../main.dart';
 import '../safety/services/purchase_services.dart';
 import 'health_kit_screen.dart';
 
@@ -124,6 +132,7 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
       }
     } finally {
       final profileAsync = ref.watch(currentUserProfileProvider);
+      //ref.invalidate(currentUserProfileProvider);
 
       if (profileAsync.value!.role != "senior") {
         ref.invalidate(currentUserProfileProvider);
@@ -177,9 +186,9 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
       }
 
       // ✅ STEP 3 — Stop services
-      PushNotificationService.saveTokenToProfile(null);
+      await PushNotificationService.saveTokenToProfile(null);
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('priv_biometric', false);
+      //  await prefs.setBool('priv_biometric', false);
       FlutterBackgroundService().invoke('stopService');
 
       await dotenv.load(fileName: ".env");
@@ -284,22 +293,27 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
   }
 
   Future<void> _logout() async {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    await ReferralService.instance.clearReferralCode();
+
     setState(() {
       _isLoggingOut = true;
     });
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('priv_biometric', false);
-    await prefs.setBool('is_logged_in', false);
-
+    //await prefs.setBool('is_logged_in', false);
+    await prefs.setString('last_user_profile', "");
     await PushNotificationService.saveTokenToProfile(null);
     FlutterBackgroundService().invoke('stopService');
 
+    //  await prefs.setBool('priv_biometric', false);
     try {
       await PurchasesService.instance.logOut();
+      await stopWellCheckService();
     } catch (e) {
       debugPrint('[RC] logOut skipped: $e');
     }
-
+    await Supabase.instance.client.auth.signOut();
     ref.read(shieldRouterProvider).go('/');
   }
 
@@ -404,6 +418,9 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
                   children: [
                     Text(
                       profile.fullName ?? 'User',
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -457,6 +474,7 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
               icon: Icons.notifications_outlined,
               label: 'Notification Preferences',
               onTap: () {
+                Navigator.of(context).pop();
                 showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
@@ -465,10 +483,48 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
                 );
               },
             ),
+            // _settingsItem(
+            //   icon: Icons.description,
+            //   label: 'Referral Details',
+            //   onTap: () {
+            //     showModalBottomSheet(
+            //       context: context,
+            //       useSafeArea: true,
+            //       isScrollControlled: true,
+            //       backgroundColor: Colors.transparent,
+            //       builder: (_) => const ReferralDetailsScreen(),
+            //     );
+            //   },
+            // ),
+            // _settingsItem(
+            //   icon: Icons.mobile_screen_share_sharp,
+            //   label: 'Refer a friend',
+            //   onTap: () async {
+            //     final ref = profileAsync.value?.referralCode;
+            //
+            //     if (ref == null || ref.isEmpty) {
+            //       ScaffoldMessenger.of(context).showSnackBar(
+            //         const SnackBar(
+            //           content: Text('Referral code not available'),
+            //         ),
+            //       );
+            //       return;
+            //     }
+            //     final referralUrl = 'https://well-check.com/ref/$ref';
+            //     showModalBottomSheet(
+            //       context: context,
+            //       useSafeArea: true,
+            //       isScrollControlled: true,
+            //       backgroundColor: Colors.transparent,
+            //       builder: (_) => SalespersonQrScreen(referralUrl: referralUrl),
+            //     );
+            //   },
+            // ),
             _settingsItem(
               icon: Icons.shield_outlined,
               label: 'Privacy & Security',
               onTap: () {
+                Navigator.of(context).pop();
                 showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
@@ -527,7 +583,9 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
             ),
 
             // const Spacer(),
-            Text("Version:1.0.2"),
+            Text(
+              "Version: ${Platform.isAndroid ? Constants.androidAppVersion : Constants.iOSAppVersion}",
+            ),
             SizedBox(height: 10),
             GestureDetector(
               child: Container(
@@ -621,6 +679,9 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
   }
 
   Future<void> deleteAccount() async {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    await ReferralService.instance.clearReferralCode();
+
     try {
       final user = Supabase.instance.client.auth.currentUser;
 
@@ -649,33 +710,38 @@ class _ProfileSettingsViewState extends ConsumerState<ProfileSettingsView> {
           context,
         ).showSnackBar(SnackBar(content: Text("Failed to delete account")));
       }
-
+      try {
+        await Supabase.instance.client.auth.signOut(scope: SignOutScope.local);
+      } catch (e) {
+        debugPrint('[Auth] local signOut skipped: $e');
+      }
       // ✅ Wipe ALL biometric/session data — regardless of success/failure of edge function
       await sharedSecureStorage.delete(key: 'supabase_access_token');
       await sharedSecureStorage.delete(key: 'supabase_refresh_token');
       await sharedSecureStorage.delete(key: 'biometric_login_enabled');
-
+      await sharedSecureStorage.delete(key: 'saved_email');
+      await sharedSecureStorage.delete(key: 'saved_password');
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('priv_biometric', false);
-      await prefs.setBool('is_logged_in', false);
+      // await prefs.setBool('is_logged_in', false);
       await prefs.setBool('has_seen_leader_onboarding', false);
+      await prefs.setString('last_user_profile', "");
 
       // RC cleanup
       try {
         await PurchasesService.instance.logOut();
+        await stopWellCheckService();
       } catch (e) {
         debugPrint('[RC] logOut skipped: $e');
       }
-
-      await Supabase.instance.client.auth
-          .signOut(); // full global signout, account is gone
 
       setState(() {
         isLoad = false;
       });
 
-      if (mounted) context.go('/');
-
+      if (mounted) ref.read(shieldRouterProvider).go('/');
+      //
+      ///
       debugPrint('Account deleted');
     } catch (e) {
       setState(() {
@@ -797,44 +863,53 @@ class _NotificationPrefsSheetState extends State<_NotificationPrefsSheet> {
           //   activeColor: ShieldColors.urgentRed,
           //   onChanged: (v) => setState(() => _sosAlerts = v),
           // ),
-          SwitchListTile(
-            title: const Text('Sync Heart Rate'),
-            //    subtitle: const Text('AES-256 encryption for all vault files'),
-            value: heartBeat,
-            activeColor: ShieldColors.activeTeal,
-            onChanged: (value) async {
-              if (value) {
-                final healthRepo = HealthRepository(Supabase.instance.client);
+          if (!Platform.isAndroid)
+            SwitchListTile(
+              title: const Text('Sync Heart Rate'),
+              //    subtitle: const Text('AES-256 encryption for all vault files'),
+              value: heartBeat,
+              activeColor: ShieldColors.activeTeal,
+              onChanged: (value) async {
+                if (value) {
+                  final healthRepo = HealthRepository(Supabase.instance.client);
+                  print("aaaaa");
+                  try {
+                    final granted = await healthRepo.requestPermissions();
+                    print("bbbbb");
+                    print(granted);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setBool('priv_heartbeat', granted);
+                    setState(() => heartBeat = granted);
+                    print("ccccc");
+                  } catch (e) {
+                    final prefs = await SharedPreferences.getInstance();
+                    print("dddddd");
 
-                try {
-                  final granted = await healthRepo.requestPermissions();
+                    await prefs.setBool('priv_heartbeat', false);
 
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setBool('priv_heartbeat', granted);
-                  setState(() => heartBeat = granted);
-                } catch (e) {
-                  final prefs = await SharedPreferences.getInstance();
-
-                  await prefs.setBool('priv_heartbeat', false);
-
-                  debugPrint(
-                    '[ProfileSetup] HealthKit permission request failed: $e',
-                  );
-                  // ScaffoldMessenger.of(context).showSnackBar(
-                  //   SnackBar(
-                  //     content: Text('HealthKit permission request failed: $e'),
-                  //   ),
-                  // );
+                    debugPrint(
+                      '[ProfileSetup] HealthKit permission request failed: $e',
+                    );
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'HealthKit permission request failed: $e',
+                        ),
+                      ),
+                    );
+                    setState(() => heartBeat = false);
+                  }
+                } else {
+                  print("sasasa");
                   setState(() => heartBeat = false);
                 }
-              } else {
-                setState(() => heartBeat = false);
-              }
-              //final prefs = await SharedPreferences.getInstance();
+                print("eeeeee");
 
-              // prefs.getBool('priv_heartbeat') ?? true;
-            },
-          ),
+                //final prefs = await SharedPreferences.getInstance();
+
+                // prefs.getBool('priv_heartbeat') ?? true;
+              },
+            ),
           SwitchListTile(
             title: const Text('Check-In Notifications'),
             value: _checkInAlerts,
@@ -959,13 +1034,13 @@ class _PrivacySecuritySheetState extends State<_PrivacySecuritySheet> {
             ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 24),
-          SwitchListTile(
-            title: const Text('Share Location with Family'),
-            subtitle: const Text('Required for safe zone tracking'),
-            value: _locationSharing,
-            activeColor: ShieldColors.activeTeal,
-            onChanged: (v) => setState(() => _locationSharing = v),
-          ),
+          // SwitchListTile(
+          //   title: const Text('Share Location with Family'),
+          //   subtitle: const Text('Required for safe zone tracking'),
+          //   value: _locationSharing,
+          //   activeColor: ShieldColors.activeTeal,
+          //   onChanged: (v) => setState(() => _locationSharing = v),
+          // ),
           SwitchListTile(
             title: const Text('Biometric Lock (Face ID / Touch ID)'),
             subtitle: const Text('Require authentication to open app'),

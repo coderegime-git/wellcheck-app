@@ -131,7 +131,7 @@ import 'package:latlong2/latlong.dart';
 //       });
 //
 //       // Log event
-//       await Supabase.instance.client.from('well_events').insert({
+//       await logWellEvent(Supabase.instance.client,{
 //         'family_id': profile.familyId,
 //         'user_id': profile.userId,
 //         'event_type': 'safe_zone_created',
@@ -346,6 +346,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../main.dart';
+
 class SafeZoneScreen extends ConsumerStatefulWidget {
   /// Pass an existing zone map to enter edit mode. Null = create mode.
   final Map<String, dynamic>? existingZone;
@@ -444,7 +446,9 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Could not get location: $e. Using default.'),
+            content: Text(
+              'Could not get location: ${e.toString().replaceFirst('Exception: ', '')}. Using default.',
+            ),
             backgroundColor: Colors.orange,
           ),
         );
@@ -483,7 +487,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
   }
 
   Future<void> _handleSave() async {
-    if (_zoneNameController.text.isEmpty) {
+    if (_zoneNameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a zone name.'),
@@ -492,7 +496,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
       );
       return;
     }
-    if (_addressController.text.isEmpty) {
+    if (_addressController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a address.'),
@@ -543,7 +547,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
             .update(payload)
             .eq('id', widget.existingZone!['id']);
 
-        await Supabase.instance.client.from('well_events').insert({
+        await logWellEvent(Supabase.instance.client, {
           'family_id': profile.familyId,
           'user_id': profile.userId,
           'event_type': 'safe_zone_updated',
@@ -559,7 +563,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
           'family_id': profile.familyId,
         });
 
-        await Supabase.instance.client.from('well_events').insert({
+        await logWellEvent(Supabase.instance.client, {
           'family_id': profile.familyId,
           'user_id': profile.userId,
           'event_type': 'safe_zone_created',
@@ -917,6 +921,7 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                     Text("No Family member")
                   else if (_familyMembers.isNotEmpty)
                     DropdownButtonFormField<String>(
+                      isExpanded: true,
                       value: _selectedUserId,
 
                       decoration: InputDecoration(
@@ -934,6 +939,9 @@ class _SafeZoneScreenState extends ConsumerState<SafeZoneScreen> {
                           value: m['user_id'] as String,
                           child: Text(
                             '$name ($role)',
+                            overflow: TextOverflow.ellipsis,
+
+                            maxLines: 1,
                             style: TextStyle(fontSize: 15),
                           ),
                         );
