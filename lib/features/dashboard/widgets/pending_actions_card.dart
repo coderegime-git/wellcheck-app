@@ -1249,7 +1249,16 @@ class _ActionItemConsumerState extends ConsumerState<_ActionItemConsumer> {
         final DateTime displayDoseTime = isMissedToday
             ? missedToday.first.scheduledAt!
             : graceDose!;
-
+        final skippedThisDose =
+            !isMissedToday &&
+            medicationLogs.any(
+              (l) =>
+                  l.status == 'not_taken' &&
+                  l.scheduledAt != null &&
+                  l.scheduledAt!.difference(displayDoseTime).abs() <
+                      const Duration(minutes: 30),
+            );
+        if (skippedThisDose) return const SizedBox.shrink();
         final diff = displayDoseTime.difference(now).inMinutes;
 
         // Hide only if it's more than 1h away, or it's past the grace window

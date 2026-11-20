@@ -14,7 +14,7 @@ class DoseNotificationService {
 
   static final instance = DoseNotificationService._();
 
-  static const _countdownMinutes = 2;
+  static const _countdownMinutes = 15;
   static const _slots = 7; // how many upcoming doses to schedule
   static const _missedGraceMinutes = 5;
   final _plugin = FlutterLocalNotificationsPlugin();

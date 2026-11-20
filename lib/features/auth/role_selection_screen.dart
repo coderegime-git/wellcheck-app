@@ -208,7 +208,7 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
                             const _ShieldBadge(),
                             const SizedBox(height: 28),
                             Text(
-                              'Welcome to Shield',
+                              'Welcome to WellCheck',
                               textAlign: TextAlign.center,
                               style: Theme.of(context).textTheme.headlineMedium
                                   ?.copyWith(
